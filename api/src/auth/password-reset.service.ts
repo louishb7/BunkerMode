@@ -104,7 +104,7 @@ export class PasswordResetService implements OnModuleDestroy {
     })
     if (!token) return
     const link = new URL("/reset-password", frontend)
-    link.searchParams.set("token", token)
+    link.hash = new URLSearchParams({ token }).toString()
     await this.email.sendPasswordReset(email, link.toString())
   }
 

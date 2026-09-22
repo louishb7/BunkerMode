@@ -266,7 +266,7 @@ test("/auth autenticado redireciona para Home", async () => {
 
 test("/reset-password permanece público mesmo com sessão e não carrega módulos", async () => {
   for (const user of [undefined, users.both]) {
-    const result = await navigate(`/reset-password?token=${"a".repeat(64)}`, user)
+    const result = await navigate(`/reset-password#token=${"a".repeat(64)}`, user)
     assert.equal(result.path, "/reset-password")
     assert.match(result.rendered, /Criar nova senha/)
     assert.doesNotMatch(result.rendered, /Link inválido/)

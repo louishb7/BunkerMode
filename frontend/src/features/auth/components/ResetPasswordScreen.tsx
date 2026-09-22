@@ -12,7 +12,9 @@ import PasswordField from "./PasswordField"
 export default function ResetPasswordScreen({ onReset }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const [token, setToken] = useState(() => new URLSearchParams(location.search).get("token") ?? "")
+  const [token, setToken] = useState(
+    () => new URLSearchParams(location.hash.slice(1)).get("token") ?? ""
+  )
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -21,8 +23,8 @@ export default function ResetPasswordScreen({ onReset }) {
   const validToken = /^[a-f0-9]{64}$/.test(token)
   useEffect(() => {
     // Retira o segredo da URL/histórico; permanece apenas no estado deste formulário.
-    if (location.search) navigate(location.pathname, { replace: true })
-  }, [location.pathname, location.search, navigate])
+    if (location.hash) navigate(location.pathname, { replace: true })
+  }, [location.hash, location.pathname, navigate])
 
   async function submit(event) {
     event.preventDefault()

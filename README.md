@@ -98,9 +98,11 @@ normal aguarda os envios; não há fila durável nem retentativa automática se 
 for encerrado abruptamente.
 
 `POST /api/v2/auth/reset-password` recebe `{ "token": "...", "password": "..." }`.
-Os links apontam para `/reset-password?token=...`, expiram em 30 minutos e são de uso
-único. Ao gerar um novo link, os resets pendentes anteriores da conta são invalidados.
-Somente SHA-256 do token fica no banco. Senhas continuam usando scrypt, com
+Os links apontam para `/reset-password#token=...`, expiram em 30 minutos e são de uso
+único. O token fica no fragmento, que não é enviado na requisição HTTP ao servidor. O
+frontend captura e remove o fragmento após montar, mantendo o token somente no estado
+local do formulário. Ao gerar um novo link, os resets pendentes anteriores da conta são
+invalidados. Somente SHA-256 do token fica no banco. Senhas continuam usando scrypt, com
 validação de cinco letras Unicode e ao menos um dígito decimal Unicode, sem requisitos
 adicionais de composição ou comprimento. O limite geral de corpo HTTP continua vigente.
 
@@ -116,12 +118,11 @@ disso, o PostgreSQL limita cada conta a 1 envio a cada 2 minutos, 3 por hora e 5
 horas, com teto global de 50 envios por 24 horas. A API confia em um salto de proxy em
 produção; restrinja acesso direto e preserve essa topologia.
 
-Não habilite logs de corpos de requisição, cabeçalhos de autorização ou query strings
-de `/reset-password` no proxy, hospedagem ou APM. A página aplica `no-referrer` e `no-store`
-na Vercel e remove o token da URL após montar; o primeiro acesso ainda chega à hospedagem
-com a query string. Não adicionar analytics nessa rota. Recarregar após a remoção da query
-exige reabrir o link do e-mail. Tokens usados/expirados permanecem para inspeção; poderão
-ser removidos por uma rotina operacional futura.
+Não habilite logs de corpos de requisição, tokens ou cabeçalhos de autorização no proxy,
+hospedagem ou APM. A página aplica `no-referrer` e `no-store`; não adicionar analytics
+nessa rota. Recarregar após a remoção do fragmento exige reabrir o link original do e-mail.
+Tokens usados/expirados permanecem para inspeção; poderão ser removidos por uma rotina
+operacional futura.
 
 Deploy: com backup e as variáveis configuradas, aplique a migration aditiva antes de
 subir a nova API (não usar `migrate reset`):

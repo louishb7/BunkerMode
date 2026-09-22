@@ -192,7 +192,7 @@ test("recuperação libera o formulário depois de erro de rede", async () => {
 })
 
 function Location() {
-  return React.createElement("output", {}, useLocation().search)
+  return React.createElement("output", {}, useLocation().hash)
 }
 test("reset mantém token só no formulário, valida requisitos e oferece login após sucesso", async () => {
   const original = api.resetPassword
@@ -206,7 +206,7 @@ test("reset mantém token só no formulário, valida requisitos e oferece login 
   const view = await mount(
     React.createElement(
       MemoryRouter,
-      { initialEntries: [`/reset-password?token=${token}`] },
+      { initialEntries: [`/reset-password#token=${token}`] },
       React.createElement(ResetPasswordScreen, {
         onReset: () => {
           cleared = true
@@ -240,3 +240,32 @@ test("reset mantém token só no formulário, valida requisitos e oferece login 
     await view.close()
   }
 })
+
+for (const entry of ["/reset-password", "/reset-password#token=malformado"]) {
+  test(`reset rejeita entrada sem token válido: ${entry}`, async () => {
+    const original = api.resetPassword
+    let calls = 0
+    api.resetPassword = async () => {
+      calls += 1
+      return { ok: true, data: {} }
+    }
+    const view = await mount(
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: [entry] },
+        React.createElement(ResetPasswordScreen, { onReset() {} }),
+        React.createElement(Location)
+      )
+    )
+    try {
+      assert.match(view.container.querySelector('[role="alert"]').textContent, /Link inválido/)
+      assert.equal(view.container.querySelector('[type="submit"]').disabled, true)
+      assert.equal(view.container.querySelector("output").textContent, "")
+      await submit(view.container)
+      assert.equal(calls, 0)
+    } finally {
+      api.resetPassword = original
+      await view.close()
+    }
+  })
+}

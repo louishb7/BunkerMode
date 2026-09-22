@@ -21,12 +21,14 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
   let userId: number
   let email: string
   let previousToken: string
-  const delivered: Array<{ email: string; token: string }> = []
+  const delivered: Array<{ email: string; link: string; token: string }> = []
   const sender = {
     sendPasswordReset: jest.fn(async (recipient: string, link: string) => {
+      const url = new URL(link)
       delivered.push({
         email: recipient,
-        token: new URL(link).searchParams.get("token")!
+        link,
+        token: new URLSearchParams(url.hash.slice(1)).get("token")!
       })
     })
   }
@@ -104,6 +106,8 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     expect(unknown.body).toEqual(known.body)
     expect(delivered).toHaveLength(1)
     expect(delivered[0].email).toBe(email)
+    expect(new URL(delivered[0].link).search).toBe("")
+    expect(new URL(delivered[0].link).hash).toBe(`#token=${delivered[0].token}`)
     expect(delivered[0].token).toMatch(/^[a-f0-9]{64}$/)
     const row = await prisma.passwordReset.findFirstOrThrow({
       where: { userId }
@@ -357,7 +361,7 @@ describe("Email adapter", () => {
     try {
       await new ResendEmailService().sendPasswordReset(
         "person@example.com",
-        "https://bunker.example.com/reset-password?token=test"
+        "https://bunker.example.com/reset-password#token=test"
       )
       expect(fetchMock).toHaveBeenCalledWith(
         "https://api.resend.com/emails",

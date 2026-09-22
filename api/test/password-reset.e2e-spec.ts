@@ -24,8 +24,11 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
   const delivered: Array<{ email: string; token: string }> = []
   const sender = {
     sendPasswordReset: jest.fn(async (recipient: string, link: string) => {
-      delivered.push({ email: recipient, token: new URL(link).searchParams.get("token")! })
-    }),
+      delivered.push({
+        email: recipient,
+        token: new URL(link).searchParams.get("token")!
+      })
+    })
   }
   const environment = { ...process.env }
 
@@ -50,7 +53,11 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     reset = app.get(PasswordResetService)
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
     email = `${suffix}@example.com`
-    const user = await auth.register({ usuario: `reset-${suffix}`, email, senha: "abcde1" })
+    const user = await auth.register({
+      usuario: `reset-${suffix}`,
+      email,
+      senha: "abcde1"
+    })
     userId = user.usuario_id
     previousToken = (await auth.login({ email, senha: "abcde1" })).access_token
   })
@@ -76,16 +83,31 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
       .post("/api/v2/auth/reset-password")
       .send({ token, password })
   }
+  async function seedReset(ageMs: number, owner = userId, label = `${ageMs}-${owner}`) {
+    const createdAt = new Date(Date.now() - ageMs)
+    return prisma.passwordReset.create({
+      data: {
+        userId: owner,
+        tokenHash: createHash("sha256").update(label).digest("hex"),
+        expiresAt: new Date(createdAt.getTime() + 30 * 60_000),
+        createdAt
+      }
+    })
+  }
 
   it("returns equivalent public responses and stores only a hash with a 30 minute expiration", async () => {
     const known = await forgot(` ${email.toUpperCase()} `)
+    const blocked = await forgot()
     const unknown = await forgot("absent@example.com")
     expect(known.body).toEqual({ message: FORGOT_PASSWORD_MESSAGE })
+    expect(blocked.body).toEqual(known.body)
     expect(unknown.body).toEqual(known.body)
     expect(delivered).toHaveLength(1)
     expect(delivered[0].email).toBe(email)
     expect(delivered[0].token).toMatch(/^[a-f0-9]{64}$/)
-    const row = await prisma.passwordReset.findFirstOrThrow({ where: { userId } })
+    const row = await prisma.passwordReset.findFirstOrThrow({
+      where: { userId }
+    })
     expect(row.tokenHash).toBe(createHash("sha256").update(delivered[0].token).digest("hex"))
     expect(JSON.stringify(row)).not.toContain(delivered[0].token)
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBeGreaterThan(29 * 60_000)
@@ -98,8 +120,12 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     const legacy = new TokenService().generate({ sub: userId, email })
     await auth.getUserFromToken(legacy)
     await forgot()
+    await prisma.passwordReset.updateMany({
+      where: { userId },
+      data: { createdAt: new Date(Date.now() - 3 * 60_000) }
+    })
     await forgot()
-    await submit(delivered[0].token).expect(200)
+    await submit(delivered[1].token).expect(200)
     await request(app.getHttpServer())
       .post("/api/v2/auth/login")
       .send({ email, senha: "abcde1" })
@@ -120,7 +146,9 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
       .expect(200)
     await submit(delivered[0].token).expect(400)
     await submit(delivered[1].token).expect(400)
-    const user = await prisma.usuarios.findUniqueOrThrow({ where: { usuario_id: userId } })
+    const user = await prisma.usuarios.findUniqueOrThrow({
+      where: { usuario_id: userId }
+    })
     expect(user.auth_version).toBe(1)
     expect(user.senha_hash).toMatch(/^scrypt\$/)
     expect(await prisma.passwordReset.count({ where: { userId, usedAt: null } })).toBe(0)
@@ -135,7 +163,7 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     await submit("invalid").expect(400)
     await prisma.passwordReset.updateMany({
       where: { userId },
-      data: { expiresAt: new Date(Date.now() - 1) },
+      data: { expiresAt: new Date(Date.now() - 1) }
     })
     await submit(token).expect(400)
     await expect(auth.login({ email, senha: "abcde1" })).resolves.toHaveProperty("access_token")
@@ -146,26 +174,108 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     "allows only one concurrent reset, different tokens=%s",
     async (different) => {
       await forgot()
+      await prisma.passwordReset.updateMany({
+        where: { userId },
+        data: { createdAt: new Date(Date.now() - 3 * 60_000) }
+      })
       await forgot()
+      const latest = delivered[1].token
       const results = await Promise.all([
-        submit(delivered[0].token, "primeira1"),
-        submit(delivered[different ? 1 : 0].token, "segunda2"),
+        submit(latest, "primeira1"),
+        submit(different ? delivered[0].token : latest, "segunda2")
       ])
       expect(results.map((result) => result.status).sort()).toEqual([200, 400])
       const winner = results[0].status === 200 ? "primeira1" : "segunda2"
       await expect(auth.login({ email, senha: winner })).resolves.toHaveProperty("access_token")
       expect(
-        (await prisma.usuarios.findUniqueOrThrow({ where: { usuario_id: userId } })).auth_version
+        (
+          await prisma.usuarios.findUniqueOrThrow({
+            where: { usuario_id: userId }
+          })
+        ).auth_version
       ).toBe(1)
     }
   )
+
+  it("suppresses a second delivery within two minutes", async () => {
+    await forgot()
+    await forgot()
+    expect(sender.sendPasswordReset).toHaveBeenCalledTimes(1)
+    expect(await prisma.passwordReset.count({ where: { userId } })).toBe(1)
+  })
+
+  it("suppresses delivery after three requests in one hour", async () => {
+    await seedReset(3 * 60_000, userId, "hour-1")
+    await seedReset(10 * 60_000, userId, "hour-2")
+    await seedReset(30 * 60_000, userId, "hour-3")
+    expect((await forgot()).body).toEqual({ message: FORGOT_PASSWORD_MESSAGE })
+    expect(sender.sendPasswordReset).not.toHaveBeenCalled()
+    expect(await prisma.passwordReset.count({ where: { userId } })).toBe(3)
+  })
+
+  it("suppresses delivery after five requests in 24 hours", async () => {
+    for (let hour = 2; hour <= 6; hour++) {
+      await seedReset(hour * 60 * 60_000, userId, `day-${hour}`)
+    }
+    expect((await forgot()).body).toEqual({ message: FORGOT_PASSWORD_MESSAGE })
+    expect(sender.sendPasswordReset).not.toHaveBeenCalled()
+    expect(await prisma.passwordReset.count({ where: { userId } })).toBe(5)
+  })
+
+  it("suppresses delivery after 50 global requests in 24 hours", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+    const other = await auth.register({
+      usuario: `global-${suffix}`,
+      email: `global-${suffix}@example.com`,
+      senha: "abcde1"
+    })
+    const log = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => {})
+    try {
+      await prisma.passwordReset.createMany({
+        data: Array.from({ length: 50 }, (_, index) => ({
+          userId: other.usuario_id,
+          tokenHash: createHash("sha256").update(`global-${suffix}-${index}`).digest("hex"),
+          expiresAt: new Date(Date.now() + 30 * 60_000),
+          createdAt: new Date(Date.now() - 60 * 60_000)
+        }))
+      })
+      expect((await forgot()).body).toEqual({
+        message: FORGOT_PASSWORD_MESSAGE
+      })
+      expect(sender.sendPasswordReset).not.toHaveBeenCalled()
+      expect(log).toHaveBeenCalledWith("Limite global de recuperação de senha atingido.")
+      expect(JSON.stringify(log.mock.calls)).not.toContain(email)
+    } finally {
+      log.mockRestore()
+      await prisma.usuarios.delete({ where: { usuario_id: other.usuario_id } })
+    }
+  })
+
+  it("invalidates pending resets before creating the latest token", async () => {
+    await forgot()
+    const first = delivered[0].token
+    await prisma.passwordReset.updateMany({
+      where: { userId },
+      data: { createdAt: new Date(Date.now() - 3 * 60_000) }
+    })
+    await forgot()
+    const rows = await prisma.passwordReset.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" }
+    })
+    expect(rows).toHaveLength(2)
+    expect(rows[0].usedAt).not.toBeNull()
+    expect(rows[1].usedAt).toBeNull()
+    await submit(first).expect(400)
+    await submit(delivered[1].token).expect(200)
+  })
 
   it("rolls back token consumption if updating credentials fails", async () => {
     await forgot()
     // Força falha real no incremento, depois de consumir o token dentro da transação.
     await prisma.usuarios.update({
       where: { usuario_id: userId },
-      data: { auth_version: 2147483647 },
+      data: { auth_version: 2147483647 }
     })
     await expect(
       reset.reset({ token: delivered[0].token, password: "novaSenha2" })
@@ -190,7 +300,9 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     const log = jest.spyOn(Logger.prototype, "error").mockImplementation(() => {})
     sender.sendPasswordReset.mockRejectedValueOnce(new Error("provider secret"))
     try {
-      expect((await forgot()).body).toEqual({ message: FORGOT_PASSWORD_MESSAGE })
+      expect((await forgot()).body).toEqual({
+        message: FORGOT_PASSWORD_MESSAGE
+      })
       expect(log).toHaveBeenCalledWith("Não foi possível enviar instruções de recuperação.")
       expect(JSON.stringify(log.mock.calls)).not.toContain(email)
       expect(JSON.stringify(log.mock.calls)).not.toContain("provider secret")
@@ -200,7 +312,10 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
   })
 
   it("returns the same response for inactive accounts and never sends them a token", async () => {
-    await prisma.usuarios.update({ where: { usuario_id: userId }, data: { ativo: false } })
+    await prisma.usuarios.update({
+      where: { usuario_id: userId },
+      data: { ativo: false }
+    })
     expect((await forgot()).body).toEqual({ message: FORGOT_PASSWORD_MESSAGE })
     expect(delivered).toHaveLength(0)
     expect(await prisma.passwordReset.count({ where: { userId } })).toBe(0)

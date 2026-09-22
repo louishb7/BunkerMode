@@ -116,4 +116,6 @@ model PasswordReset {
   user      usuarios  @relation(fields: [userId], references: [usuario_id], onDelete: Cascade)
 
   @@index([userId, usedAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }

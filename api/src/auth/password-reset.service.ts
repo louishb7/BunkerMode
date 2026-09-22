@@ -12,6 +12,11 @@ export const FORGOT_PASSWORD_MESSAGE =
 const invalidToken = () =>
   new BadRequestException("Link inválido ou expirado. Solicite uma nova recuperação de senha.")
 const digest = (token: string) => createHash("sha256").update(token).digest("hex")
+const TWO_MINUTES = 2 * 60_000
+const ONE_HOUR = 60 * 60_000
+const ONE_DAY = 24 * ONE_HOUR
+const GLOBAL_DAILY_LIMIT = 50
+const GLOBAL_LIMIT_LOCK = 740_011
 
 @Injectable()
 export class PasswordResetService implements OnModuleDestroy {
@@ -49,14 +54,55 @@ export class PasswordResetService implements OnModuleDestroy {
   private async deliver(email: string, frontend: URL) {
     const user = await this.prisma.usuarios.findUnique({ where: { email } })
     if (!user?.ativo) return
-    const token = randomBytes(32).toString("hex")
-    await this.prisma.passwordReset.create({
-      data: {
-        userId: user.usuario_id,
-        tokenHash: digest(token),
-        expiresAt: new Date(Date.now() + 30 * 60_000),
-      },
+    const token = await this.prisma.$transaction(async (tx) => {
+      // Serializa a contagem global para que solicitações concorrentes não ultrapassem o teto.
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(${GLOBAL_LIMIT_LOCK})`
+      const activeUsers = await tx.$queryRaw<Array<{ usuario_id: number }>>`
+        SELECT usuario_id FROM usuarios
+        WHERE usuario_id = ${user.usuario_id} AND ativo = true
+        FOR UPDATE
+      `
+      if (activeUsers.length === 0) return null
+
+      const now = new Date()
+      const dayAgo = new Date(now.getTime() - ONE_DAY)
+      const globalCount = await tx.passwordReset.count({
+        where: { createdAt: { gte: dayAgo } }
+      })
+      if (globalCount >= GLOBAL_DAILY_LIMIT) {
+        this.logger.warn("Limite global de recuperação de senha atingido.")
+        return null
+      }
+
+      const recent = await tx.passwordReset.findMany({
+        where: { userId: user.usuario_id, createdAt: { gte: dayAgo } },
+        select: { createdAt: true }
+      })
+      const twoMinutesAgo = now.getTime() - TWO_MINUTES
+      const hourAgo = now.getTime() - ONE_HOUR
+      if (
+        recent.some((reset) => reset.createdAt.getTime() >= twoMinutesAgo) ||
+        recent.filter((reset) => reset.createdAt.getTime() >= hourAgo).length >= 3 ||
+        recent.length >= 5
+      ) {
+        return null
+      }
+
+      const value = randomBytes(32).toString("hex")
+      await tx.passwordReset.updateMany({
+        where: { userId: user.usuario_id, usedAt: null },
+        data: { usedAt: now }
+      })
+      await tx.passwordReset.create({
+        data: {
+          userId: user.usuario_id,
+          tokenHash: digest(value),
+          expiresAt: new Date(now.getTime() + 30 * 60_000)
+        }
+      })
+      return value
     })
+    if (!token) return
     const link = new URL("/reset-password", frontend)
     link.searchParams.set("token", token)
     await this.email.sendPasswordReset(email, link.toString())
@@ -66,28 +112,32 @@ export class PasswordResetService implements OnModuleDestroy {
     if (typeof payload.token !== "string" || !/^[a-f0-9]{64}$/.test(payload.token))
       throw invalidToken()
     const tokenHash = digest(payload.token)
-    const candidate = await this.prisma.passwordReset.findUnique({ where: { tokenHash } })
+    const candidate = await this.prisma.passwordReset.findUnique({
+      where: { tokenHash }
+    })
     if (!candidate || candidate.usedAt || candidate.expiresAt <= new Date()) throw invalidToken()
     const password = validateNewPassword(payload.password)
     const senhaHash = hashPassword(password)
     await this.prisma.$transaction(async (tx) => {
       // Serializa resets do mesmo usuário, inclusive com tokens diferentes.
       await tx.$queryRaw`SELECT usuario_id FROM usuarios WHERE usuario_id = ${candidate.userId} FOR UPDATE`
-      const user = await tx.usuarios.findUnique({ where: { usuario_id: candidate.userId } })
+      const user = await tx.usuarios.findUnique({
+        where: { usuario_id: candidate.userId }
+      })
       if (!user?.ativo) throw invalidToken()
       const now = new Date()
       const consumed = await tx.passwordReset.updateMany({
         where: { id: candidate.id, usedAt: null, expiresAt: { gt: now } },
-        data: { usedAt: now },
+        data: { usedAt: now }
       })
       if (consumed.count !== 1) throw invalidToken()
       await tx.usuarios.update({
         where: { usuario_id: candidate.userId },
-        data: { senha_hash: senhaHash, auth_version: { increment: 1 } },
+        data: { senha_hash: senhaHash, auth_version: { increment: 1 } }
       })
       await tx.passwordReset.updateMany({
         where: { userId: candidate.userId, usedAt: null },
-        data: { usedAt: now },
+        data: { usedAt: now }
       })
     })
     return { message: "Senha redefinida. Entre com sua nova senha." }

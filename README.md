@@ -95,11 +95,12 @@ mensagem para contas existentes e inexistentes. O envio ocorre em segundo plano 
 processo da API Docker, para não denunciar existência da conta pelo tempo do provider.
 Falhas geram somente um log genérico, sem destinatário, conteúdo ou token. O shutdown
 normal aguarda os envios; não há fila durável nem retentativa automática se o processo
-for encerrado abruptamente. O usuário pode solicitar outro link.
+for encerrado abruptamente.
 
 `POST /api/v2/auth/reset-password` recebe `{ "token": "...", "password": "..." }`.
 Os links apontam para `/reset-password?token=...`, expiram em 30 minutos e são de uso
-único. Somente SHA-256 do token fica no banco. Senhas continuam usando scrypt, com
+único. Ao gerar um novo link, os resets pendentes anteriores da conta são invalidados.
+Somente SHA-256 do token fica no banco. Senhas continuam usando scrypt, com
 validação de cinco letras Unicode e ao menos um dígito decimal Unicode, sem requisitos
 adicionais de composição ou comprimento. O limite geral de corpo HTTP continua vigente.
 
@@ -110,8 +111,10 @@ as sessões anteriores recebem 401. Usuários existentes recebem esse default na
 
 Limites: recuperação, 5 solicitações por IP e 3 por e-mail normalizado a cada 15 minutos;
 redefinição, 10 tentativas por IP a cada 15 minutos. Usa o limitador em memória existente:
-em múltiplas réplicas, configure também limitação compartilhada no proxy/gateway. A API
-confia em um salto de proxy em produção; restrinja acesso direto e preserve essa topologia.
+em múltiplas réplicas, configure também limitação compartilhada no proxy/gateway. Além
+disso, o PostgreSQL limita cada conta a 1 envio a cada 2 minutos, 3 por hora e 5 por 24
+horas, com teto global de 50 envios por 24 horas. A API confia em um salto de proxy em
+produção; restrinja acesso direto e preserve essa topologia.
 
 Não habilite logs de corpos de requisição, cabeçalhos de autorização ou query strings
 de `/reset-password` no proxy, hospedagem ou APM. A página aplica `no-referrer` e `no-store`

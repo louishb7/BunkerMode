@@ -129,13 +129,16 @@ test("cadastro atualiza e reverte os dois requisitos e bloqueia senha inválida"
   }
 })
 
-test("recuperação apresenta loading, resposta genérica e erro de rede", async () => {
+test("recuperação bloqueia reenvio após sucesso enquanto o e-mail não muda", async () => {
   const original = api.forgotPassword
+  let calls = 0
   let resolve
-  api.forgotPassword = () =>
-    new Promise((done) => {
+  api.forgotPassword = () => {
+    calls += 1
+    return new Promise((done) => {
       resolve = done
     })
+  }
   const view = await mount(React.createElement(AuthScreen, {}))
   try {
     await click(button(view.container, "Esqueci minha senha"))
@@ -156,9 +159,32 @@ test("recuperação apresenta loading, resposta genérica e erro de rede", async
       view.container.querySelector('[role="status"]').textContent,
       /Se existir uma conta/
     )
-    api.forgotPassword = async () => ({ ok: false, status: 0, data: {} })
+    const action = button(view.container, "Instruções enviadas")
+    assert.equal(action.disabled, true)
+    await click(action)
+    await submit(view.container)
+    assert.equal(calls, 1)
+    assert.equal(button(view.container, "Entrar").disabled, false)
+
+    await input(view.container.querySelector('[name="email"]'), "outra@example.com")
+    assert.equal(view.container.querySelector('[role="status"]'), null)
+    assert.equal(button(view.container, "Enviar instruções").disabled, false)
+  } finally {
+    api.forgotPassword = original
+    await view.close()
+  }
+})
+
+test("recuperação libera o formulário depois de erro de rede", async () => {
+  const original = api.forgotPassword
+  api.forgotPassword = async () => ({ ok: false, status: 0, data: {} })
+  const view = await mount(React.createElement(AuthScreen, {}))
+  try {
+    await click(button(view.container, "Esqueci minha senha"))
+    await input(view.container.querySelector('[name="email"]'), "pessoa@example.com")
     await submit(view.container)
     assert.match(view.container.querySelector('[role="alert"]').textContent, /conectar à API/)
+    assert.equal(button(view.container, "Enviar instruções").disabled, false)
   } finally {
     api.forgotPassword = original
     await view.close()

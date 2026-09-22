@@ -18,22 +18,32 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
   const isForgot = mode === "forgot"
   const [recoveryLoading, setRecoveryLoading] = useState(false)
   const [recoveryMessage, setRecoveryMessage] = useState("")
+  const [recoveryEmail, setRecoveryEmail] = useState("")
+  const recoverySucceeded = Boolean(recoveryMessage) && recoveryEmail === form.email
   const requirements = passwordRequirements(form.senha)
   function updateField(event) {
+    if (event.target.name === "email" && event.target.value !== recoveryEmail) {
+      setRecoveryMessage("")
+      setRecoveryEmail("")
+    }
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
     setError("")
   }
   async function submit(event) {
     event.preventDefault()
-    if (loading || recoveryLoading) return
+    if (loading || recoveryLoading || (isForgot && recoverySucceeded)) return
     if (isForgot) {
+      const requestedEmail = form.email
       setRecoveryLoading(true)
       setError("")
       setRecoveryMessage("")
+      setRecoveryEmail("")
       try {
         const result = await api.forgotPassword({ email: form.email.trim() })
-        if (result.ok) setRecoveryMessage(result.data.message)
-        else setError(getErrorMessage(result, "Não foi possível solicitar a recuperação."))
+        if (result.ok) {
+          setRecoveryMessage(result.data.message)
+          setRecoveryEmail(requestedEmail)
+        } else setError(getErrorMessage(result, "Não foi possível solicitar a recuperação."))
       } catch {
         setError("Não foi possível conectar à API.")
       } finally {
@@ -136,6 +146,7 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
                   setMode("forgot")
                   setError("")
                   setRecoveryMessage("")
+                  setRecoveryEmail("")
                   setForm((current) => ({ ...current, senha: "" }))
                 }}
               >
@@ -146,7 +157,7 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
               status={
                 error
                   ? { type: "error", message: error }
-                  : isForgot
+                  : isForgot && recoverySucceeded
                     ? { type: "success", message: recoveryMessage }
                     : status
               }
@@ -155,9 +166,18 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
               className="w-full"
               loading={loading || recoveryLoading}
               type="submit"
-              disabled={!isLogin && !isForgot && (!requirements.letters || !requirements.number)}
+              disabled={
+                recoverySucceeded ||
+                (!isLogin && !isForgot && (!requirements.letters || !requirements.number))
+              }
             >
-              {isForgot ? "Enviar instruções" : isLogin ? "Entrar" : "Criar conta"}
+              {isForgot
+                ? recoverySucceeded
+                  ? "Instruções enviadas"
+                  : "Enviar instruções"
+                : isLogin
+                  ? "Entrar"
+                  : "Criar conta"}
               <ArrowRight size={17} aria-hidden="true" />
             </Button>
             <div className="flex flex-wrap items-center justify-center gap-x-1 text-xs text-text-secondary">

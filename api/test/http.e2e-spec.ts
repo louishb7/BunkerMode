@@ -12,6 +12,7 @@ type UserRow = {
   usuario: string;
   email: string;
   senha_hash: string;
+  auth_version: number;
   ativo: boolean;
   enabled_modules: string[];
   timezone: string;
@@ -97,6 +98,7 @@ class InMemoryPrisma {
         usuario: data.usuario,
         email: data.email,
         senha_hash: data.senha_hash,
+        auth_version: 0,
         ativo: true,
         enabled_modules: ["tasks", "objectives"],
         timezone: "America/Recife",

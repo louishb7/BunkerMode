@@ -8,6 +8,7 @@ import { emptyStatus } from "../constants/uiState"
 import { useAuth } from "../context/AuthContext"
 import { TaskBoardProvider, useTaskBoardContext } from "../context/TaskBoardContext"
 import AuthScreen from "../features/auth/components/AuthScreen"
+import ResetPasswordScreen from "../features/auth/components/ResetPasswordScreen"
 import HomePage from "../features/home/pages/HomePage"
 import ObjectivesPage from "../features/objectives/pages/ObjectivesPage"
 import SettingsPage from "../features/settings/pages/SettingsPage"
@@ -26,6 +27,7 @@ export default function App() {
   return (
     <Routes>
       <Route path={APP_ROUTES.AUTH} element={<AuthRoute />} />
+      <Route path="/reset-password" element={<ResetPasswordScreen onReset={auth.clearSession} />} />
       <Route
         element={
           <ProtectedRoute>

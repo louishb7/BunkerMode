@@ -6,8 +6,8 @@ const BLOCK_SIZE = 8
 const PARALLELIZATION = 1
 
 export function hashPassword(password: string): string {
-  if (typeof password !== "string" || password.length === 0 || password.length > 128) {
-    throw new Error("Senha deve ter entre 1 e 128 caracteres.")
+  if (typeof password !== "string" || password.length === 0) {
+    throw new Error("Informe uma senha.")
   }
 
   const salt = randomBytes(16).toString("hex")

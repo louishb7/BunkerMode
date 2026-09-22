@@ -264,6 +264,16 @@ test("/auth autenticado redireciona para Home", async () => {
   assert.equal((await navigate("/auth", users.both)).path, "/")
 })
 
+test("/reset-password permanece público mesmo com sessão e não carrega módulos", async () => {
+  for (const user of [undefined, users.both]) {
+    const result = await navigate(`/reset-password?token=${"a".repeat(64)}`, user)
+    assert.equal(result.path, "/reset-password")
+    assert.match(result.rendered, /Criar nova senha/)
+    assert.doesNotMatch(result.rendered, /Link inválido/)
+    assert.equal(result.calls.some((call) => /tarefas|objetivos/.test(call)), false)
+  }
+})
+
 test("rota desconhecida segue fallback genérico conforme autenticação", async () => {
   assert.equal((await navigate("/desconhecida")).path, "/auth")
   const authenticated = await navigate("/desconhecida", users.both)

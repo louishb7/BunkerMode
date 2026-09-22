@@ -5,6 +5,7 @@ import { PrismaService } from "../prisma/prisma.service"
 import { UserRecord } from "./auth.types"
 import { hashPassword, verifyPassword } from "./password"
 import { TokenService } from "./token.service"
+import { validateNewPassword } from "./password-policy"
 
 type RegisterPayload = {
   usuario?: unknown
@@ -30,7 +31,7 @@ function requireText(value: unknown, message: string): string {
   return normalized
 }
 
-function normalizeEmail(value: unknown): string {
+export function normalizeEmail(value: unknown): string {
   const raw = requireText(value, "E-mail inválido.")
   if (raw.length > 254) {
     throw new HttpException("E-mail deve ter no máximo 254 caracteres.", HttpStatus.BAD_REQUEST)
@@ -52,16 +53,6 @@ function normalizeUsername(value: unknown): string {
     throw new HttpException("Usuário deve usar apenas letras, números, ponto, hífen ou sublinhado.", HttpStatus.BAD_REQUEST)
   }
   return usuario
-}
-
-function normalizePassword(value: unknown, status = HttpStatus.BAD_REQUEST): string {
-  if (
-    typeof value !== "string" || value.length < 6 || value.length > 128 ||
-    !/\p{L}/u.test(value) || !/\p{N}/u.test(value)
-  ) {
-    throw new HttpException("Senha deve ter de 6 a 128 caracteres, com letras e pelo menos um número.", status)
-  }
-  return value
 }
 
 function normalizeEnabledModules(payload: unknown): string[] {
@@ -93,7 +84,7 @@ export class AuthService {
   async register(payload: RegisterPayload): Promise<UserRecord> {
     const usuario = normalizeUsername(payload.usuario)
     const email = normalizeEmail(payload.email)
-    const senha = normalizePassword(payload.senha)
+    const senha = validateNewPassword(payload.senha)
 
     try {
       return await this.prisma.usuarios.create({
@@ -113,7 +104,7 @@ export class AuthService {
 
   async login(payload: LoginPayload): Promise<{ access_token: string; token_type: "bearer"; usuario: UserRecord }> {
     const identificador = requireText(payload.email, "Credenciais inválidas.")
-    if (identificador.length > 254 || typeof payload.senha !== "string" || payload.senha.length === 0 || payload.senha.length > 128) {
+    if (identificador.length > 254 || typeof payload.senha !== "string" || payload.senha.length === 0) {
       throw new HttpException("Credenciais inválidas.", HttpStatus.UNAUTHORIZED)
     }
     const senha = payload.senha
@@ -132,7 +123,7 @@ export class AuthService {
     }
 
     return {
-      access_token: this.tokenService.generate({ sub: usuario.usuario_id, email: usuario.email }),
+      access_token: this.tokenService.generate({ sub: usuario.usuario_id, email: usuario.email, version: usuario.auth_version }),
       token_type: "bearer",
       usuario,
     }
@@ -146,6 +137,10 @@ export class AuthService {
     }
     if (!usuario.ativo) {
       throw new HttpException("Usuário inativo.", HttpStatus.UNAUTHORIZED)
+    }
+    // JWTs anteriores à migration equivalem à versão inicial, nunca às versões após reset.
+    if ((payload.version ?? 0) !== usuario.auth_version) {
+      throw new HttpException("Sessão expirada. Faça login novamente.", HttpStatus.UNAUTHORIZED)
     }
     return usuario
   }

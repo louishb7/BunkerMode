@@ -11,6 +11,9 @@ export class AuthRateLimitService {
 
   check(key: string, limit: number, windowMs: number): void {
     const now = Date.now()
+    for (const [expiredKey, entry] of this.buckets) {
+      if (entry.resetAt <= now) this.buckets.delete(expiredKey)
+    }
     const bucket = this.buckets.get(key)
     if (!bucket || bucket.resetAt <= now) {
       this.buckets.set(key, { count: 1, resetAt: now + windowMs })

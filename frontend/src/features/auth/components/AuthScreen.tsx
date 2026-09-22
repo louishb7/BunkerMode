@@ -3,7 +3,10 @@ import { ArrowRight, ListTodo, Compass } from "lucide-react"
 import Brand from "../../../components/ui/Brand"
 import Button from "../../../components/ui/Button"
 import StatusNotice from "../../../components/ui/StatusNotice"
-import { validateAuth } from "../authValidation"
+import { passwordRequirements, validateAuth } from "../authValidation"
+import PasswordField from "./PasswordField"
+import { api } from "../../../services/bunkermodeApi"
+import { getErrorMessage } from "../../../api/httpClient"
 
 const field =
   "min-h-12 w-full rounded-control border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-focus-ring"
@@ -12,12 +15,32 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
   const [error, setError] = useState("")
   const [form, setForm] = useState({ usuario: "", email: "", identificador: "", senha: "" })
   const isLogin = mode === "login"
+  const isForgot = mode === "forgot"
+  const [recoveryLoading, setRecoveryLoading] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState("")
+  const requirements = passwordRequirements(form.senha)
   function updateField(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
     setError("")
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
+    if (loading || recoveryLoading) return
+    if (isForgot) {
+      setRecoveryLoading(true)
+      setError("")
+      setRecoveryMessage("")
+      try {
+        const result = await api.forgotPassword({ email: form.email.trim() })
+        if (result.ok) setRecoveryMessage(result.data.message)
+        else setError(getErrorMessage(result, "Não foi possível solicitar a recuperação."))
+      } catch {
+        setError("Não foi possível conectar à API.")
+      } finally {
+        setRecoveryLoading(false)
+      }
+      return
+    }
     const payload = {
       usuario: form.usuario.trim(),
       email: (isLogin ? form.identificador : form.email).trim(),
@@ -58,15 +81,17 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
           <form className="mx-auto grid w-full max-w-sm gap-5" onSubmit={submit}>
             <div className="mb-2">
               <h1 className="m-0 text-2xl font-semibold tracking-tight">
-                {isLogin ? "Entrar no Bunker" : "Criar sua conta"}
+                {isForgot ? "Recuperar senha" : isLogin ? "Entrar no Bunker" : "Criar sua conta"}
               </h1>
               <p className="mt-2 mb-0 text-sm text-text-secondary">
-                {isLogin
-                  ? "Acesse seu espaço de trabalho."
-                  : "Seus dados para acessar o BunkerMode."}
+                {isForgot
+                  ? "Receba por e-mail um link para criar uma nova senha."
+                  : isLogin
+                    ? "Acesse seu espaço de trabalho."
+                    : "Seus dados para acessar o BunkerMode."}
               </p>
             </div>
-            {!isLogin && (
+            {!isLogin && !isForgot && (
               <label className="grid gap-2 text-sm font-medium">
                 Usuário
                 <input
@@ -94,37 +119,53 @@ export default function AuthScreen({ loading, onLogin, onRegister, status }) {
                 onChange={updateField}
               />
             </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Senha
-              <input
-                className={field}
-                name="senha"
-                type="password"
-                required
-                minLength={isLogin ? 1 : 6}
-                maxLength={128}
-                autoComplete={isLogin ? "current-password" : "new-password"}
-                aria-describedby={isLogin ? undefined : "password-help"}
+            {!isForgot && (
+              <PasswordField
+                key={mode}
                 value={form.senha}
                 onChange={updateField}
+                creation={!isLogin}
               />
-            </label>
-            {!isLogin && (
-              <p id="password-help" className="-mt-3 mb-0 text-xs leading-5 text-text-secondary">
-                6–128 caracteres, com letras e pelo menos um número.
-              </p>
             )}
-            <StatusNotice status={error ? { type: "error", message: error } : status} />
-            <Button className="w-full" loading={loading} type="submit">
-              {isLogin ? "Entrar" : "Criar conta"}
+            {isLogin && (
+              <Button
+                variant="ghost"
+                size="small"
+                disabled={loading}
+                onClick={() => {
+                  setMode("forgot")
+                  setError("")
+                  setRecoveryMessage("")
+                  setForm((current) => ({ ...current, senha: "" }))
+                }}
+              >
+                Esqueci minha senha
+              </Button>
+            )}
+            <StatusNotice
+              status={
+                error
+                  ? { type: "error", message: error }
+                  : isForgot
+                    ? { type: "success", message: recoveryMessage }
+                    : status
+              }
+            />
+            <Button
+              className="w-full"
+              loading={loading || recoveryLoading}
+              type="submit"
+              disabled={!isLogin && !isForgot && (!requirements.letters || !requirements.number)}
+            >
+              {isForgot ? "Enviar instruções" : isLogin ? "Entrar" : "Criar conta"}
               <ArrowRight size={17} aria-hidden="true" />
             </Button>
             <div className="flex flex-wrap items-center justify-center gap-x-1 text-xs text-text-secondary">
-              {isLogin ? "Ainda não tem conta?" : "Já tem conta?"}
+              {isForgot ? "" : isLogin ? "Ainda não tem conta?" : "Já tem conta?"}
               <Button
                 size="small"
                 variant="ghost"
-                disabled={loading}
+                disabled={loading || recoveryLoading}
                 onClick={() => {
                   setMode(isLogin ? "register" : "login")
                   setError("")

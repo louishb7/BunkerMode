@@ -77,6 +77,12 @@ async function requestFocusBoard(
 }
 
 export const api = {
+  forgotPassword(payload: { email: string }) {
+    return request<{ message: string }>("/auth/forgot-password", { method: "POST", body: payload })
+  },
+  resetPassword(payload: { token: string; password: string }) {
+    return request<{ message: string }>("/auth/reset-password", { method: "POST", body: payload })
+  },
   register(payload) {
     return request<User>("/auth/register", { method: "POST", body: payload })
   },

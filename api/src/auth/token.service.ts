@@ -5,6 +5,7 @@ import { Injectable } from "@nestjs/common"
 type TokenPayload = {
   sub: number
   email: string
+  version?: number
   exp?: number
 }
 

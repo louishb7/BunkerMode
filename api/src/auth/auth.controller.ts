@@ -5,6 +5,7 @@ import { AuthGuard } from "./auth.guard"
 import { AuthRateLimitService } from "./rate-limit.service"
 import { AuthService } from "./auth.service"
 import { toUserResponse } from "./user-response"
+import { PasswordResetService } from "./password-reset.service"
 
 type RequestLike = {
   ip?: string
@@ -20,6 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly rateLimit: AuthRateLimitService,
+    private readonly passwordReset: PasswordResetService,
   ) {}
 
   @Post("auth/register")
@@ -39,6 +41,20 @@ export class AuthController {
       token_type: result.token_type,
       usuario: toUserResponse(result.usuario, false),
     }
+  }
+
+  @Post("auth/forgot-password")
+  @HttpCode(200)
+  forgotPassword(@Req() request: RequestLike, @Body() payload: { email?: unknown }) {
+    this.rateLimit.check(`forgot:${clientAddress(request)}`, 5, 15 * 60_000)
+    return this.passwordReset.forgot(payload ?? {})
+  }
+
+  @Post("auth/reset-password")
+  @HttpCode(200)
+  resetPassword(@Req() request: RequestLike, @Body() payload: { token?: unknown; password?: unknown }) {
+    this.rateLimit.check(`reset:${clientAddress(request)}`, 10, 15 * 60_000)
+    return this.passwordReset.reset(payload ?? {})
   }
 
   @Get("usuarios/me")

@@ -81,6 +81,71 @@ O frontend e a API ficam em diretórios independentes (`frontend/` e `api/`). A 
 
 Por padrão, o frontend usa `http://127.0.0.1:3000/api/v2`. Para apontá-lo a outra API, defina `VITE_API_URL` antes de executar `npm run dev`.
 
+## Recuperação de senha
+
+Na API, configure `FRONTEND_URL` (origem pública do frontend, HTTPS em produção),
+`RESEND_API_KEY` (chave com permissão de envio) e `EMAIL_FROM` (remetente de um domínio
+verificado no Resend). Configure os registros DNS pedidos pelo provider e desative
+tracking de links para esses e-mails. A implementação usa a [API de envio do Resend](https://resend.com/docs/api-reference/emails/send-email).
+Não exponha essas variáveis como `VITE_*`. Sem configuração, a solicitação retorna
+indisponibilidade genérica para qualquer endereço.
+
+`POST /api/v2/auth/forgot-password` recebe `{ "email": "..." }` e devolve a mesma
+mensagem para contas existentes e inexistentes. O envio ocorre em segundo plano no
+processo da API Docker, para não denunciar existência da conta pelo tempo do provider.
+Falhas geram somente um log genérico, sem destinatário, conteúdo ou token. O shutdown
+normal aguarda os envios; não há fila durável nem retentativa automática se o processo
+for encerrado abruptamente. O usuário pode solicitar outro link.
+
+`POST /api/v2/auth/reset-password` recebe `{ "token": "...", "password": "..." }`.
+Os links apontam para `/reset-password?token=...`, expiram em 30 minutos e são de uso
+único. Somente SHA-256 do token fica no banco. Senhas continuam usando scrypt, com
+validação de cinco letras Unicode e ao menos um dígito decimal Unicode, sem requisitos
+adicionais de composição ou comprimento. O limite geral de corpo HTTP continua vigente.
+
+O reset bloqueia a linha do usuário em transação, consome o token, atualiza o hash,
+incrementa `auth_version` e invalida os outros tokens pendentes. JWTs antigos sem versão
+são aceitos apenas enquanto o usuário estiver na versão inicial `0`; após reset, todas
+as sessões anteriores recebem 401. Usuários existentes recebem esse default na migration.
+
+Limites: recuperação, 5 solicitações por IP e 3 por e-mail normalizado a cada 15 minutos;
+redefinição, 10 tentativas por IP a cada 15 minutos. Usa o limitador em memória existente:
+em múltiplas réplicas, configure também limitação compartilhada no proxy/gateway. A API
+confia em um salto de proxy em produção; restrinja acesso direto e preserve essa topologia.
+
+Não habilite logs de corpos de requisição, cabeçalhos de autorização ou query strings
+de `/reset-password` no proxy, hospedagem ou APM. A página aplica `no-referrer` e `no-store`
+na Vercel e remove o token da URL após montar; o primeiro acesso ainda chega à hospedagem
+com a query string. Não adicionar analytics nessa rota. Recarregar após a remoção da query
+exige reabrir o link do e-mail. Tokens usados/expirados permanecem para inspeção; poderão
+ser removidos por uma rotina operacional futura.
+
+Deploy: com backup e as variáveis configuradas, aplique a migration aditiva antes de
+subir a nova API (não usar `migrate reset`):
+
+```bash
+cd api
+npm ci
+npm run prisma:generate
+npm run prisma:migrate:deploy
+npm run build
+npm run start
+```
+
+O Dockerfile já gera Prisma no build e executa `prisma:migrate:deploy` na inicialização.
+Publique também o frontend com `cd frontend && npm ci && npm run build`; a configuração
+Vercel existente mantém o acesso direto a `/reset-password`. Teste um envio real após
+configurar domínio e credenciais; os testes automatizados substituem somente o envio.
+
+Os testes de persistência usam exclusivamente um banco isolado e migrado, indicado por
+`TEST_DATABASE_URL`; sem essa variável, Jest os marca como ignorados:
+
+```bash
+cd api
+DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:migrate:deploy
+npm test
+```
+
 ## Testes e qualidade
 
 Backend:

@@ -92,6 +92,8 @@ model usuarios {
   usuario            String               @unique @db.VarChar(80)
   email              String               @unique @db.VarChar(254)
   senha_hash         String
+  auth_version       Int                  @default(0)
+  password_resets    PasswordReset[]
   ativo              Boolean              @default(true)
   enabled_modules    String[]              @default(["tasks", "objectives"])
   timezone           String               @default("America/Recife") @db.VarChar(80)
@@ -102,4 +104,16 @@ model usuarios {
   missoes_recebidas  missoes[]            @relation("missoes_responsavel")
   series_recorrencia series_recorrencia[] @relation("series_recorrencia_responsavel")
   objetivos          objetivos[]
+}
+
+model PasswordReset {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tokenHash String    @unique @db.Char(64)
+  expiresAt DateTime  @db.Timestamp(6)
+  usedAt    DateTime? @db.Timestamp(6)
+  createdAt DateTime  @default(now()) @db.Timestamp(6)
+  user      usuarios  @relation(fields: [userId], references: [usuario_id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
 }

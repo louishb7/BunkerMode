@@ -70,12 +70,12 @@ test('objetivo apresenta estado como informação e administra os quatro estados
 })
 
 test('política de cadastro e login possui limites distintos e não normaliza senha',()=>{
- const good={usuario:' pessoa ',email:' Pessoa@example.com ',senha:'abc123'}
+ const good={usuario:' pessoa ',email:' Pessoa@example.com ',senha:'abcde1'}
  assert.equal(validateAuth(good,true),'')
- for(const patch of [{usuario:'ab'},{usuario:'a'.repeat(33)},{email:'x@'},{email:'a'.repeat(255)},{senha:'ab123'},{senha:'a1'.repeat(65)},{senha:'123456'},{senha:'abcdef'}]) assert.notEqual(validateAuth({...good,...patch},true),'')
- assert.equal(validateAuth({...good,senha:' éé１２ '},true),'')
+ for(const patch of [{usuario:'ab'},{usuario:'a'.repeat(33)},{email:'x@'},{email:'a'.repeat(255)},{senha:'ab123'},{senha:'abcd!1'},{senha:'123456'},{senha:'abcdef'}]) assert.notEqual(validateAuth({...good,...patch},true),'')
+ assert.equal(validateAuth({...good,senha:' ééééé１２ '},true),'')
  assert.equal(validateAuth({email:'pessoa',senha:'a'},false),'')
- assert.notEqual(validateAuth({email:'pessoa',senha:'a'.repeat(129)},false),'')
+ assert.equal(validateAuth({email:'pessoa',senha:'a'.repeat(129)},false),'')
 })
 
 test('tema local aplica light/dark e devolve controle ao sistema',()=>{

@@ -11,6 +11,7 @@ function user(overrides: Partial<UserRecord> = {}): UserRecord {
     usuario: "usuario-teste",
     email: "usuario-teste@bunker.local",
     senha_hash: "hash",
+    auth_version: 0,
     ativo: true,
     enabled_modules: ["tasks", "objectives"],
     timezone: "America/Recife",

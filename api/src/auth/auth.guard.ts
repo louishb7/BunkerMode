@@ -30,7 +30,7 @@ export class AuthGuard implements CanActivate {
       if (error instanceof HttpException) {
         throw error
       }
-      throw new HttpException(error instanceof Error ? error.message : "Token inválido.", HttpStatus.UNAUTHORIZED)
+      throw new HttpException("Token inválido.", HttpStatus.UNAUTHORIZED)
     }
   }
 }

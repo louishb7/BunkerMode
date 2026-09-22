@@ -3,6 +3,7 @@ export type UserRecord = {
   usuario: string
   email: string
   senha_hash: string
+  auth_version: number
   ativo: boolean
   enabled_modules: string[]
   timezone: string

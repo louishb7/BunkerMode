@@ -42,7 +42,7 @@ export default function TasksPanel({
     return (
       <section className="grid gap-0">
         <h3
-          className={`m-0 bg-surface-subtle px-5 py-2 text-xs font-medium ${tone === "default" ? "text-text-primary" : "text-text-secondary"}`}
+          className={`m-0 bg-surface-subtle px-4 text-xs font-medium ${tone === "default" ? "py-2 text-text-primary" : "py-1.5 text-text-secondary"}`}
         >
           {label}
         </h3>

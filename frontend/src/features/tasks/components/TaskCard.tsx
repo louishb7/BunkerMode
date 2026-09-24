@@ -26,6 +26,7 @@ export default function TaskCard({
   const permissions = task?.id !== undefined && task?.id !== null ? task.permissions || {} : {}
   const busy = completing || pinning || reopening
   const focus = variant === "focus"
+  const compactCompleted = !focus && completed
   const administrative = [
     ...(permissions.can_edit && onEdit ? [{ label: "Editar", onSelect: onEdit }] : []),
     ...(permissions.can_pin && onTogglePin
@@ -46,9 +47,9 @@ export default function TaskCard({
   const showDeadline = deadline && selected && deadline !== selected
   return (
     <article
-      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : "px-3 py-3 sm:px-5"}`}
+      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : compactCompleted ? "px-2 py-0.5 sm:px-4" : "px-2 py-1.5 sm:px-4"}`}
     >
-      <div className={`flex items-start ${focus ? "gap-4" : "gap-2 sm:gap-3"}`}>
+      <div className={`flex min-w-0 items-start ${focus ? "gap-4" : "gap-1 sm:gap-2"}`}>
         {!focus && (
           <div className="shrink-0">
             {permissions.can_complete ? (
@@ -81,27 +82,31 @@ export default function TaskCard({
             )}
           </div>
         )}
-        <div className="min-w-0 flex-1 pt-2">
+        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-1" : "py-2"}`}>
           <h3
-            className={`m-0 break-words font-semibold leading-6 ${focus ? "text-xl tracking-tight" : "text-sm sm:text-base"} ${completed ? "text-text-secondary" : "text-text-primary"}`}
+            className={`m-0 break-words font-semibold ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "text-text-secondary line-through" : "text-text-primary"}`}
           >
             {title}
           </h3>
-          {task?.instrucao && (
+          {task?.instrucao && !compactCompleted && (
             <p
-              className={`mt-1.5 mb-0 break-words leading-6 text-text-secondary ${focus ? "text-base" : "text-sm"}`}
+              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : "mt-1 line-clamp-2 text-sm leading-5"}`}
+              title={!focus ? task.instrucao : undefined}
             >
               {task.instrucao}
             </p>
           )}
-          {((!focus && (task.is_pinned || task.recurrence)) ||
-            notPerformed ||
-            showDeadline ||
+          {task?.instrucao && compactCompleted && (
+            <span className="sr-only">Instrução: {task.instrucao}</span>
+          )}
+          {((!focus && (task.is_pinned || task.recurrence) && !compactCompleted) ||
+            (!compactCompleted && (notPerformed || showDeadline)) ||
+            (compactCompleted && task.recurrence) ||
             (focus && completed)) && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            <div className={`${focus ? "mt-2 gap-2" : "mt-1 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}>
               {notPerformed && <Badge>Não realizada</Badge>}
               {focus && completed && <span className="text-success">Concluída</span>}
-              {!focus && task.is_pinned && (
+              {!focus && !compactCompleted && task.is_pinned && (
                 <span className="inline-flex items-center gap-1">
                   <Pin size={12} aria-hidden="true" />
                   Prioridade alta
@@ -113,7 +118,7 @@ export default function TaskCard({
                   Recorrente
                 </span>
               )}
-              {showDeadline && <span>Prazo {deadline}</span>}
+              {showDeadline && !compactCompleted && <span>Prazo {deadline}</span>}
             </div>
           )}
           {focus && permissions.can_complete && (
@@ -122,13 +127,13 @@ export default function TaskCard({
               Concluir
             </Button>
           )}
-          {!focus && permissions.can_reopen && onReopen && (
-            <Button size="small" variant="ghost" loading={reopening} onClick={onReopen}>
-              <RotateCcw size={14} aria-hidden="true" />
-              Reabrir
-            </Button>
-          )}
         </div>
+        {compactCompleted && permissions.can_reopen && onReopen && (
+          <Button className="px-2" size="small" variant="ghost" loading={reopening} onClick={onReopen}>
+            <RotateCcw size={14} aria-hidden="true" />
+            Reabrir
+          </Button>
+        )}
         {!focus && administrative.length > 0 && (
           <ActionsMenu label={`Ações da tarefa: ${title}`} disabled={busy} items={administrative} />
         )}

@@ -9,8 +9,8 @@ const dom = new JSDOM('<!doctype html><html><body></body></html>',{url:'http://l
 Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true})
 const vite=await createServer({appType:'custom',logLevel:'silent',root:new URL('..',import.meta.url).pathname,server:{middlewareMode:true}})
 const load=path=>vite.ssrLoadModule(`/src/${path}`)
-const [{default:ActionsMenu},{default:DaySelector},{default:TaskCard},{default:ObjetivoCard},{validateAuth},preference]=await Promise.all([
- load('components/ui/ActionsMenu.tsx'),load('features/calendar/components/DaySelector.tsx'),load('features/tasks/components/TaskCard.tsx'),load('features/objectives/components/ObjetivoCard.tsx'),load('features/auth/authValidation.ts'),load('theme/preference.ts'),
+const [{default:ActionsMenu},{default:DaySelector},{default:TaskCard},{default:TasksPanel},{default:ObjetivoCard},{validateAuth},preference]=await Promise.all([
+ load('components/ui/ActionsMenu.tsx'),load('features/calendar/components/DaySelector.tsx'),load('features/tasks/components/TaskCard.tsx'),load('features/tasks/components/TasksPanel.tsx'),load('features/objectives/components/ObjetivoCard.tsx'),load('features/auth/authValidation.ts'),load('theme/preference.ts'),
 ])
 after(()=>vite.close())
 async function mount(Component,props) {
@@ -53,6 +53,21 @@ test('tarefas preservam conclusão e administração sem ação manual de falha'
  const focus=await mount(TaskCard,{task:{...task,status_code:'PENDENTE'},variant:'focus',onComplete:()=>complete++})
  assert.equal(focus.container.querySelector('[aria-haspopup=menu]'),null)
  assert.equal(focus.container.querySelector('button').textContent,'Concluir');await focus.close()
+})
+
+test('concluídas ficam abaixo das abertas e preservam Reabrir sem ações proibidas',async()=>{
+ let reopened=0
+ const pending={id:1,titulo:'Aberta',status:'PENDENTE',status_code:'PENDENTE',permissions:{can_complete:true,can_edit:true}}
+ const completed={id:2,titulo:'Concluída',instrucao:'Instrução longa que fica fora do resumo compacto',status:'CONCLUIDA',status_code:'CONCLUIDA',permissions:{can_complete:false,can_reopen:true,can_edit:false}}
+ const view=await mount(TasksPanel,{selectedDate:new Date(2026,8,23),selectedTasks:[completed,pending],loading:false,onCompleteTask:()=>{},onCreateTask:()=>{},onDeleteTask:()=>{},onEditTask:()=>{},onReopenTask:()=>reopened++,onTogglePin:()=>{}})
+ const cards=[...view.container.querySelectorAll('article')]
+ assert.deepEqual(cards.map(card=>card.querySelector('h3').textContent),['Aberta','Concluída'])
+ assert.equal(cards[1].querySelector('p'),null)
+ assert.match(cards[1].textContent,/Instrução longa/)
+ await click([...cards[1].querySelectorAll('button')].find(button=>button.textContent.includes('Reabrir')))
+ assert.equal(reopened,1)
+ assert.equal(cards[1].querySelector('[aria-haspopup=menu]'),null)
+ await view.close()
 })
 
 test('objetivo permite pausar no menu e concluir pela ação principal',async()=>{

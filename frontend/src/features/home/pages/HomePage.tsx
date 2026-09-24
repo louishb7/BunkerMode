@@ -11,7 +11,7 @@ import { getOverview, subscribeOverview, updateCachedTask, updateOverview } from
 import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
 import { formatDateForApi } from "../../../utils/date"
 
-const emptyOverview = { daily: null, dailyDate: null, all: null, objectives: null }
+const emptyOverview = { daily: null, dailyDate: null, all: null, objectives: null, trackers: null }
 
 const emptyPreview = { error: "", items: [], loading: false }
 

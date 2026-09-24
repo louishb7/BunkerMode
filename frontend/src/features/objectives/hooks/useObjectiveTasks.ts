@@ -4,7 +4,7 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
-import { getOverview, updateOverview } from "../../../state/overviewCache"
+import { detachObjectiveTaskList, getOverview, unlinkCachedObjectiveTask, unlinkTaskList, updateOverview } from "../../../state/overviewCache"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
 export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
@@ -13,6 +13,7 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
   const [error, setError] = useState("")
   const [formLoading, setFormLoading] = useState(false)
   const [formStatus, setFormStatus] = useState(emptyStatus)
+  const [unlinkingId, setUnlinkingId] = useState<number | null>(null)
   const requestId = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -76,6 +77,32 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     return true
   }
 
+  async function unlinkTask(task: Task) {
+    if (!token || unlinkingId !== null) return false
+    const previous = tasks
+    const previousCache = getOverview(token)
+    const currentRequest = ++requestId.current
+    setUnlinkingId(task.id)
+    setTasks(unlinkTaskList(previous, task))
+    unlinkCachedObjectiveTask(token, task)
+    const result = await api.unlinkTaskFromObjective(token, task.id)
+    if (currentRequest !== requestId.current) return false
+    setUnlinkingId(null)
+    if (onUnauthorized?.(result)) return false
+    if (!result.ok || result.data?.series_id !== (task.recurrence?.series_id ?? null)) {
+      setTasks(previous)
+      updateOverview(token, { all: previousCache.all, daily: previousCache.daily })
+      setError(getErrorMessage(result, "Não foi possível desvincular a tarefa."))
+      return false
+    }
+    return true
+  }
+
+  function detachObjective(objectiveId: number) {
+    requestId.current += 1
+    setTasks((current) => detachObjectiveTaskList(current, objectiveId))
+  }
+
   return {
     tasksByObjetivo,
     loading,
@@ -85,6 +112,9 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     formLoading,
     formStatus,
     setFormStatus,
+    unlinkTask,
+    unlinkingId,
+    detachObjective,
   }
 }
 

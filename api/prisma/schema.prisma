@@ -82,6 +82,7 @@ model objetivos {
   order_index        Int                  @default(0)
   missoes            missoes[]
   series_recorrencia series_recorrencia[]
+  acompanhamentos   acompanhamentos[]
   usuarios           usuarios             @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([usuario_id, status])
@@ -104,6 +105,29 @@ model usuarios {
   missoes_recebidas  missoes[]            @relation("missoes_responsavel")
   series_recorrencia series_recorrencia[] @relation("series_recorrencia_responsavel")
   objetivos          objetivos[]
+}
+
+model acompanhamentos {
+  id          Int                            @id @default(autoincrement())
+  objetivo_id Int
+  titulo      String                         @db.VarChar(200)
+  descricao   String?
+  created_at  DateTime                       @default(now()) @db.Timestamp(6)
+  updated_at  DateTime                       @updatedAt @db.Timestamp(6)
+  objetivo    objetivos                      @relation(fields: [objetivo_id], references: [id], onDelete: Cascade)
+  ocorrencias ocorrencias_acompanhamento[]
+
+  @@index([objetivo_id])
+}
+
+model ocorrencias_acompanhamento {
+  id                Int             @id @default(autoincrement())
+  acompanhamento_id Int
+  occurred_at       DateTime        @default(now()) @db.Timestamp(6)
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  acompanhamento    acompanhamentos @relation(fields: [acompanhamento_id], references: [id], onDelete: Cascade)
+
+  @@index([acompanhamento_id, occurred_at])
 }
 
 model PasswordReset {

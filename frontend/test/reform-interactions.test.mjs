@@ -76,6 +76,23 @@ test('objetivo permite pausar no menu e concluir pela ação principal',async()=
  assert.doesNotMatch(standalone.container.textContent,/Adicionar tarefa|Carregando tarefas/);await standalone.close()
 })
 
+test('tarefa concluída no objetivo oferece desvincular sem exclusão',async()=>{
+ let unlinked=null
+ const task={id:8,titulo:'Faxina no lugar de trabalho!',status:'CONCLUIDA',status_code:'CONCLUIDA',objetivo_id:1,recurrence:null}
+ const view=await mount(ObjetivoCard,{
+  objetivo:{id:1,titulo:'Organizar trabalho',status:'ativo'},tasks:[task],tasksEnabled:true,
+  loading:false,tasksLoading:false,tasksError:'',trackers:[],trackersLoading:false,
+  onCreateTask:()=>{},onCreateTracker:()=>{},onUpdateStatus:()=>{},onUnlinkTask:value=>unlinked=value,
+  onDelete:()=>{},onEdit:()=>{},
+ })
+ await click(view.container.querySelector('[aria-label="Ações da tarefa: Faxina no lugar de trabalho!"]'))
+ assert.match(document.querySelector('[role=menu]').textContent,/Desvincular do objetivo/)
+ assert.doesNotMatch(document.querySelector('[role=menu]').textContent,/Excluir tarefa/)
+ await click([...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent==='Desvincular do objetivo'))
+ assert.equal(unlinked,task)
+ await view.close()
+})
+
 test('política de cadastro e login possui limites distintos e não normaliza senha',()=>{
  const good={usuario:' pessoa ',email:' Pessoa@example.com ',senha:'abcde1'}
  assert.equal(validateAuth(good,true),'')

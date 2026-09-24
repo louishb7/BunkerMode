@@ -13,15 +13,22 @@ import ObjetivoForm from "../components/ObjetivoForm"
 import ObjetivoList from "../components/ObjetivoList"
 import { useObjectives } from "../hooks/useObjectives"
 import { useObjectiveTasks } from "../hooks/useObjectiveTasks"
+import { useTrackers } from "../hooks/useTrackers"
+import TrackerForm from "../components/TrackerForm"
+import { removeObjectiveFromOverview } from "../../../state/overviewCache"
 
 export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const objectives = useObjectives({ onUnauthorized, token })
   const tasksEnabled = getEnabledModules(user).some((module) => module.key === "tasks")
   const objectiveTasks = useObjectiveTasks({ token, onUnauthorized, enabled: tasksEnabled })
+  const trackers = useTrackers({ token, onUnauthorized })
   const [editingObjetivo, setEditingObjetivo] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [taskObjetivo, setTaskObjetivo] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [trackerForm, setTrackerForm] = useState(null)
+  const [deleteTrackerTarget, setDeleteTrackerTarget] = useState(null)
+  const [unlinkTarget, setUnlinkTarget] = useState(null)
   const busy = objectives.loading || objectives.mutating
 
   function openCreateObjective() {
@@ -50,6 +57,14 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     }
   }
 
+  async function submitTracker(payload) {
+    if (!trackerForm) return
+    const saved = trackerForm.tracker
+      ? await trackers.updateTracker(trackerForm.tracker, payload)
+      : await trackers.createTracker({ ...payload, objetivo_id: trackerForm.objetivo.id })
+    if (saved) setTrackerForm(null)
+  }
+
   function moveObjetivoToTop(objetivoId) {
     const reordered = [...objectives.objetivos]
     const index = reordered.findIndex((objetivo) => objetivo.id === objetivoId)
@@ -74,6 +89,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       />
 
       <StatusNotice status={objectives.status} />
+      <StatusNotice status={trackers.status} />
 
       {formOpen && (
         <Dialog
@@ -107,7 +123,60 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         }}
         onMoveToTop={moveObjetivoToTop}
         onUpdateStatus={objectives.updateObjetivoStatus}
+        onUnlinkTask={setUnlinkTarget}
+        unlinkingId={objectiveTasks.unlinkingId}
+        trackersByObjective={trackers.byObjective}
+        trackersLoading={trackers.loading}
+        trackersError=""
+        trackerBusyId={trackers.busyId}
+        onCreateTracker={(objetivo) => setTrackerForm({ objetivo, tracker: null })}
+        onEditTracker={(tracker) => setTrackerForm({ objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id), tracker })}
+        onDeleteTracker={setDeleteTrackerTarget}
+        onRecordOccurrence={trackers.recordOccurrence}
+        onDeleteOccurrence={trackers.deleteOccurrence}
+        timezone={user?.timezone}
       />
+
+      {trackerForm && (
+        <Dialog closeOnBackdrop={false} onClose={() => setTrackerForm(null)} title={trackerForm.tracker ? "Editar acompanhamento" : "Novo acompanhamento"}>
+          <TrackerForm
+            key={trackerForm.tracker?.id ?? `new-${trackerForm.objetivo.id}`}
+            tracker={trackerForm.tracker}
+            objetivoTitulo={trackerForm.objetivo.titulo}
+            loading={trackers.busyId === trackerForm.tracker?.id}
+            onCancel={() => setTrackerForm(null)}
+            onSubmit={submitTracker}
+          />
+        </Dialog>
+      )}
+
+      {deleteTrackerTarget && (
+        <ConfirmDialog
+          title="Excluir acompanhamento"
+          message={`"${deleteTrackerTarget.titulo}" e suas ocorrências serão removidos. As tarefas do objetivo não serão alteradas.`}
+          confirmLabel="Excluir acompanhamento"
+          loading={trackers.busyId === deleteTrackerTarget.id}
+          onCancel={() => setDeleteTrackerTarget(null)}
+          onConfirm={async () => {
+            if (await trackers.deleteTracker(deleteTrackerTarget)) setDeleteTrackerTarget(null)
+          }}
+        />
+      )}
+
+      {unlinkTarget && (
+        <ConfirmDialog
+          title="Desvincular do objetivo"
+          message={unlinkTarget.recurrence
+            ? `A série "${unlinkTarget.titulo}" e suas ocorrências continuarão em Tarefas sem vínculo com este objetivo.`
+            : `"${unlinkTarget.titulo}" continuará em Tarefas com o mesmo status e histórico.`}
+          confirmLabel="Desvincular"
+          loading={objectiveTasks.unlinkingId === unlinkTarget.id}
+          onCancel={() => setUnlinkTarget(null)}
+          onConfirm={async () => {
+            if (await objectiveTasks.unlinkTask(unlinkTarget)) setUnlinkTarget(null)
+          }}
+        />
+      )}
 
       {tasksEnabled && taskObjetivo && (
         <Dialog
@@ -146,6 +215,9 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           onConfirm={async () => {
             const removed = await objectives.deleteObjetivo(deleteTarget.id)
             if (removed) {
+              objectiveTasks.detachObjective(deleteTarget.id)
+              trackers.removeForObjective(deleteTarget.id)
+              removeObjectiveFromOverview(token, deleteTarget.id)
               setDeleteTarget(null)
             }
           }}

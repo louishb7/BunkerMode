@@ -7,6 +7,7 @@ import {
   TaskHistoryEvent,
 } from "../types/taskContract"
 import { AuthSession, User } from "../types/userContract"
+import { Tracker, TrackerOccurrence } from "../types/trackerContract"
 
 function contractErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Contrato inválido."
@@ -128,6 +129,11 @@ export const api = {
   deleteTask(token, taskId) {
     return request(`/tarefas/${taskId}`, { token, method: "DELETE" })
   },
+  unlinkTaskFromObjective(token, taskId) {
+    return request<{ tarefa_id: number; series_id: number | null; objetivo_id: null }>(
+      `/tarefas/${taskId}/desvincular-objetivo`, { token, method: "POST" }
+    )
+  },
   getTaskHistory(token, taskId) {
     return request<TaskHistoryEvent[]>(`/tarefas/${taskId}/historico`, { token })
   },
@@ -148,5 +154,23 @@ export const api = {
   },
   deleteObjetivo(token, objetivoId) {
     return request(`/objetivos/${objetivoId}`, { token, method: "DELETE" })
+  },
+  listTrackers(token) {
+    return request<Tracker[]>("/acompanhamentos", { token })
+  },
+  createTracker(token, payload) {
+    return request<Tracker>("/acompanhamentos", { token, method: "POST", body: payload })
+  },
+  updateTracker(token, id, payload) {
+    return request<Tracker>(`/acompanhamentos/${id}`, { token, method: "PATCH", body: payload })
+  },
+  deleteTracker(token, id) {
+    return request(`/acompanhamentos/${id}`, { token, method: "DELETE" })
+  },
+  recordTrackerOccurrence(token, id) {
+    return request<TrackerOccurrence>(`/acompanhamentos/${id}/ocorrencias`, { token, method: "POST" })
+  },
+  deleteTrackerOccurrence(token, id, occurrenceId) {
+    return request(`/acompanhamentos/${id}/ocorrencias/${occurrenceId}`, { token, method: "DELETE" })
   },
 }

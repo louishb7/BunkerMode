@@ -17,6 +17,18 @@ export default function ObjetivoList({
   onEdit,
   onMoveToTop,
   onUpdateStatus,
+  onUnlinkTask,
+  unlinkingId,
+  trackersByObjective = {},
+  trackersLoading,
+  trackersError,
+  trackerBusyId,
+  onCreateTracker,
+  onEditTracker,
+  onDeleteTracker,
+  onRecordOccurrence,
+  onDeleteOccurrence,
+  timezone,
 }) {
   if (objetivos.length === 0) {
     return (
@@ -46,6 +58,18 @@ export default function ObjetivoList({
           onEdit={() => onEdit(objetivo)}
           onMoveToTop={index > 0 ? () => onMoveToTop(objetivo.id) : null}
           onUpdateStatus={(status) => onUpdateStatus(objetivo.id, status)}
+          onUnlinkTask={onUnlinkTask}
+          unlinkingId={unlinkingId}
+          trackers={trackersByObjective[String(objetivo.id)] || []}
+          trackersLoading={trackersLoading}
+          trackersError={trackersError}
+          trackerBusyId={trackerBusyId}
+          onCreateTracker={() => onCreateTracker(objetivo)}
+          onEditTracker={onEditTracker}
+          onDeleteTracker={onDeleteTracker}
+          onRecordOccurrence={onRecordOccurrence}
+          onDeleteOccurrence={onDeleteOccurrence}
+          timezone={timezone}
         />
       ))}
     </div>

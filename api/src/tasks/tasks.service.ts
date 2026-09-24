@@ -482,6 +482,12 @@ export class TasksService {
       payload,
       "objetivo_id",
     );
+    if (hasObjetivoId && current.recurrence_series_id !== null) {
+      throw new HttpException(
+        "Use o desvínculo da série para alterar o Objetivo de uma tarefa recorrente.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const objetivoId = hasObjetivoId
       ? optionalId(payload.objetivo_id, "Objetivo vinculado não encontrado.")
       : current.objetivo_id;
@@ -557,6 +563,58 @@ export class TasksService {
       action: "tarefa_concluida",
       details: `Tarefa '${current.titulo}' concluída.`,
     });
+  }
+
+  async unlinkFromObjective(
+    id: number,
+    user: UserRecord,
+  ): Promise<{ tarefa_id: number; series_id: number | null; objetivo_id: null }> {
+    const current = await this.getTaskForUser(id, user);
+    if (current.objetivo_id === null) {
+      throw new HttpException("Tarefa não está vinculada a um objetivo.", HttpStatus.BAD_REQUEST);
+    }
+
+    if (current.recurrence_series_id === null) {
+      await this.prisma.missoes.update({
+        where: { missao_id: current.missao_id },
+        data: { objetivo_id: null },
+      });
+      return { tarefa_id: current.missao_id, series_id: null, objetivo_id: null };
+    }
+
+    const series = await this.prisma.series_recorrencia.findFirst({
+      where: {
+        recurrence_series_id: current.recurrence_series_id,
+        responsavel_id: user.usuario_id,
+      },
+    });
+    if (!series) {
+      throw new HttpException("Série recorrente não encontrada.", HttpStatus.NOT_FOUND);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.series_recorrencia.update({
+        where: { recurrence_series_id: series.recurrence_series_id },
+        data: {
+          objetivo_id: null,
+          ...(series.termination_policy === "ate_objetivo"
+            ? { termination_policy: "sem_termino" }
+            : {}),
+        },
+      });
+      await tx.missoes.updateMany({
+        where: {
+          recurrence_series_id: series.recurrence_series_id,
+          responsavel_id: user.usuario_id,
+        },
+        data: { objetivo_id: null },
+      });
+    });
+    return {
+      tarefa_id: current.missao_id,
+      series_id: series.recurrence_series_id,
+      objetivo_id: null,
+    };
   }
 
   async reopen(id: number, user: UserRecord): Promise<TaskRecord> {

@@ -539,6 +539,9 @@ describe("HTTP application", () => {
 
   it("rejects protected endpoints without token", async () => {
     await request(app.getHttpServer()).get("/api/v2/usuarios/me").expect(401);
+    await request(app.getHttpServer()).get("/api/v2/acompanhamentos").expect(401);
+    await request(app.getHttpServer()).post("/api/v2/acompanhamentos/1/ocorrencias").expect(401);
+    await request(app.getHttpServer()).post("/api/v2/tarefas/1/desvincular-objetivo").expect(401);
   });
 
   it("reopens completed tasks through an authenticated audited command", async () => {

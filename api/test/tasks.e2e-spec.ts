@@ -58,13 +58,16 @@ function prismaMock() {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     objetivos: {
       findFirst: jest.fn(),
     },
     series_recorrencia: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
       updateMany: jest.fn(),
     },
   };
@@ -72,6 +75,71 @@ function prismaMock() {
 
 describe("Tasks clean domain", () => {
   const calendar = new OperationalCalendarService();
+
+  it("desvincula tarefa pontual concluída sem alterar status ou histórico", async () => {
+    const prisma = prismaMock();
+    prisma.missoes.findFirst.mockResolvedValue(task({ status: TASK_STATUS.completed, objetivo_id: 4 }));
+    const service = new TasksService(prisma as never, calendar);
+    const result = await service.unlinkFromObjective(10, user());
+    expect(result).toEqual({ tarefa_id: 10, series_id: null, objetivo_id: null });
+    expect(prisma.missoes.update).toHaveBeenCalledWith({ where: { missao_id: 10 }, data: { objetivo_id: null } });
+    expect(prisma.missoes.delete).not.toHaveBeenCalled();
+    expect(prisma.auditoria_eventos.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("desvincula por series_id, preserva ocorrências e torna independente a política até objetivo", async () => {
+    const prisma = prismaMock();
+    prisma.missoes.findFirst.mockResolvedValue(task({ objetivo_id: 4, recurrence_series_id: 31 }));
+    prisma.series_recorrencia.findFirst.mockResolvedValue({
+      recurrence_series_id: 31, responsavel_id: 7, objetivo_id: 4,
+      titulo: "Mesmo título", termination_policy: "ate_objetivo",
+    });
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
+    const service = new TasksService(prisma as never, calendar);
+    const result = await service.unlinkFromObjective(10, user());
+    expect(result.series_id).toBe(31);
+    expect(prisma.series_recorrencia.update).toHaveBeenCalledWith({
+      where: { recurrence_series_id: 31 },
+      data: { objetivo_id: null, termination_policy: "sem_termino" },
+    });
+    expect(prisma.missoes.updateMany).toHaveBeenCalledWith({
+      where: { recurrence_series_id: 31, responsavel_id: 7 },
+      data: { objetivo_id: null },
+    });
+    expect(prisma.missoes.delete).not.toHaveBeenCalled();
+  });
+
+  it("impede PATCH de objetivo_id em uma ocorrência recorrente", async () => {
+    const prisma = prismaMock();
+    prisma.missoes.findFirst.mockResolvedValue(task({ objetivo_id: 4, recurrence_series_id: 31 }));
+    const service = new TasksService(prisma as never, calendar);
+    await expect(service.update(10, { objetivo_id: null }, user())).rejects.toMatchObject({ status: 400 });
+    expect(prisma.missoes.update).not.toHaveBeenCalled();
+  });
+
+  it("materializa futuras ocorrências sem objetivo após o desvínculo da série", async () => {
+    const prisma = prismaMock();
+    prisma.series_recorrencia.findMany.mockResolvedValue([{
+      recurrence_series_id: 31, responsavel_id: 7, objetivo_id: null,
+      objetivos: null, titulo: "Mesmo título", instrucao: null, prioridade: 2,
+      start_date: new Date("2026-09-09T00:00:00Z"), end_date: null,
+      termination_policy: "sem_termino", recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6], ativo: true,
+    }]);
+    prisma.missoes.createManyAndReturn.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
+    const service = new TasksService(prisma as never, calendar);
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-09T12:00:00Z"));
+    try {
+      await service.materializeRecurrences(user());
+      expect(prisma.missoes.createManyAndReturn).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({
+          recurrence_series_id: 31, objetivo_id: null,
+        })]),
+      }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it("limits daily query to the operational date and nearby completions", async () => {
     const prisma = prismaMock();
@@ -735,24 +803,26 @@ describe("Tasks clean domain", () => {
     ).resolves.toMatchObject({ objetivo_id: null });
   });
 
-  it("disconnects the goal without configuring recurrence on the occurrence", async () => {
+  it("disconnects a recurring series without changing its recurrence policy", async () => {
     const prisma = prismaMock();
     prisma.missoes.findFirst.mockResolvedValue(
       task({ objetivo_id: 3, recurrence_series_id: 21 }),
     );
-    prisma.missoes.update.mockResolvedValue(
-      task({ recurrence_series_id: 21 }),
-    );
+    prisma.series_recorrencia.findFirst.mockResolvedValue({
+      recurrence_series_id: 21, responsavel_id: 7, termination_policy: "sem_termino",
+    });
     prisma.$transaction.mockImplementation(async (callback) =>
       callback(prisma),
     );
     const service = new TasksService(prisma as never, calendar);
-    await service.update(10, { objetivo_id: null }, user());
+    await service.unlinkFromObjective(10, user());
     expect(prisma.objetivos.findFirst).not.toHaveBeenCalled();
-    expect(prisma.missoes.update).toHaveBeenCalledWith({
-      where: { missao_id: 10 },
-      data: { objetivos: { disconnect: true } },
-      include: { serie_recorrencia: true },
+    expect(prisma.series_recorrencia.update).toHaveBeenCalledWith({
+      where: { recurrence_series_id: 21 },
+      data: { objetivo_id: null },
+    });
+    expect(prisma.missoes.updateMany).toHaveBeenCalledWith({
+      where: { recurrence_series_id: 21, responsavel_id: 7 }, data: { objetivo_id: null },
     });
   });
 

@@ -1,5 +1,5 @@
 import React from "react"
-import { CalendarDays, Check, Plus, Circle, ListTodo } from "lucide-react"
+import { CalendarDays, Check, Plus, Circle, ListTodo, ListChecks } from "lucide-react"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Badge from "../../../components/ui/Badge"
 
@@ -52,6 +52,18 @@ export default function ObjetivoCard({
   onEdit,
   onMoveToTop,
   onUpdateStatus,
+  onUnlinkTask,
+  unlinkingId,
+  trackers = [],
+  trackersLoading = false,
+  trackersError = "",
+  trackerBusyId = null,
+  onCreateTracker,
+  onEditTracker,
+  onDeleteTracker,
+  onRecordOccurrence,
+  onDeleteOccurrence,
+  timezone,
 }) {
   const targetDate = objetivo.data_alvo ? formatDateOnly(objetivo.data_alvo, "") : ""
 
@@ -170,6 +182,11 @@ export default function ObjetivoCard({
                     {task.status_code === "NAO_REALIZADA" && (
                       <span className="text-xs text-text-muted">Não realizada</span>
                     )}
+                    <ActionsMenu
+                      label={`Ações da tarefa: ${task.titulo}`}
+                      disabled={unlinkingId === task.id}
+                      items={[{ label: "Desvincular do objetivo", onSelect: () => onUnlinkTask(task) }]}
+                    />
                   </li>
                 )
               })}
@@ -183,6 +200,70 @@ export default function ObjetivoCard({
           )}
         </section>
       )}
+      <section
+        aria-label={`Acompanhamentos de ${objetivo.titulo}`}
+        className="border-t border-border bg-surface-subtle px-5 py-3 sm:px-6"
+      >
+        <header className="flex items-center justify-between gap-3">
+          <h3 className="m-0 flex items-center gap-2 text-xs font-semibold text-text-secondary">
+            <ListChecks size={15} aria-hidden="true" />
+            Acompanhamentos
+          </h3>
+          <Button size="icon" variant="ghost" disabled={trackersLoading} onClick={onCreateTracker} aria-label={`Adicionar acompanhamento a ${objetivo.titulo}`} title="Adicionar acompanhamento">
+            <Plus size={18} aria-hidden="true" />
+          </Button>
+        </header>
+        {trackersError && <p role="alert" className="m-0 py-2 text-sm text-danger">{trackersError}</p>}
+        {trackersLoading && trackers.length === 0 && <p className="m-0 py-2 text-sm text-text-secondary">Carregando acompanhamentos…</p>}
+        {!trackersLoading && trackers.length === 0 && <p className="m-0 py-2 text-sm text-text-muted">Nenhum acompanhamento ainda.</p>}
+        {trackers.length > 0 && (
+          <ul className="m-0 list-none p-0">
+            {trackers.map((tracker) => {
+              const occurrences = tracker.ocorrencias ?? []
+              const last = occurrences[0]
+              return (
+                <li key={tracker.id} className="border-t border-border py-3 first:border-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="m-0 break-words text-sm font-medium text-text-primary">{tracker.titulo}</p>
+                      {tracker.descricao && <p className="mt-1 mb-0 break-words text-sm text-text-secondary">{tracker.descricao}</p>}
+                      <p className="mt-1 mb-0 text-xs text-text-muted">
+                        {last ? `Última ocorrência: ${new Date(last.occurred_at).toLocaleDateString("pt-BR", { timeZone: timezone })}` : "Nenhuma ocorrência registrada"}
+                      </p>
+                    </div>
+                    <ActionsMenu
+                      label={`Ações do acompanhamento: ${tracker.titulo}`}
+                      disabled={trackerBusyId === tracker.id}
+                      items={[
+                        { label: "Editar acompanhamento", onSelect: () => onEditTracker(tracker) },
+                        { label: "Excluir acompanhamento", onSelect: () => onDeleteTracker(tracker), danger: true },
+                      ]}
+                    />
+                  </div>
+                  <Button className="mt-2" size="small" variant="ghost" loading={trackerBusyId === tracker.id} onClick={() => onRecordOccurrence(tracker)}>
+                    Registrar ocorrência
+                  </Button>
+                  {occurrences.length > 0 && (
+                    <details className="mt-2 text-xs text-text-secondary">
+                      <summary className="cursor-pointer">Ocorrências recentes</summary>
+                      <ul className="mt-2 grid list-none gap-1 p-0">
+                        {occurrences.slice(0, 5).map((occurrence) => (
+                          <li key={occurrence.id} className="flex items-center justify-between gap-2">
+                            <span>{new Date(occurrence.occurred_at).toLocaleDateString("pt-BR", { timeZone: timezone })}</span>
+                            <Button size="small" variant="ghost" disabled={trackerBusyId === tracker.id} onClick={() => onDeleteOccurrence(tracker, occurrence)} aria-label={`Remover ocorrência de ${tracker.titulo}`}>
+                              Remover
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
     </article>
   )
 }

@@ -105,6 +105,11 @@ export class TasksController {
     return toTaskResponse(task, user);
   }
 
+  @Post("tarefas/:id/desvincular-objetivo")
+  unlinkFromObjective(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
+    return this.tasksService.unlinkFromObjective(taskId(id), request.currentUser!);
+  }
+
   @Patch("tarefas/:id/toggle-pin")
   async togglePin(
     @Req() request: AuthenticatedRequest,

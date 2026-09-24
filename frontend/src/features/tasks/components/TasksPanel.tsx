@@ -1,5 +1,7 @@
 import React from "react"
+import { Focus, Plus } from "lucide-react"
 
+import Button from "../../../components/ui/Button"
 import EmptyState from "../../../components/ui/EmptyState"
 import { isCompleted, isNotPerformed } from "../../../utils/taskStatus"
 import TaskCard from "./TaskCard"
@@ -20,9 +22,11 @@ export default function TasksPanel({
   completeLoadingId,
   loading,
   onCompleteTask,
+  onCreateTask,
   onDeleteTask,
   onEditTask,
   onReopenTask,
+  onStartFocus,
   onTogglePin,
   pinLoadingId,
   reopenLoadingId,
@@ -68,8 +72,8 @@ export default function TasksPanel({
 
   return (
     <section className="grid gap-0">
-      <div className="border-b border-border px-4 py-3">
-        <div>
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-2">
+        <div className="min-w-0">
           <h2 className="m-0 text-sm font-semibold text-text-primary">
             <span className="sr-only">Tarefas de </span>
             {selectedDate.toLocaleDateString("pt-BR", {
@@ -79,7 +83,17 @@ export default function TasksPanel({
             })}
           </h2>
         </div>
-      </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="secondary" onClick={onStartFocus}>
+            <Focus size={18} aria-hidden="true" />
+            Foco
+          </Button>
+          <Button onClick={onCreateTask}>
+            <Plus size={18} aria-hidden="true" />
+            Nova tarefa
+          </Button>
+        </div>
+      </header>
 
       {loading ? (
         <EmptyState

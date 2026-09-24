@@ -21,7 +21,7 @@ export default function DaySelector({ onSelectDate, selectedDate, todayDate, wee
               day: "numeric",
               month: "long",
             })}
-            className={`relative grid min-h-15 min-w-0 content-center justify-items-center rounded-control border px-0 text-sm font-medium transition-[background-color,border-color,transform] active:scale-[0.97] motion-reduce:transition-none motion-reduce:transform-none focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${selected ? "border-selection-border bg-selection text-selection-text" : "border-transparent bg-transparent text-text-primary hover:border-border-strong hover:bg-peripheral"}`}
+            className={`relative grid min-h-15 min-w-0 content-center justify-items-center rounded-control border px-0 text-sm font-medium transition-[background-color,border-color,transform] active:scale-[0.97] motion-reduce:transition-none motion-reduce:transform-none focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${selected ? "border-selection-border bg-selection text-selection-text ring-1 ring-inset ring-selection-border" : today ? "border-transparent bg-peripheral text-text-primary hover:border-border-strong" : "border-transparent bg-surface-subtle text-text-primary hover:border-border-strong hover:bg-peripheral"}`}
             type="button"
             onClick={() => onSelectDate(date)}
           >
@@ -30,7 +30,7 @@ export default function DaySelector({ onSelectDate, selectedDate, todayDate, wee
               {String(date.getDate()).padStart(2, "0")}
             </span>
             <span
-              className={`min-h-4 text-[10px] font-medium leading-4 ${today ? "text-text-secondary" : "invisible"}`}
+              className={`min-h-4 text-[10px] font-semibold leading-4 ${today ? "text-accent" : "invisible"}`}
               aria-hidden={!today}
             >
               Hoje

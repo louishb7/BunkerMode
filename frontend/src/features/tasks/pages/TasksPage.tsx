@@ -1,8 +1,6 @@
-import { Focus, Plus } from "lucide-react"
 import React, { useMemo, useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
-import Button from "../../../components/ui/Button"
 import Dialog from "../../../components/ui/Dialog"
 import PageHeader from "../../../components/ui/PageHeader"
 import StatusNotice from "../../../components/ui/StatusNotice"
@@ -73,21 +71,7 @@ export default function TasksPage({ board, onStartFocus, user }) {
   return (
     <>
       <section className="mx-auto grid max-w-[900px] gap-5">
-        <PageHeader
-          actions={
-            <>
-              <Button variant="secondary" onClick={onStartFocus}>
-                <Focus size={18} aria-hidden="true" />
-                Foco
-              </Button>
-              <Button onClick={openCreateForm}>
-                <Plus size={18} aria-hidden="true" />
-                Nova tarefa
-              </Button>
-            </>
-          }
-          title="Tarefas"
-        />
+        <PageHeader title="Tarefas" />
 
         <div className="empty:hidden">
           <StatusNotice status={board.status} />
@@ -108,9 +92,11 @@ export default function TasksPage({ board, onStartFocus, user }) {
             completeLoadingId={board.completeLoadingId}
             loading={board.taskLoading && !board.hasBoardSnapshot}
             onCompleteTask={board.completeTask}
+            onCreateTask={openCreateForm}
             onDeleteTask={setDeleteTarget}
             onEditTask={openEditForm}
             onReopenTask={board.reopenTask}
+            onStartFocus={onStartFocus}
             onTogglePin={board.toggleTaskPin}
             pinLoadingId={board.pinLoadingId}
             reopenLoadingId={board.reopenLoadingId}

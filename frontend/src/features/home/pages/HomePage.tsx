@@ -75,14 +75,24 @@ function TasksCompartment({ preview, onComplete, completingId }) {
             <span className="text-xs text-text-secondary">Hoje</span>
           </div>
         </div>
-        <Link
-          to={APP_ROUTES.TASKS}
-          aria-label="Abrir Tarefas"
-          title="Abrir Tarefas"
-          className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral"
-        >
-          <ArrowUpRight size={21} aria-hidden="true" />
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link
+            to={APP_ROUTES.TASKS_FOCUS}
+            aria-label="Abrir modo foco"
+            title="Abrir modo foco"
+            className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          >
+            <Focus size={19} aria-hidden="true" />
+          </Link>
+          <Link
+            to={APP_ROUTES.TASKS}
+            aria-label="Abrir Tarefas"
+            title="Abrir Tarefas"
+            className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral"
+          >
+            <ArrowUpRight size={21} aria-hidden="true" />
+          </Link>
+        </div>
       </header>
       <PreviewState preview={preview} empty="Nenhuma tarefa aberta para hoje." />
       {!preview.loading && !preview.error && (
@@ -118,15 +128,6 @@ function TasksCompartment({ preview, onComplete, completingId }) {
           ))}
         </ul>
       )}
-      <div className="mt-4 border-t border-border pt-2">
-        <Link
-          to={APP_ROUTES.TASKS_FOCUS}
-          className="inline-flex min-h-11 items-center gap-2 rounded-control px-2 text-sm text-text-secondary no-underline hover:bg-surface-subtle hover:text-text-primary"
-        >
-          <Focus size={16} aria-hidden="true" />
-          Abrir modo foco
-        </Link>
-      </div>
     </section>
   )
 }

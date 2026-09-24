@@ -25,7 +25,7 @@ const { operationalDateFor, addDays } = await vite.ssrLoadModule(
 const { formatDateForApi } = await vite.ssrLoadModule("/src/utils/date.ts")
 after(() => vite.close())
 
-test("header único abre Foco e criação mantém hoje, outro dia e outra semana", async () => {
+test("ações no cabeçalho do dia abrem Foco e criação mantém hoje, outro dia e outra semana", async () => {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
@@ -63,6 +63,12 @@ test("header único abre Foco e criação mantém hoje, outro dia e outra semana
       [...container.querySelectorAll("button")].filter((el) => el.textContent === "Nova tarefa")
         .length,
       1
+    )
+    assert.equal(container.querySelector("h1").closest("header").querySelectorAll("button").length, 0)
+    const dayHeader = container.querySelector("h2").closest("header")
+    assert.deepEqual(
+      [...dayHeader.querySelectorAll("button")].map((el) => el.textContent.trim()),
+      ["Foco", "Nova tarefa"]
     )
     await click(button("Foco"))
     assert.equal(focus, 1)
@@ -158,6 +164,10 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
         if (route === "/") {
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
+          const card = container.querySelector('[aria-labelledby="home-tasks-title"]')
+          assert.equal(card.querySelectorAll('a[href="/tarefas/foco"]').length, 1)
+          assert.equal(card.querySelector('header a[href="/tarefas/foco"]').getAttribute("aria-label"), "Abrir modo foco")
+          assert.doesNotMatch(card.textContent, /Abrir modo foco/)
         }
         const trigger =
           route === "/"

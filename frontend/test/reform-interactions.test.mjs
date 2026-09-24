@@ -55,6 +55,32 @@ test('tarefas preservam conclusão e administração sem ação manual de falha'
  assert.equal(focus.container.querySelector('button').textContent,'Concluir');await focus.close()
 })
 
+test('detalhes longos expandem localmente; conclusão, menu e recorrência ficam acessíveis recolhidos',async()=>{
+ let complete=0,edit=0
+ const task={id:9,titulo:'Ler livro',instrucao:'Ler um capítulo, anotar os conceitos centrais e revisar as notas antes de seguir para o capítulo seguinte.',recurrence:{series_id:1,weekdays:[0,1,2,3,4,5,6]},status_code:'PENDENTE',permissions:{can_complete:true,can_edit:true}}
+ const view=await mount(TaskCard,{task,onComplete:()=>complete++,onEdit:()=>edit++})
+ const description=view.container.querySelector('p')
+ Object.defineProperties(description,{scrollHeight:{configurable:true,value:60},clientHeight:{configurable:true,value:40}})
+ await act(async()=>window.dispatchEvent(new window.Event('resize')))
+ const details=[...view.container.querySelectorAll('button')].find(button=>button.textContent==='Mostrar detalhes')
+ assert.ok(details)
+ assert.equal(details.getAttribute('aria-expanded'),'false')
+ assert.match(view.container.textContent,/Recorrente/)
+ await click(view.container.querySelector('[aria-label="Concluir: Ler livro"]'));assert.equal(complete,1)
+ await click(view.container.querySelector('[aria-haspopup=menu]'))
+ await click(document.querySelector('[role=menuitem]'));assert.equal(edit,1)
+ await click(details)
+ assert.equal(details.textContent,'Ocultar detalhes')
+ assert.equal(details.getAttribute('aria-expanded'),'true')
+ await click(details)
+ assert.equal(details.textContent,'Mostrar detalhes')
+ assert.equal(details.getAttribute('aria-expanded'),'false')
+ await view.close()
+ const short=await mount(TaskCard,{task:{...task,id:10,instrucao:'Nota breve.',recurrence:null},onComplete:()=>{}})
+ assert.equal([...short.container.querySelectorAll('button')].some(button=>button.textContent.includes('detalhes')),false)
+ await short.close()
+})
+
 test('concluídas ficam abaixo das abertas e preservam Reabrir sem ações proibidas',async()=>{
  let reopened=0
  const pending={id:1,titulo:'Aberta',status:'PENDENTE',status_code:'PENDENTE',permissions:{can_complete:true,can_edit:true}}

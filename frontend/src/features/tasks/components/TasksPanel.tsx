@@ -1,7 +1,5 @@
 import React from "react"
-import { Plus } from "lucide-react"
 
-import Button from "../../../components/ui/Button"
 import EmptyState from "../../../components/ui/EmptyState"
 import { isCompleted, isNotPerformed } from "../../../utils/taskStatus"
 import TaskCard from "./TaskCard"
@@ -22,7 +20,6 @@ export default function TasksPanel({
   completeLoadingId,
   loading,
   onCompleteTask,
-  onCreateTask,
   onDeleteTask,
   onEditTask,
   onReopenTask,
@@ -70,8 +67,8 @@ export default function TasksPanel({
   }
 
   return (
-    <section className="work-surface grid gap-0">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
+    <section className="grid gap-0">
+      <div className="border-b border-border px-4 py-3">
         <div>
           <h2 className="m-0 text-sm font-semibold text-text-primary">
             <span className="sr-only">Tarefas de </span>
@@ -82,10 +79,6 @@ export default function TasksPanel({
             })}
           </h2>
         </div>
-        <Button size="small" onClick={onCreateTask}>
-          <Plus size={17} aria-hidden="true" />
-          Nova tarefa
-        </Button>
       </div>
 
       {loading ? (

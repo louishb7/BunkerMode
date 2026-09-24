@@ -5,6 +5,7 @@ import { FOCUS_DURATIONS } from "../focusSession"
 export default function FocusPreparation({ todayTasks, duration, onDurationChange, onStart }) {
   const [activityText, setActivityText] = useState("")
   const [linkedTask, setLinkedTask] = useState(null)
+  const [showAllTasks, setShowAllTasks] = useState(false)
 
   return (
     <form
@@ -19,7 +20,10 @@ export default function FocusPreparation({ todayTasks, duration, onDurationChang
       }}
     >
       <div className="grid min-w-0 gap-3">
-        <label htmlFor="focus-activity" className="text-xl font-semibold">
+        <label
+          htmlFor="focus-activity"
+          className="text-2xl font-semibold leading-snug tracking-tight"
+        >
           No que você vai focar agora?
         </label>
         <textarea
@@ -43,6 +47,40 @@ export default function FocusPreparation({ todayTasks, duration, onDurationChang
           </div>
         )}
       </div>
+      {todayTasks.length > 0 && (
+        <section aria-labelledby="focus-shortcuts">
+          <h2 id="focus-shortcuts" className="m-0 mb-1 text-sm font-medium text-text-secondary">
+            Tarefas de hoje
+          </h2>
+          <ul id="focus-task-shortcuts" className="m-0 grid list-none p-0">
+            {(showAllTasks ? todayTasks : todayTasks.slice(0, 3)).map((task) => (
+              <li key={task.id} className="min-w-0">
+                <button
+                  type="button"
+                  className="min-h-11 w-full cursor-pointer rounded-control border-0 bg-transparent px-2 py-2 text-left text-sm text-text-secondary hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-focus-ring [overflow-wrap:anywhere]"
+                  onClick={() => {
+                    setActivityText(task.titulo)
+                    setLinkedTask(task)
+                  }}
+                >
+                  {task.titulo}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {todayTasks.length > 3 && (
+            <Button
+              size="small"
+              variant="ghost"
+              aria-expanded={showAllTasks}
+              aria-controls="focus-task-shortcuts"
+              onClick={() => setShowAllTasks((value) => !value)}
+            >
+              {showAllTasks ? "Mostrar menos tarefas" : "Mostrar mais tarefas"}
+            </Button>
+          )}
+        </section>
+      )}
       <fieldset className="m-0 min-w-0 border-0 p-0">
         <legend className="mb-3 text-sm text-text-secondary">Duração do bloco</legend>
         <div className="grid grid-cols-4 gap-2">
@@ -67,29 +105,6 @@ export default function FocusPreparation({ todayTasks, duration, onDurationChang
       <Button type="submit" disabled={!activityText.trim()}>
         Iniciar bloco
       </Button>
-      {todayTasks.length > 0 && (
-        <section aria-labelledby="focus-shortcuts">
-          <h2 id="focus-shortcuts" className="mb-2 text-sm font-medium text-text-secondary">
-            Tarefas de hoje
-          </h2>
-          <ul className="m-0 grid list-none gap-1 p-0">
-            {todayTasks.map((task) => (
-              <li key={task.id} className="min-w-0">
-                <button
-                  type="button"
-                  className="min-h-11 w-full cursor-pointer rounded-control border-0 bg-transparent px-2 py-3 text-left text-sm text-text-secondary hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-focus-ring [overflow-wrap:anywhere]"
-                  onClick={() => {
-                    setActivityText(task.titulo)
-                    setLinkedTask(task)
-                  }}
-                >
-                  {task.titulo}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </form>
   )
 }

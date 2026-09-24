@@ -369,7 +369,12 @@ test("tarefa removida durante bloco não destrói contexto; encerrar apaga apena
 test("storage bloqueado mantém bloco em memória e informa limite de recuperação", async () => {
   storage.clear()
   const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage")
-  Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new Error("Blocked") } })
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    get() {
+      throw new Error("Blocked")
+    },
+  })
   let view
   try {
     view = await mount()
@@ -380,5 +385,34 @@ test("storage bloqueado mantém bloco em memória e informa limite de recuperaç
   } finally {
     if (view) await view.close()
     Object.defineProperty(window, "localStorage", descriptor)
+  }
+})
+
+test("preparação limita atalhos, revela os demais e mantém seleção antes da duração", async () => {
+  storage.clear()
+  const tasks = Array.from({ length: 5 }, (_, index) => ({
+    ...task,
+    id: index + 1,
+    titulo: `Tarefa ${index + 1}`,
+  }))
+  const view = await mount({ dailyTasks: tasks })
+  try {
+    assert.ok(view.button("Tarefa 3"))
+    assert.equal(view.button("Tarefa 4"), undefined)
+    assert.equal(view.button("Mostrar mais tarefas").getAttribute("aria-expanded"), "false")
+    const shortcuts = view.container.querySelector('[aria-labelledby="focus-shortcuts"]')
+    const duration = view.container.querySelector("fieldset")
+    assert.ok(shortcuts.compareDocumentPosition(duration) & window.Node.DOCUMENT_POSITION_FOLLOWING)
+    await view.click("Mostrar mais tarefas")
+    assert.equal(view.button("Mostrar menos tarefas").getAttribute("aria-expanded"), "true")
+    await view.click("Tarefa 5")
+    await view.click("Mostrar menos tarefas")
+    assert.equal(view.container.querySelector("textarea").value, "Tarefa 5")
+    await view.click("Iniciar bloco")
+    assert.equal(current().taskId, 5)
+    assert.equal(view.button("Mostrar mais tarefas"), undefined)
+    assert.doesNotMatch(view.container.textContent, /Tarefa 1|Tarefa 2|Tarefas de hoje/)
+  } finally {
+    await view.close()
   }
 })

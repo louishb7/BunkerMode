@@ -1,4 +1,4 @@
-import { Focus } from "lucide-react"
+import { Focus, Plus } from "lucide-react"
 import React, { useMemo, useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
@@ -75,19 +75,26 @@ export default function TasksPage({ board, onStartFocus, user }) {
       <section className="mx-auto grid max-w-[900px] gap-5">
         <PageHeader
           actions={
-            <Button
-              variant="secondary"
-              onClick={onStartFocus}
-            >
-              <Focus size={18} aria-hidden="true" />
-              Foco
-            </Button>
+            <>
+              <Button variant="secondary" onClick={onStartFocus}>
+                <Focus size={18} aria-hidden="true" />
+                Foco
+              </Button>
+              <Button onClick={openCreateForm}>
+                <Plus size={18} aria-hidden="true" />
+                Nova tarefa
+              </Button>
+            </>
           }
           title="Tarefas"
         />
 
-        <div className="grid gap-5">
+        <div className="empty:hidden">
+          <StatusNotice status={board.status} />
+        </div>
+        <div className="work-surface min-w-0">
           <WeekPanel
+            onToday={() => setSelectedDate(todayDate)}
             onNextWeek={() => setSelectedDate((current) => addDays(current, 7))}
             onPreviousWeek={() => setSelectedDate((current) => addDays(current, -7))}
             onSelectDate={(date) => setSelectedDate(startOfDay(date))}
@@ -97,15 +104,10 @@ export default function TasksPage({ board, onStartFocus, user }) {
             weekDays={weekDays}
           />
 
-          <div className="empty:hidden">
-            <StatusNotice status={board.status} />
-          </div>
-
           <TasksPanel
             completeLoadingId={board.completeLoadingId}
             loading={board.taskLoading && !board.hasBoardSnapshot}
             onCompleteTask={board.completeTask}
-            onCreateTask={openCreateForm}
             onDeleteTask={setDeleteTarget}
             onEditTask={openEditForm}
             onReopenTask={board.reopenTask}

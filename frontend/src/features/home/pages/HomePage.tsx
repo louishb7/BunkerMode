@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { ArrowUpRight, ListTodo, Compass, Circle, Check } from "lucide-react"
+import { ArrowUpRight, ListTodo, Compass, Circle, Check, Focus } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { getErrorMessage } from "../../../api/httpClient"
@@ -7,7 +7,12 @@ import StatusNotice from "../../../components/ui/StatusNotice"
 import { getEnabledModules } from "../../../modules/moduleCatalog"
 import { APP_ROUTES } from "../../../routes/routeConstants"
 import { api } from "../../../services/bunkermodeApi"
-import { getOverview, subscribeOverview, updateCachedTask, updateOverview } from "../../../state/overviewCache"
+import {
+  getOverview,
+  subscribeOverview,
+  updateCachedTask,
+  updateOverview,
+} from "../../../state/overviewCache"
 import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
 import { formatDateForApi } from "../../../utils/date"
 
@@ -90,17 +95,38 @@ function TasksCompartment({ preview, onComplete, completingId }) {
               <button
                 type="button"
                 aria-label={`${task.status === "CONCLUIDA" ? "Concluída" : "Concluir"}: ${task.titulo}`}
-                disabled={task.status === "CONCLUIDA" || completingId === task.id || !task.permissions?.can_complete}
+                disabled={
+                  task.status === "CONCLUIDA" ||
+                  completingId === task.id ||
+                  !task.permissions?.can_complete
+                }
                 onClick={() => onComplete(task)}
                 className="mt-1 grid size-[17px] shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 text-text-muted focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default"
               >
-                {task.status === "CONCLUIDA" ? <Check size={17} aria-hidden="true" /> : <Circle size={17} aria-hidden="true" />}
+                {task.status === "CONCLUIDA" ? (
+                  <Check size={17} aria-hidden="true" />
+                ) : (
+                  <Circle size={17} aria-hidden="true" />
+                )}
               </button>
-              <span className={`min-w-0 break-words ${task.status === "CONCLUIDA" ? "text-text-muted line-through" : ""}`}>{task.titulo}</span>
+              <span
+                className={`min-w-0 break-words ${task.status === "CONCLUIDA" ? "text-text-muted line-through" : ""}`}
+              >
+                {task.titulo}
+              </span>
             </li>
           ))}
         </ul>
       )}
+      <div className="mt-4 border-t border-border pt-2">
+        <Link
+          to={APP_ROUTES.TASKS_FOCUS}
+          className="inline-flex min-h-11 items-center gap-2 rounded-control px-2 text-sm text-text-secondary no-underline hover:bg-surface-subtle hover:text-text-primary"
+        >
+          <Focus size={16} aria-hidden="true" />
+          Abrir modo foco
+        </Link>
+      </div>
     </section>
   )
 }
@@ -153,16 +179,29 @@ export default function HomePage({ onUnauthorized, token, user }) {
   const enabledModules = getEnabledModules(user)
   const tasksEnabled = enabledModules.some((module) => module.key === "tasks")
   const objectivesEnabled = enabledModules.some((module) => module.key === "objectives")
-  const cached = useSyncExternalStore(subscribeOverview, () => getOverview(token), () => emptyOverview)
+  const cached = useSyncExternalStore(
+    subscribeOverview,
+    () => getOverview(token),
+    () => emptyOverview
+  )
   const [tasksPreview, setTasksPreview] = useState(emptyPreview)
   const [objectivesPreview, setObjectivesPreview] = useState(emptyPreview)
   const [completingId, setCompletingId] = useState(null)
   const [completeError, setCompleteError] = useState("")
   const mutationVersion = useRef(0)
   const todayKey = formatDateForApi(operationalDateFor(user?.timezone))
-  const knownDaily = cached.dailyDate === todayKey ? cached.daily : (cached.all ? dailyFromBoard(cached.all, user?.timezone) : null)
-  const taskView = knownDaily ? { error: "", items: selectHomeTasks(knownDaily), loading: false } : tasksPreview
-  const objectiveView = cached.objectives ? { error: "", items: selectHomeObjectives(cached.objectives), loading: false } : objectivesPreview
+  const knownDaily =
+    cached.dailyDate === todayKey
+      ? cached.daily
+      : cached.all
+        ? dailyFromBoard(cached.all, user?.timezone)
+        : null
+  const taskView = knownDaily
+    ? { error: "", items: selectHomeTasks(knownDaily), loading: false }
+    : tasksPreview
+  const objectiveView = cached.objectives
+    ? { error: "", items: selectHomeObjectives(cached.objectives), loading: false }
+    : objectivesPreview
 
   async function completeTask(task) {
     if (!task.permissions?.can_complete || completingId) return
@@ -170,7 +209,14 @@ export default function HomePage({ onUnauthorized, token, user }) {
     setCompleteError("")
     mutationVersion.current += 1
     const previous = task
-    updateCachedTask(token, { ...task, status: "CONCLUIDA", status_code: "CONCLUIDA", status_label: "Concluída", completed_at: new Date().toISOString(), permissions: { ...task.permissions, can_complete: false } })
+    updateCachedTask(token, {
+      ...task,
+      status: "CONCLUIDA",
+      status_code: "CONCLUIDA",
+      status_label: "Concluída",
+      completed_at: new Date().toISOString(),
+      permissions: { ...task.permissions, can_complete: false },
+    })
     const result = await api.completeTask(token, task.id)
     setCompletingId(null)
     if (onUnauthorized?.(result)) return
@@ -195,7 +241,8 @@ export default function HomePage({ onUnauthorized, token, user }) {
     async function loadTasks() {
       const startedAtVersion = mutationVersion.current
       const known = getOverview(token)
-      if (!(known.daily && known.dailyDate === todayKey) && !known.all) setTasksPreview({ error: "", items: [], loading: true })
+      if (!(known.daily && known.dailyDate === todayKey) && !known.all)
+        setTasksPreview({ error: "", items: [], loading: true })
 
       const result = await api.listDailyTasks(token)
       if (cancelled || onUnauthorized?.(result)) {
@@ -233,7 +280,8 @@ export default function HomePage({ onUnauthorized, token, user }) {
     }
 
     async function loadObjectives() {
-      if (!getOverview(token).objectives) setObjectivesPreview({ error: "", items: [], loading: true })
+      if (!getOverview(token).objectives)
+        setObjectivesPreview({ error: "", items: [], loading: true })
       const result = await api.listObjetivos(token)
       if (cancelled || onUnauthorized?.(result)) {
         return
@@ -262,7 +310,6 @@ export default function HomePage({ onUnauthorized, token, user }) {
   return (
     <section className="grid gap-7">
       <header className="pt-2 pb-3">
-        <p className="m-0 mb-2 text-sm text-text-secondary">{user?.usuario}</p>
         <h1 className="m-0 text-3xl font-semibold tracking-tight">Seu Bunker</h1>
       </header>
       {enabledModules.length === 0 ? (
@@ -281,8 +328,34 @@ export default function HomePage({ onUnauthorized, token, user }) {
         <div
           className={`grid items-start gap-5 ${tasksEnabled && objectivesEnabled ? "xl:grid-cols-[1fr_1.1fr]" : "max-w-2xl"}`}
         >
-          {tasksEnabled && <div className="grid gap-2"><StatusNotice status={completeError || (knownDaily && tasksPreview.error) ? { type: "error", message: completeError || tasksPreview.error } : null} /><TasksCompartment preview={taskView} onComplete={completeTask} completingId={completingId} /></div>}
-          {objectivesEnabled && <div className="grid gap-2"><StatusNotice status={cached.objectives && objectivesPreview.error ? { type: "error", message: objectivesPreview.error } : null} /><ObjectivesCompartment preview={objectiveView} /></div>}
+          {tasksEnabled && (
+            <div className="grid gap-2">
+              <StatusNotice
+                status={
+                  completeError || (knownDaily && tasksPreview.error)
+                    ? { type: "error", message: completeError || tasksPreview.error }
+                    : null
+                }
+              />
+              <TasksCompartment
+                preview={taskView}
+                onComplete={completeTask}
+                completingId={completingId}
+              />
+            </div>
+          )}
+          {objectivesEnabled && (
+            <div className="grid gap-2">
+              <StatusNotice
+                status={
+                  cached.objectives && objectivesPreview.error
+                    ? { type: "error", message: objectivesPreview.error }
+                    : null
+                }
+              />
+              <ObjectivesCompartment preview={objectiveView} />
+            </div>
+          )}
         </div>
       )}
     </section>

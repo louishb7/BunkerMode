@@ -27,6 +27,7 @@ export default function TaskCard({
   const busy = completing || pinning || reopening
   const focus = variant === "focus"
   const compactCompleted = !focus && completed
+  const inlineRecurrence = !focus && task.recurrence && (compactCompleted || !task.instrucao)
   const administrative = [
     ...(permissions.can_edit && onEdit ? [{ label: "Editar", onSelect: onEdit }] : []),
     ...(permissions.can_pin && onTogglePin
@@ -47,7 +48,7 @@ export default function TaskCard({
   const showDeadline = deadline && selected && deadline !== selected
   return (
     <article
-      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : compactCompleted ? "px-2 py-0.5 sm:px-4" : "px-2 py-1.5 sm:px-4"}`}
+      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : compactCompleted ? "px-2 sm:px-4" : "px-2 py-0.5 sm:px-4"}`}
     >
       <div className={`flex min-w-0 items-start ${focus ? "gap-4" : "gap-1 sm:gap-2"}`}>
         {!focus && (
@@ -63,7 +64,7 @@ export default function TaskCard({
                 onClick={onComplete}
               >
                 <Circle
-                  size={23}
+                  size={19}
                   className="text-text-muted group-hover:text-accent"
                   aria-hidden="true"
                 />
@@ -73,21 +74,32 @@ export default function TaskCard({
                 className={`grid size-11 place-items-center ${completed ? "text-success" : "text-text-muted"}`}
               >
                 {completed ? (
-                  <Check size={21} aria-hidden="true" />
+                  <Check size={19} aria-hidden="true" />
                 ) : (
-                  <Circle size={21} aria-hidden="true" />
+                  <Circle size={19} aria-hidden="true" />
                 )}
                 <span className="sr-only">{completed ? "Concluída" : "Sem ação disponível"}</span>
               </span>
             )}
           </div>
         )}
-        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-1" : "py-2"}`}>
-          <h3
-            className={`m-0 break-words font-semibold ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "text-text-secondary line-through" : "text-text-primary"}`}
-          >
-            {title}
-          </h3>
+        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : "py-3"}`}>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h3
+              className={`m-0 min-w-0 max-w-full break-words font-medium ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "line-clamp-2 text-text-secondary line-through" : "text-text-primary"}`}
+            >
+              {title}
+            </h3>
+            {inlineRecurrence && (
+              <span
+                className="inline-flex items-center gap-1 text-xs text-text-muted"
+                title="Recorrente"
+              >
+                <Repeat2 size={13} aria-hidden="true" />
+                <span className={compactCompleted ? "sr-only" : ""}>Recorrente</span>
+              </span>
+            )}
+          </div>
           {task?.instrucao && !compactCompleted && (
             <p
               className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : "mt-1 line-clamp-2 text-sm leading-5"}`}
@@ -99,11 +111,14 @@ export default function TaskCard({
           {task?.instrucao && compactCompleted && (
             <span className="sr-only">Instrução: {task.instrucao}</span>
           )}
-          {((!focus && (task.is_pinned || task.recurrence) && !compactCompleted) ||
+          {((!focus &&
+            (task.is_pinned || (task.recurrence && !inlineRecurrence)) &&
+            !compactCompleted) ||
             (!compactCompleted && (notPerformed || showDeadline)) ||
-            (compactCompleted && task.recurrence) ||
             (focus && completed)) && (
-            <div className={`${focus ? "mt-2 gap-2" : "mt-1 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}>
+            <div
+              className={`${focus ? "mt-2 gap-2" : "mt-1 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}
+            >
               {notPerformed && <Badge>Não realizada</Badge>}
               {focus && completed && <span className="text-success">Concluída</span>}
               {!focus && !compactCompleted && task.is_pinned && (
@@ -112,7 +127,7 @@ export default function TaskCard({
                   Prioridade alta
                 </span>
               )}
-              {!focus && task.recurrence && (
+              {!focus && task.recurrence && !inlineRecurrence && (
                 <span className="inline-flex items-center gap-1">
                   <Repeat2 size={13} aria-hidden="true" />
                   Recorrente
@@ -129,9 +144,17 @@ export default function TaskCard({
           )}
         </div>
         {compactCompleted && permissions.can_reopen && onReopen && (
-          <Button className="px-2" size="small" variant="ghost" loading={reopening} onClick={onReopen}>
+          <Button
+            className="w-11 shrink-0 px-0 sm:w-auto sm:px-2"
+            aria-label={`Reabrir: ${title}`}
+            title="Reabrir tarefa"
+            size="small"
+            variant="ghost"
+            loading={reopening}
+            onClick={onReopen}
+          >
             <RotateCcw size={14} aria-hidden="true" />
-            Reabrir
+            <span className="sr-only sm:not-sr-only">Reabrir</span>
           </Button>
         )}
         {!focus && administrative.length > 0 && (

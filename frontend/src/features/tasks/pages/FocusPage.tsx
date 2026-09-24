@@ -36,7 +36,7 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
     phase === "preparation"
       ? "Modo Foco"
       : phase === "active"
-        ? "Seu bloco de foco"
+        ? "Modo Foco"
         : phase === "break"
           ? "Pausa"
           : phase === "break-ended"
@@ -46,14 +46,21 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
               : "O tempo deste bloco terminou."
 
   return (
-    <section className="mx-auto grid w-full min-w-0 max-w-xl gap-7">
-      <h1
-        ref={heading}
-        tabIndex={-1}
-        className="m-0 text-xl font-semibold tracking-tight text-text-primary focus-visible:outline-2 focus-visible:outline-focus-ring"
-      >
-        {title}
-      </h1>
+    <section className="mx-auto grid w-full min-w-0 max-w-[640px] gap-6 rounded-card border border-border bg-surface p-5 shadow-surface sm:gap-8 sm:p-10">
+      <header className="grid gap-3">
+        <span
+          aria-hidden="true"
+          className={`h-0.5 w-8 rounded-full ${phase === "active" ? "bg-accent" : "bg-border-strong"}`}
+        />
+        <h1
+          ref={heading}
+          tabIndex={-1}
+          className={`m-0 font-medium focus-visible:outline-2 focus-visible:outline-focus-ring ${phase === "active" ? "text-sm text-accent" : phase === "preparation" ? "text-sm text-text-secondary" : "text-xl text-text-primary"}`}
+        >
+          {title}
+          {phase === "active" && <span className="sr-only"> — bloco ativo</span>}
+        </h1>
+      </header>
       {focus.storageUnavailable && (
         <p role="status" className="text-sm text-text-secondary">
           Este navegador não conseguiu guardar o bloco. Mantenha esta página aberta para continuar.
@@ -78,20 +85,15 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
         <>
           {phase !== "break" && (
             <div className="grid min-w-0 gap-3">
-              <h2 className="m-0 text-3xl font-semibold leading-snug text-text-primary [overflow-wrap:anywhere]">
+              <h2 className="m-0 text-3xl font-semibold leading-snug sm:text-4xl text-text-primary [overflow-wrap:anywhere]">
                 {session.activityText}
               </h2>
-              {session.taskId && (
-                <p className="m-0 text-sm text-text-secondary [overflow-wrap:anywhere]">
-                  Tarefa vinculada · {linkedTask?.titulo ?? session.taskTitle ?? "Indisponível"}
-                </p>
-              )}
             </div>
           )}
           {phase === "active" && (
             <>
               <div className="grid gap-2">
-                <p className="m-0 text-xl text-text-primary">
+                <p className="m-0 text-2xl font-medium text-text-primary">
                   Até{" "}
                   <time dateTime={new Date(session.endsAt).toISOString()}>
                     {new Intl.DateTimeFormat("pt-BR", {
@@ -105,9 +107,16 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
                   {remainingMinutes(session, focus.now)} min restantes
                 </p>
               </div>
-              <Button variant="secondary" onClick={focus.finish}>
-                Encerrar bloco
-              </Button>
+              {session.taskId && (
+                <p className="m-0 text-sm text-text-secondary [overflow-wrap:anywhere]">
+                  Tarefa vinculada · {linkedTask?.titulo ?? session.taskTitle ?? "Indisponível"}
+                </p>
+              )}
+              <div className="border-t border-border pt-5">
+                <Button className="w-full sm:w-auto" variant="secondary" onClick={focus.finish}>
+                  Encerrar bloco
+                </Button>
+              </div>
             </>
           )}
           {phase === "break" && (
@@ -118,14 +127,23 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
               <p role="timer" aria-live="off" className="m-0 text-sm text-text-secondary">
                 {remainingMinutes(session, focus.now)} min restantes
               </p>
-              <Button variant="secondary" onClick={focus.finishBreak}>
+              <Button
+                className="w-full sm:w-auto sm:justify-self-start"
+                variant="secondary"
+                onClick={focus.finishBreak}
+              >
                 Encerrar pausa
               </Button>
             </>
           )}
           {deciding && (
             <>
-              <div className="grid gap-3">
+              {session.taskId && (
+                <p className="m-0 text-sm text-text-secondary [overflow-wrap:anywhere]">
+                  Tarefa vinculada · {linkedTask?.titulo ?? session.taskTitle ?? "Indisponível"}
+                </p>
+              )}
+              <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:flex-wrap">
                 <Button
                   onClick={() =>
                     focus.start(
@@ -152,6 +170,7 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
               <StatusNotice status={board.status} />
               {linkedTask && canCompleteInFocus(linkedTask) && board.status.type !== "error" && (
                 <Button
+                  className="sm:justify-self-start"
                   variant="ghost"
                   disabled={board.taskLoading}
                   loading={board.completeLoadingId === linkedTask.id}
@@ -161,6 +180,7 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
                 </Button>
               )}
               <Button
+                className="sm:justify-self-start"
                 variant="ghost"
                 onClick={() => {
                   focus.clear()

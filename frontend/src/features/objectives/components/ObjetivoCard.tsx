@@ -58,12 +58,11 @@ export default function ObjetivoCard({
   const menuItems = [
     { label: "Editar objetivo", onSelect: onEdit },
     ...(onMoveToTop ? [{ label: "Mover para o início", onSelect: onMoveToTop }] : []),
-    ...Object.entries(statusLabels)
-      .filter(([value]) => value !== objetivo.status)
-      .map(([value, label]) => ({
-        label: `Status: ${label}`,
-        onSelect: () => onUpdateStatus(value),
-      })),
+    ...(objetivo.status === "ativo"
+      ? [{ label: "Pausar objetivo", onSelect: () => onUpdateStatus("pausado") }]
+      : objetivo.status === "pausado"
+        ? [{ label: "Retomar objetivo", onSelect: () => onUpdateStatus("ativo") }]
+        : []),
     { label: "Remover objetivo", onSelect: onDelete, danger: true },
   ]
   return (
@@ -162,6 +161,11 @@ export default function ObjetivoCard({
                     <span className="min-w-0 flex-1 break-words text-sm leading-5 text-text-secondary">
                       {task.titulo}
                       <span className="sr-only"> — {status.label}</span>
+                      {task.recurrence && (
+                        <span className="block text-xs text-text-muted">
+                          Recorrente · {task.recurrence.weekdays.length === 7 ? "Todos os dias" : task.recurrence.weekdays.length === 5 && task.recurrence.weekdays.join(",") === "0,1,2,3,4" ? "Dias úteis" : ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].filter((_, index) => task.recurrence.weekdays.includes(index)).join(", ")}
+                        </span>
+                      )}
                     </span>
                     {task.status_code === "NAO_REALIZADA" && (
                       <span className="text-xs text-text-muted">Não realizada</span>

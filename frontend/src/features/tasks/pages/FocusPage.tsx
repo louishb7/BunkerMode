@@ -8,6 +8,7 @@ import TaskCard from "../components/TaskCard"
 
 export default function FocusPage({ actionTasks, board, dailyTasks, timezone }) {
   const allDailyTasksCompleted = dailyTasks.length > 0 && dailyTasks.every(isCompleted)
+  const waitingForTasks = board.taskLoading && !board.hasBoardSnapshot
 
   return (
     <section className="grid gap-7">
@@ -25,14 +26,14 @@ export default function FocusPage({ actionTasks, board, dailyTasks, timezone }) 
           Tarefas de hoje
         </h2>
 
-        {board.taskLoading && (
+        {waitingForTasks && (
           <EmptyState
             title="Sincronizando tarefas"
             message="Carregando as tarefas programadas para hoje."
           />
         )}
 
-        {!board.taskLoading && dailyTasks.length > 0 && (
+        {!waitingForTasks && dailyTasks.length > 0 && (
           <div className="work-surface grid">
             {dailyTasks.map((task) => (
               <TaskCard
@@ -47,7 +48,7 @@ export default function FocusPage({ actionTasks, board, dailyTasks, timezone }) 
           </div>
         )}
 
-        {!board.taskLoading && actionTasks.length === 0 && (
+        {!waitingForTasks && actionTasks.length === 0 && (
           <>
             {dailyTasks.length === 0 ? (
               <EmptyState

@@ -15,6 +15,7 @@ export function TaskBoardProvider({ children }) {
     authenticated: auth.authenticated,
     onUnauthorized: auth.handleUnauthorized,
     token: auth.token,
+    timezone: auth.user?.timezone,
     boardMode,
   })
 

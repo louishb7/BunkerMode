@@ -39,6 +39,13 @@ function boardHarness(api, onUnauthorized = () => false) {
       if (path.endsWith("httpClient")) return {
         getErrorMessage: (result, fallback) => result.data?.message || fallback,
       }
+      if (path.endsWith("overviewCache")) return {
+        getOverview: () => ({ all: null, daily: null }),
+        updateOverview: () => {},
+        updateCachedTask: () => {},
+      }
+      if (path.endsWith("calendarUtils")) return { operationalDateFor: () => new Date(2026, 8, 9) }
+      if (path.endsWith("/date")) return { formatDateForApi: () => "09-09-2026" }
       throw new Error(path)
     },
   })

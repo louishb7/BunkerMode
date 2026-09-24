@@ -3,10 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
+import { getOverview, updateCachedTask, updateOverview } from "../../../state/overviewCache"
+import { operationalDateFor } from "../../calendar/calendarUtils"
+import { formatDateForApi } from "../../../utils/date"
 import { getActionTasks } from "../taskSelectors"
 
-export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }) {
-  const [tasks, setTasks] = useState([])
+export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, timezone }) {
+  const [tasks, setTasks] = useState(() => boardMode === "focus" ? (getOverview(token).daily ?? []) : (getOverview(token).all ?? []))
+  const [hasBoardSnapshot, setHasBoardSnapshot] = useState(() => boardMode === "focus" ? getOverview(token).daily !== null : getOverview(token).all !== null)
   const [taskLoading, setTaskLoading] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
   const [pinLoadingId, setPinLoadingId] = useState(null)
@@ -70,6 +74,8 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }
       }
 
       setTasks(tasksResult.data)
+      setHasBoardSnapshot(true)
+      updateOverview(token, { all: tasksResult.data, daily: null, dailyDate: null })
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
@@ -127,10 +133,12 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }
       }
 
       setTasks(result.data.daily_tasks)
+      setHasBoardSnapshot(true)
+      updateOverview(token, { daily: result.data.daily_tasks, dailyDate: formatDateForApi(operationalDateFor(timezone)) })
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token]
+    [onUnauthorized, token, timezone]
   )
 
   useEffect(() => {
@@ -141,10 +149,15 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }
 
     if (!authenticated) {
       setTasks([])
+      setHasBoardSnapshot(false)
       setStatus(emptyStatus)
       setFormStatus(emptyStatus)
       return
     }
+
+    const cachedTasks = boardMode === "focus" ? getOverview(token).daily : getOverview(token).all
+    setTasks(cachedTasks ?? [])
+    setHasBoardSnapshot(cachedTasks !== null)
 
     if (boardMode === "focus") {
       loadFocusBoard()
@@ -323,6 +336,8 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }
       return false
     }
 
+    updateCachedTask(token, result.data)
+    setTasks((current) => current.map((item) => item.id === task.id ? result.data : item))
     return refreshAfterPersistedMutation("Tarefa concluída.")
   }
 
@@ -358,6 +373,7 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token }
   }
 
   return {
+    hasBoardSnapshot,
     actionTasks,
     completeLoadingId,
     completeTask,

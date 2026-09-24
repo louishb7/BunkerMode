@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react"
-import { ArrowUpRight, ListTodo, Compass, Circle } from "lucide-react"
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { ArrowUpRight, ListTodo, Compass, Circle, Check } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { getErrorMessage } from "../../../api/httpClient"
@@ -7,11 +7,24 @@ import StatusNotice from "../../../components/ui/StatusNotice"
 import { getEnabledModules } from "../../../modules/moduleCatalog"
 import { APP_ROUTES } from "../../../routes/routeConstants"
 import { api } from "../../../services/bunkermodeApi"
+import { getOverview, subscribeOverview, updateCachedTask, updateOverview } from "../../../state/overviewCache"
+import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
+import { formatDateForApi } from "../../../utils/date"
+
+const emptyOverview = { daily: null, dailyDate: null, all: null, objectives: null }
 
 const emptyPreview = { error: "", items: [], loading: false }
 
 export function selectHomeTasks(tasks = []) {
-  return tasks.filter((task) => task?.status_code === "PENDENTE").slice(0, 3)
+  return [
+    ...tasks.filter((task) => task?.status !== "CONCLUIDA").slice(0, 3),
+    ...tasks.filter((task) => task?.status === "CONCLUIDA").slice(0, 3),
+  ]
+}
+
+function dailyFromBoard(tasks, timezone) {
+  const date = operationalDateFor(timezone)
+  return tasks.filter((task) => taskBelongsToDate(task, date, timezone))
 }
 
 export function selectHomeObjectives(objetivos = []) {
@@ -42,7 +55,7 @@ function PreviewState({ preview, empty }) {
   if (!preview.items.length) return <p className="m-0 py-5 text-sm text-text-secondary">{empty}</p>
   return null
 }
-function TasksCompartment({ preview }) {
+function TasksCompartment({ preview, onComplete, completingId }) {
   return (
     <section aria-labelledby="home-tasks-title" className="work-surface p-5 sm:p-6">
       <header className="mb-5 flex items-center justify-between gap-3">
@@ -74,8 +87,16 @@ function TasksCompartment({ preview }) {
               key={task.id}
               className="flex items-start gap-3 border-t border-border py-4 text-sm font-medium leading-6"
             >
-              <Circle size={17} className="mt-1 text-text-muted" aria-hidden="true" />
-              <span className="min-w-0 break-words">{task.titulo}</span>
+              <button
+                type="button"
+                aria-label={`${task.status === "CONCLUIDA" ? "Concluída" : "Concluir"}: ${task.titulo}`}
+                disabled={task.status === "CONCLUIDA" || completingId === task.id || !task.permissions?.can_complete}
+                onClick={() => onComplete(task)}
+                className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-control text-text-muted hover:bg-peripheral disabled:cursor-default"
+              >
+                {task.status === "CONCLUIDA" ? <Check size={17} aria-hidden="true" /> : <Circle size={17} aria-hidden="true" />}
+              </button>
+              <span className={`min-w-0 break-words ${task.status === "CONCLUIDA" ? "text-text-muted line-through" : ""}`}>{task.titulo}</span>
             </li>
           ))}
         </ul>
@@ -132,8 +153,34 @@ export default function HomePage({ onUnauthorized, token, user }) {
   const enabledModules = getEnabledModules(user)
   const tasksEnabled = enabledModules.some((module) => module.key === "tasks")
   const objectivesEnabled = enabledModules.some((module) => module.key === "objectives")
+  const cached = useSyncExternalStore(subscribeOverview, () => getOverview(token), () => emptyOverview)
   const [tasksPreview, setTasksPreview] = useState(emptyPreview)
   const [objectivesPreview, setObjectivesPreview] = useState(emptyPreview)
+  const [completingId, setCompletingId] = useState(null)
+  const [completeError, setCompleteError] = useState("")
+  const mutationVersion = useRef(0)
+  const todayKey = formatDateForApi(operationalDateFor(user?.timezone))
+  const knownDaily = cached.dailyDate === todayKey ? cached.daily : (cached.all ? dailyFromBoard(cached.all, user?.timezone) : null)
+  const taskView = knownDaily ? { error: "", items: selectHomeTasks(knownDaily), loading: false } : tasksPreview
+  const objectiveView = cached.objectives ? { error: "", items: selectHomeObjectives(cached.objectives), loading: false } : objectivesPreview
+
+  async function completeTask(task) {
+    if (!task.permissions?.can_complete || completingId) return
+    setCompletingId(task.id)
+    setCompleteError("")
+    mutationVersion.current += 1
+    const previous = task
+    updateCachedTask(token, { ...task, status: "CONCLUIDA", status_code: "CONCLUIDA", status_label: "Concluída", completed_at: new Date().toISOString(), permissions: { ...task.permissions, can_complete: false } })
+    const result = await api.completeTask(token, task.id)
+    setCompletingId(null)
+    if (onUnauthorized?.(result)) return
+    if (!result.ok) {
+      updateCachedTask(token, previous)
+      setCompleteError(getErrorMessage(result, "Não foi possível concluir a tarefa."))
+      return
+    }
+    updateCachedTask(token, result.data)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -146,25 +193,15 @@ export default function HomePage({ onUnauthorized, token, user }) {
     }
 
     async function loadTasks() {
-      setTasksPreview({ error: "", items: [], loading: true })
-      const materialization = await api.materializeTaskRecurrences(token)
-      if (cancelled || onUnauthorized?.(materialization)) {
-        return
-      }
-
-      if (!materialization.ok) {
-        setTasksPreview({
-          error: getErrorMessage(materialization, "Não foi possível preparar as tarefas de hoje."),
-          items: [],
-          loading: false,
-        })
-        return
-      }
+      const startedAtVersion = mutationVersion.current
+      const known = getOverview(token)
+      if (!(known.daily && known.dailyDate === todayKey) && !known.all) setTasksPreview({ error: "", items: [], loading: true })
 
       const result = await api.listDailyTasks(token)
       if (cancelled || onUnauthorized?.(result)) {
         return
       }
+      if (startedAtVersion !== mutationVersion.current) return
 
       if (!result.ok) {
         setTasksPreview({
@@ -175,6 +212,7 @@ export default function HomePage({ onUnauthorized, token, user }) {
         return
       }
 
+      updateOverview(token, { daily: result.data, dailyDate: todayKey })
       setTasksPreview({ error: "", items: selectHomeTasks(result.data), loading: false })
     }
 
@@ -182,7 +220,7 @@ export default function HomePage({ onUnauthorized, token, user }) {
     return () => {
       cancelled = true
     }
-  }, [onUnauthorized, tasksEnabled, token])
+  }, [onUnauthorized, tasksEnabled, token, todayKey])
 
   useEffect(() => {
     let cancelled = false
@@ -195,7 +233,7 @@ export default function HomePage({ onUnauthorized, token, user }) {
     }
 
     async function loadObjectives() {
-      setObjectivesPreview({ error: "", items: [], loading: true })
+      if (!getOverview(token).objectives) setObjectivesPreview({ error: "", items: [], loading: true })
       const result = await api.listObjetivos(token)
       if (cancelled || onUnauthorized?.(result)) {
         return
@@ -211,6 +249,7 @@ export default function HomePage({ onUnauthorized, token, user }) {
       }
 
       const objetivos = Array.isArray(result.data) ? result.data : []
+      updateOverview(token, { objectives: objetivos })
       setObjectivesPreview({ error: "", items: selectHomeObjectives(objetivos), loading: false })
     }
 
@@ -242,8 +281,8 @@ export default function HomePage({ onUnauthorized, token, user }) {
         <div
           className={`grid items-start gap-5 ${tasksEnabled && objectivesEnabled ? "xl:grid-cols-[1fr_1.1fr]" : "max-w-2xl"}`}
         >
-          {tasksEnabled && <TasksCompartment preview={tasksPreview} />}
-          {objectivesEnabled && <ObjectivesCompartment preview={objectivesPreview} />}
+          {tasksEnabled && <div className="grid gap-2"><StatusNotice status={completeError || (knownDaily && tasksPreview.error) ? { type: "error", message: completeError || tasksPreview.error } : null} /><TasksCompartment preview={taskView} onComplete={completeTask} completingId={completingId} /></div>}
+          {objectivesEnabled && <div className="grid gap-2"><StatusNotice status={cached.objectives && objectivesPreview.error ? { type: "error", message: objectivesPreview.error } : null} /><ObjectivesCompartment preview={objectiveView} /></div>}
         </div>
       )}
     </section>

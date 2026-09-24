@@ -55,7 +55,7 @@ test('tarefas preservam conclusão e administração sem ação manual de falha'
  assert.equal(focus.container.querySelector('button').textContent,'Concluir');await focus.close()
 })
 
-test('objetivo apresenta estado como informação e administra os quatro estados no menu',async()=>{
+test('objetivo permite pausar no menu e concluir pela ação principal',async()=>{
  let status='',created=0
  const props={objetivo:{id:1,titulo:'Direção',status:'ativo'},tasks:[],tasksEnabled:true,loading:false,tasksLoading:false,tasksError:'',onCreateTask:()=>created++,onUpdateStatus:value=>status=value,onEdit:()=>{},onDelete:()=>{}}
  const view=await mount(ObjetivoCard,props)
@@ -63,8 +63,15 @@ test('objetivo apresenta estado como informação e administra os quatro estados
  assert.match(view.container.textContent,/Ativo/);assert.doesNotMatch(view.container.textContent,/Nenhuma tarefa vinculada/)
  await click([...view.container.querySelectorAll('button')].find(b=>b.textContent.includes('Adicionar tarefa')));assert.equal(created,1)
  await click(view.container.querySelector('[aria-haspopup=menu]'))
- for(const name of ['Pausado','Concluído','Abandonado']) assert.match(document.querySelector('[role=menu]').textContent,new RegExp(name))
- await click([...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent==='Status: Pausado'));assert.equal(status,'pausado');await view.close()
+ assert.match(document.querySelector('[role=menu]').textContent,/Pausar objetivo/)
+ assert.doesNotMatch(document.querySelector('[role=menu]').textContent,/Abandonado|Concluído/)
+ await click([...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent==='Pausar objetivo'));assert.equal(status,'pausado')
+ await click([...view.container.querySelectorAll('button')].find(b=>b.textContent.includes('Concluir objetivo')));assert.equal(status,'concluido');await view.close()
+ const paused=await mount(ObjetivoCard,{...props,objetivo:{...props.objetivo,status:'pausado'}})
+ await click(paused.container.querySelector('[aria-haspopup=menu]'))
+ assert.match(document.querySelector('[role=menu]').textContent,/Retomar objetivo/)
+ await click([...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent==='Retomar objetivo'));assert.equal(status,'ativo')
+ await paused.close()
  const standalone=await mount(ObjetivoCard,{...props,tasksEnabled:false})
  assert.doesNotMatch(standalone.container.textContent,/Adicionar tarefa|Carregando tarefas/);await standalone.close()
 })

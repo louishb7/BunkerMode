@@ -14,7 +14,7 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
   const react = {
     useState(initial) {
       const slot = index++
-      if (!(slot in values)) values[slot] = initial
+      if (!(slot in values)) values[slot] = typeof initial === "function" ? initial() : initial
       return [values[slot], (value) => { values[slot] = value }]
     },
     useRef(initial) {
@@ -40,6 +40,7 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
       if (path.endsWith("httpClient")) return {
         getErrorMessage: (result, fallback) => result.data?.message || fallback,
       }
+      if (path.endsWith("overviewCache")) return { getOverview: () => ({ all: null, objectives: null }), updateOverview: () => {} }
       throw new Error(path)
     },
   })
@@ -55,25 +56,22 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
   return render
 }
 
-test("desativar integração invalida preparação e criação ainda pendentes", async () => {
-  let prepare
+test("desativar integração invalida leitura e criação ainda pendentes", async () => {
+  let finishRead
   let create
   let reads = 0
-  let preparations = 0
   const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-    materializeTaskRecurrences: () => { preparations++; return new Promise((resolve) => { prepare = resolve }) },
-    listTasks: async () => { reads++; return { ok: true, data: [] } },
+    listTasks: () => { reads++; return new Promise((resolve) => { finishRead = resolve }) },
     createTask: () => new Promise((resolve) => { create = resolve }),
   })
   render.activate({ enabled: true })
   const creation = render().createTask({ titulo: "Tarefa vinculada" })
   render.activate({ enabled: false })
-  prepare({ ok: true })
+  finishRead({ ok: true, data: [] })
   create({ ok: true })
   assert.equal(await creation, false)
   await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(preparations, 1)
-  assert.equal(reads, 0)
+  assert.equal(reads, 1)
   assert.equal(render({ enabled: false }).loading, false)
 })
 
@@ -200,37 +198,36 @@ test("resposta stale não aciona o tratamento global de sessão", async () => {
   assert.equal(unauthorizedCalls, 0)
 })
 
-test("integração materializa antes de listar e interrompe a leitura em 503/401", async () => {
-  for (const status of [204, 503, 401]) {
+test("integração lê sem materializar e preserva 401 global", async () => {
+  for (const status of [200, 503, 401]) {
     const calls = []
     let unauthorized = 0
     const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-      materializeTaskRecurrences: async () => { calls.push("POST"); return { ok: status === 204, status, data: { message: "Preparação indisponível" } } },
-      listTasks: async () => { calls.push("GET"); return { ok: true, data: [] } },
+      materializeTaskRecurrences: () => { throw new Error("Leitura não materializa") },
+      listTasks: async () => { calls.push("GET"); return { ok: status === 200, status, data: status === 200 ? [] : { message: "Leitura indisponível" } } },
     }, (result) => { if (result.status === 401) unauthorized++; return result.status === 401 })
-    assert.equal(await render().refresh(), status === 204)
-    assert.deepEqual(calls, status === 204 ? ["POST", "GET"] : ["POST"])
+    assert.equal(await render().refresh(), status === 200)
+    assert.deepEqual(calls, ["GET"])
     assert.equal(unauthorized, status === 401 ? 1 : 0)
-    assert.equal(render().error, status === 503 ? "Preparação indisponível" : "")
+    assert.equal(render().error, status === 503 ? "Leitura indisponível" : "")
   }
 })
 
-test("materialização stale não dispara GET nem aplica erro ou 401", async () => {
-  for (const status of [204, 503, 401]) {
+test("leitura stale não aplica erro ou 401", async () => {
+  for (const status of [200, 503, 401]) {
     const pending = []
     let reads = 0
     let unauthorized = 0
     const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-      materializeTaskRecurrences: () => new Promise((resolve) => pending.push(resolve)),
-      listTasks: async () => { reads++; return { ok: true, data: [{ id: 2, objetivo_id: 1 }] } },
+      listTasks: () => { reads++; return new Promise((resolve) => pending.push(resolve)) },
     }, (result) => { if (result.status === 401) unauthorized++; return result.status === 401 })
     const old = render().refresh()
     const latest = render().refresh()
-    pending[1]({ ok: true, status: 204 })
+    pending[1]({ ok: true, status: 200, data: [{ id: 2, objetivo_id: 1 }] })
     await latest
-    pending[0]({ ok: status === 204, status })
+    pending[0]({ ok: status === 200, status, data: status === 200 ? [] : { message: "Antigo" } })
     assert.equal(await old, false)
-    assert.equal(reads, 1)
+    assert.equal(reads, 2)
     assert.equal(unauthorized, 0)
     assert.equal(render().tasksByObjetivo[1][0].id, 2)
     assert.equal(render().error, "")

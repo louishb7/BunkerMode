@@ -129,9 +129,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
               objectiveTasks.setFormStatus(emptyStatus)
             }}
             onCreate={createTask}
-            onUnauthorized={onUnauthorized}
             status={objectiveTasks.formStatus}
-            token={token}
             timezone={user?.timezone}
           />
         </Dialog>

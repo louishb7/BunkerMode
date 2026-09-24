@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from "react"
 
-import { getErrorMessage } from "../../../api/httpClient"
 import Button from "../../../components/ui/Button"
 import StatusNotice from "../../../components/ui/StatusNotice"
-import { api } from "../../../services/bunkermodeApi"
-import { getEnabledModules } from "../../../modules/moduleCatalog"
 import { formatDateForApi } from "../../../utils/date"
 import { operationalDateFor } from "../../calendar/calendarUtils"
 
@@ -14,7 +11,6 @@ const BUSINESS_WEEKDAYS = [0, 1, 2, 3, 4]
 const emptyForm = {
   titulo: "",
   instrucao: "",
-  objetivo_id: "",
   prazo: "",
   repeat_type: "nao",
   recurrence_weekdays: [],
@@ -131,10 +127,9 @@ function repeatTypeFor(weekdays, prazo) {
   return "personalizado"
 }
 
-function formForNewTask(initialObjetivoId, initialPrazo, timezone) {
+function formForNewTask(initialPrazo, timezone) {
   return {
     ...emptyForm,
-    objetivo_id: initialObjetivoId ? String(initialObjetivoId) : "",
     prazo: defaultPrazo(initialPrazo, timezone),
   }
 }
@@ -147,7 +142,6 @@ function formForExistingTask(task, initialPrazo) {
     ...emptyForm,
     titulo: task.titulo || "",
     instrucao: task.instrucao || "",
-    objetivo_id: task.objetivo_id ? String(task.objetivo_id) : "",
     prazo,
     repeat_type: repeatTypeFor(recurrenceWeekdays, prazo),
     recurrence_weekdays: recurrenceWeekdays,
@@ -179,84 +173,32 @@ export default function TaskForm({
   loading,
   onCancel,
   onCreate,
-  onUnauthorized = undefined,
   onUpdate = undefined,
   status,
-  token = null,
   timezone = undefined,
 }) {
-  const objectivesEnabled = getEnabledModules(currentUser).some(
-    (module) => module.key === "objectives"
-  )
-  const [form, setForm] = useState(() => formForNewTask(initialObjetivoId, initialPrazo, timezone))
-  const [objetivos, setObjetivos] = useState([])
-  const [objetivoStatus, setObjetivoStatus] = useState("")
+  const [form, setForm] = useState(() => formForNewTask(initialPrazo, timezone))
   const [recurrenceError, setRecurrenceError] = useState("")
 
   const isEditing = Boolean(editingTask)
   const isSeriesOccurrence = Boolean(editingTask?.recurrence?.series_id)
   const isRecurring = form.repeat_type !== "nao"
-  const lockedInitialPrazo = Boolean(initialPrazo && !isEditing)
   const prazoContext = formatPrazoContext(isEditing ? form.prazo : initialPrazo)
 
   useEffect(() => {
     if (!editingTask) {
-      setForm(formForNewTask(initialObjetivoId, initialPrazo, timezone))
+      setForm(formForNewTask(initialPrazo, timezone))
       return
     }
 
     setForm(formForExistingTask(editingTask, initialPrazo))
-  }, [editingTask, initialObjetivoId, initialPrazo, timezone])
-
-  useEffect(() => {
-    let active = true
-    async function loadObjetivos() {
-      if (!token || !objectivesEnabled) {
-        return
-      }
-
-      const result = await api.listObjetivos(token)
-      if (!active) return
-      if (onUnauthorized?.(result)) {
-        return
-      }
-
-      if (!result.ok) {
-        setObjetivoStatus(getErrorMessage(result, "Não foi possível carregar objetivos."))
-        return
-      }
-
-      setObjetivos(
-        (Array.isArray(result.data) ? result.data : []).filter(
-          (objetivo) => objetivo.status === "ativo"
-        )
-      )
-      setObjetivoStatus("")
-    }
-
-    loadObjetivos()
-    return () => {
-      active = false
-    }
-  }, [onUnauthorized, token, objectivesEnabled])
+  }, [editingTask, initialPrazo, timezone])
 
   function updateField(event) {
     const { name, value } = event.target
     setForm((current) => ({
       ...current,
       [name]: name === "instrucao" ? value.slice(0, TASK_INSTRUCTION_MAX_LENGTH) : value,
-    }))
-  }
-
-  function handleObjetivoChange(event) {
-    const objetivoId = event.target.value
-    setForm((current) => ({
-      ...current,
-      objetivo_id: objetivoId,
-      termination_policy:
-        !objetivoId && current.termination_policy === "ate_objetivo"
-          ? "sem_termino"
-          : current.termination_policy,
     }))
   }
 
@@ -329,10 +271,7 @@ export default function TaskForm({
       instrucao: form.instrucao.trim(),
     }
 
-    const objetivoId = form.objetivo_id ? Number(form.objetivo_id) : null
-    if (objectivesEnabled && (!isEditing || objetivoId !== (editingTask?.objetivo_id ?? null))) {
-      payload.objetivo_id = objetivoId
-    }
+    if (!isEditing) payload.objetivo_id = lockObjetivo && initialObjetivoId ? Number(initialObjetivoId) : null
 
     if (!isSeriesOccurrence) {
       payload.prazo = form.prazo ? form.prazo.trim() : null
@@ -343,7 +282,7 @@ export default function TaskForm({
     if (!isEditing) {
       Object.assign(payload, {
         recurrence_weekdays: isRecurring ? recurrenceWeekdays : [],
-        duration_type: isRecurring ? form.termination_policy : "pontual",
+        duration_type: isRecurring ? (form.termination_policy === "ate_objetivo" ? "sem_termino" : form.termination_policy) : "pontual",
         recurrence_end_date:
           isRecurring && form.termination_policy === "ate_data" ? form.recurrence_end_date : null,
       })
@@ -370,57 +309,13 @@ export default function TaskForm({
         />
       </label>
 
-      <label className={labelClass}>
-        Instrução opcional
-        <textarea
-          className={`${fieldClass} min-h-28 resize-y`}
-          maxLength={TASK_INSTRUCTION_MAX_LENGTH}
-          name="instrucao"
-          onChange={updateField}
-          placeholder="Detalhe apenas se a tarefa precisar de contexto"
-          rows={5}
-          value={form.instrucao}
-        />
-        <span className="text-right text-xs text-text-secondary">
-          {form.instrucao.length}/{TASK_INSTRUCTION_MAX_LENGTH}
-        </span>
-      </label>
-
-      {objectivesEnabled &&
-        (lockObjetivo ? (
+      {lockObjetivo && !isEditing && (
           <div className="border-l-2 border-border-strong bg-surface-subtle px-3 py-2">
             <p className="m-0 text-sm font-medium text-text-primary">Objetivo vinculado</p>
             <p className="mt-1 mb-0 text-sm text-text-secondary">
               {initialObjetivoTitulo || "Objetivo selecionado"}
             </p>
           </div>
-        ) : (
-          <label className={labelClass}>
-            Objetivo opcional
-            <select
-              className={fieldClass}
-              name="objetivo_id"
-              onChange={handleObjetivoChange}
-              value={form.objetivo_id}
-            >
-              <option value="">Sem objetivo vinculado</option>
-              {objetivos.map((objetivo) => (
-                <option key={objetivo.id} value={objetivo.id}>
-                  {objetivo.titulo}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
-      {objectivesEnabled && objetivoStatus && (
-        <StatusNotice status={{ type: "error", message: objetivoStatus }} />
-      )}
-
-      {lockedInitialPrazo && (
-        <div className="border-l-2 border-border-strong bg-surface-subtle px-3 py-2">
-          <p className="m-0 text-sm font-medium text-text-primary">Data definida</p>
-          <p className="mt-1 mb-0 text-sm text-text-secondary">{prazoContext}</p>
-        </div>
       )}
 
       {isSeriesOccurrence && (
@@ -433,7 +328,7 @@ export default function TaskForm({
         </div>
       )}
 
-      {!lockedInitialPrazo && !isSeriesOccurrence && (
+      {!isSeriesOccurrence && (
         <label className={labelClass}>
           Data de execução
           <input
@@ -446,28 +341,16 @@ export default function TaskForm({
         </label>
       )}
 
-      <section
-        className="grid gap-4 border-y border-border py-4"
-        aria-labelledby="recorrencia-title"
-      >
-        <div>
-          <h3
-            id="recorrencia-title"
-            className="m-0 text-base font-semibold normal-case text-text-primary"
-          >
-            Recorrência
-          </h3>
-          {isEditing && !isSeriesOccurrence && (
-            <p className="mt-1 mb-0 text-sm text-text-secondary">
-              A recorrência é definida ao criar uma nova tarefa.
-            </p>
-          )}
-          {isSeriesOccurrence && (
-            <p className="mt-1 mb-0 text-sm text-text-secondary">
-              As alterações serão aplicadas somente a esta tarefa; a série não será modificada.
-            </p>
-          )}
-        </div>
+      <details className="text-sm text-text-primary">
+        <summary className="cursor-pointer font-medium">Detalhes opcionais</summary>
+        <label className={`${labelClass} mt-3`}>
+          Instrução
+          <textarea className={`${fieldClass} min-h-24 resize-y`} maxLength={TASK_INSTRUCTION_MAX_LENGTH} name="instrucao" onChange={updateField} rows={3} value={form.instrucao} />
+          <span className="text-right text-xs text-text-secondary">{form.instrucao.length}/{TASK_INSTRUCTION_MAX_LENGTH}</span>
+        </label>
+      </details>
+
+      <div className="grid gap-4">
         <label className={labelClass}>
           Repetir
           <select
@@ -477,7 +360,7 @@ export default function TaskForm({
             onChange={handleRepeatChange}
             value={form.repeat_type}
           >
-            <option value="nao">Não</option>
+            <option value="nao">Não repetir</option>
             <option value="todos_dias">Todos os dias</option>
             <option value="dias_uteis">Dias úteis</option>
             <option value="semanal">Semanalmente</option>
@@ -486,12 +369,8 @@ export default function TaskForm({
         </label>
 
         {isRecurring && !isEditing && (
-          <details className="grid gap-4" open>
-            <summary className="cursor-pointer text-sm font-medium text-text-primary">
-              Detalhes da recorrência
-            </summary>
-            <div className="grid gap-4">
-              <fieldset className="m-0 border-0 p-0">
+          <div className="grid gap-4">
+              {form.repeat_type === "personalizado" && <fieldset className="m-0 border-0 p-0">
                 <legend className="mb-2 text-sm font-medium text-text-primary">
                   Dias da semana
                 </legend>
@@ -511,7 +390,7 @@ export default function TaskForm({
                     </label>
                   ))}
                 </div>
-              </fieldset>
+              </fieldset>}
 
               <label className={labelClass}>
                 Término
@@ -521,13 +400,8 @@ export default function TaskForm({
                   onChange={updateField}
                   value={form.termination_policy}
                 >
-                  <option value="sem_termino">Sem término</option>
+                  <option value="sem_termino">Sem data final</option>
                   <option value="ate_data">Até uma data</option>
-                  {objectivesEnabled && (
-                    <option disabled={!form.objetivo_id} value="ate_objetivo">
-                      Até o objetivo
-                    </option>
-                  )}
                 </select>
               </label>
 
@@ -544,10 +418,9 @@ export default function TaskForm({
                   />
                 </label>
               )}
-            </div>
-          </details>
+          </div>
         )}
-      </section>
+      </div>
       {recurrenceError && <StatusNotice status={{ type: "error", message: recurrenceError }} />}
 
       <StatusNotice status={status} />

@@ -66,6 +66,7 @@ function authHarness(api, stored = {}) {
         if (path === "react") return react
         if (path.endsWith("authValidation")) return validationExports
         if (path.endsWith("bunkermodeApi")) return { api }
+        if (path.endsWith("overviewCache")) return { clearOverview: () => {} }
         if (path.endsWith("/session")) {
           return { TOKEN_KEY: "bunkermode_token", USER_KEY: "bunkermode_usuario" }
         }

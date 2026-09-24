@@ -402,7 +402,19 @@ export class TasksService {
 
   async listDailyOperational(user: UserRecord): Promise<TaskRecord[]> {
     const today = this.today(user);
-    const tasks = await this.listAllForUser(user);
+    const day = startOfIsoDate(today);
+    // A janela de três dias cobre qualquer fuso operacional; o filtro abaixo
+    // mantém a mesma regra exata para o dia local do usuário.
+    const tasks = await this.prisma.missoes.findMany({
+      where: {
+        responsavel_id: user.usuario_id,
+        OR: [
+          { prazo: day },
+          { completed_at: { gte: addDays(day, -1), lt: addDays(day, 2) } },
+        ],
+      },
+      include: { serie_recorrencia: true },
+    });
     return this.sortForBoard(
       tasks.filter((task) =>
         this.belongsToOperationalDate(task, today, user.timezone),
@@ -648,17 +660,25 @@ export class TasksService {
       return;
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const series of seriesList) {
+    const existing = await this.prisma.missoes.findMany({
+      where: {
+        recurrence_series_id: {
+          in: seriesList.map((series) => series.recurrence_series_id),
+        },
+        prazo: { gte: today, lte: windowEnd },
+      },
+      select: { recurrence_series_id: true, prazo: true },
+    });
+    const existingDates = new Set(
+      existing.map((task) => `${task.recurrence_series_id}:${isoDateFromDate(task.prazo)}`),
+    );
+
+    const missingBySeries: Array<{ series: series_recorrencia; dates: Date[] }> = [];
+    const inactiveIds: number[] = [];
+    for (const series of seriesList) {
         if (series.termination_policy === "ate_objetivo") {
           if (series.objetivo_id === null || series.objetivos === null) {
-            await tx.series_recorrencia.updateMany({
-              where: {
-                recurrence_series_id: series.recurrence_series_id,
-                ativo: true,
-              },
-              data: { ativo: false },
-            });
+            inactiveIds.push(series.recurrence_series_id);
             continue;
           }
           if (series.objetivos.status !== GOAL_STATUS.active) {
@@ -682,6 +702,21 @@ export class TasksService {
           limit,
           series.recurrence_weekdays,
         );
+        const missing = dates.filter(
+          (date) => !existingDates.has(`${series.recurrence_series_id}:${isoDateFromDate(date)}`),
+        );
+        if (missing.length > 0) missingBySeries.push({ series, dates: missing });
+    }
+    if (missingBySeries.length === 0 && inactiveIds.length === 0) return;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (inactiveIds.length > 0) {
+        await tx.series_recorrencia.updateMany({
+          where: { recurrence_series_id: { in: inactiveIds }, ativo: true },
+          data: { ativo: false },
+        });
+      }
+      for (const { series, dates } of missingBySeries) {
         await this.createSeriesOccurrences(tx, series, dates, user.usuario_id);
       }
     });

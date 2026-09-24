@@ -21,7 +21,7 @@ import StartFocusDialog from "../components/StartFocusDialog"
 import TasksPanel from "../components/TasksPanel"
 import WeekPanel from "../components/WeekPanel"
 
-export default function TasksPage({ board, onStartFocus, onUnauthorized, token, user }) {
+export default function TasksPage({ board, onStartFocus, user }) {
   const [selectedDate, setSelectedDate] = useState(() => operationalDateFor(user?.timezone))
   const [formOpen, setFormOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
@@ -122,7 +122,7 @@ export default function TasksPage({ board, onStartFocus, onUnauthorized, token, 
 
           <TasksPanel
             completeLoadingId={board.completeLoadingId}
-            loading={board.taskLoading}
+            loading={board.taskLoading && !board.hasBoardSnapshot}
             onCompleteTask={board.completeTask}
             onCreateTask={openCreateForm}
             onDeleteTask={setDeleteTarget}
@@ -154,7 +154,6 @@ export default function TasksPage({ board, onStartFocus, onUnauthorized, token, 
             editingTask={editingTask}
             initialPrazo={editingTask ? undefined : selectedDateApi}
             loading={board.formLoading}
-            onUnauthorized={onUnauthorized}
             onCancel={() => {
               setFormOpen(false)
               setEditingTask(null)
@@ -163,7 +162,6 @@ export default function TasksPage({ board, onStartFocus, onUnauthorized, token, 
             onCreate={createTask}
             onUpdate={updateTask}
             status={board.formStatus}
-            token={token}
             timezone={user?.timezone}
           />
         </Dialog>

@@ -40,6 +40,16 @@ function formHarness(api) {
   }
 }
 
+function findField(tree, name) {
+  if (!tree || typeof tree !== "object") return null
+  if (tree.props?.name === name) return tree
+  for (const child of tree.props?.children ?? []) {
+    const found = Array.isArray(child) ? child.map((item) => findField(item, name)).find(Boolean) : findField(child, name)
+    if (found) return found
+  }
+  return null
+}
+
 test("formulário sem Objetivos não consulta a API nem altera vínculo existente", async () => {
   const render = formHarness({ listObjetivos: () => { throw new Error("Consulta indevida") } })
   let payload
@@ -56,15 +66,42 @@ test("formulário sem Objetivos não consulta a API nem altera vínculo existent
   assert.equal(props.editingTask.objetivo_id, 7)
 })
 
-test("ambos habilitados mantêm consulta e criação vinculada", async () => {
+test("criação dentro do objetivo vincula implicitamente sem consulta extra", async () => {
   let reads = 0
   let payload
   const render = formHarness({ listObjetivos: async () => { reads++; return { ok: true, data: [] } } })
-  const props = { currentUser: { enabled_modules: ["tasks", "objectives"] }, initialObjetivoId: 7, onCreate: (data) => { payload = data } }
+  const props = { currentUser: { enabled_modules: ["tasks", "objectives"] }, initialObjetivoId: 7, lockObjetivo: true, onCreate: (data) => { payload = data } }
   render(props).effects()
   const { tree } = render(props)
   tree.props.onSubmit({ preventDefault() {} })
-  assert.equal(reads, 1)
+  assert.equal(reads, 0)
   assert.equal(payload.objetivo_id, 7)
-  assert.equal(JSON.stringify(tree).includes("Objetivo opcional"), true)
+  assert.equal(JSON.stringify(tree).includes("Objetivo opcional"), false)
+})
+
+test("criação geral mantém tarefa independente mesmo com Objetivos ativo", () => {
+  let payload
+  const render = formHarness({ listObjetivos: () => { throw new Error("Consulta indevida") } })
+  const props = { currentUser: { enabled_modules: ["tasks", "objectives"] }, onCreate: (data) => { payload = data } }
+  render(props).effects()
+  const { tree } = render(props)
+  tree.props.onSubmit({ preventDefault() {} })
+  assert.equal(payload.objetivo_id, null)
+  assert.equal(payload.duration_type, "pontual")
+  assert.equal(JSON.stringify(tree).includes("Objetivo opcional"), false)
+})
+
+test("recorrência independente envia dias e término por data", () => {
+  let payload
+  const render = formHarness({ listObjetivos: () => { throw new Error("Consulta indevida") } })
+  const props = { currentUser: { enabled_modules: ["tasks", "objectives"] }, onCreate: (data) => { payload = data } }
+  render(props).effects()
+  findField(render(props).tree, "repeat_type").props.onChange({ target: { value: "todos_dias" } })
+  findField(render(props).tree, "termination_policy").props.onChange({ target: { name: "termination_policy", value: "ate_data" } })
+  findField(render(props).tree, "recurrence_end_date").props.onChange({ target: { value: "2026-09-30" } })
+  render(props).tree.props.onSubmit({ preventDefault() {} })
+  assert.equal(payload.objetivo_id, null)
+  assert.equal(payload.duration_type, "ate_data")
+  assert.equal(payload.recurrence_end_date, "30-09-2026")
+  assert.equal(JSON.stringify(payload.recurrence_weekdays), "[0,1,2,3,4,5,6]")
 })

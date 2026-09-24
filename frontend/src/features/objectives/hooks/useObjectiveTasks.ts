@@ -4,11 +4,12 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
+import { getOverview, updateOverview } from "../../../state/overviewCache"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
 export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [loading, setLoading] = useState(true)
+  const [tasks, setTasks] = useState<Task[]>(() => getOverview(token).all ?? [])
+  const [loading, setLoading] = useState(() => !getOverview(token).all)
   const [error, setError] = useState("")
   const [formLoading, setFormLoading] = useState(false)
   const [formStatus, setFormStatus] = useState(emptyStatus)
@@ -17,25 +18,8 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
   const refresh = useCallback(async () => {
     if (!token || !enabled) return false
     const currentRequest = ++requestId.current
-    setLoading(true)
+    setLoading(!getOverview(token).all)
     setError("")
-    const materialization = await api.materializeTaskRecurrences(token)
-    if (currentRequest !== requestId.current) return false
-    if (onUnauthorized?.(materialization)) {
-      setLoading(false)
-      return false
-    }
-    if (!materialization.ok) {
-      setLoading(false)
-      setTasks([])
-      setError(
-        getErrorMessage(
-          materialization,
-          "Não foi possível preparar tarefas recorrentes vinculadas."
-        )
-      )
-      return false
-    }
     const result = await api.listTasks(token)
     if (currentRequest !== requestId.current) return false
     if (onUnauthorized?.(result)) {
@@ -44,11 +28,11 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     }
     setLoading(false)
     if (!result.ok) {
-      setTasks([])
       setError(getErrorMessage(result, "Não foi possível carregar tarefas vinculadas."))
       return false
     }
     setTasks(result.data)
+    updateOverview(token, { all: result.data })
     return true
   }, [token, onUnauthorized, enabled])
 
@@ -66,16 +50,7 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     }
   }, [refresh, enabled])
 
-  const tasksByObjetivo = useMemo(() => {
-    const grouped: Record<string, Task[]> = {}
-    for (const task of tasks) {
-      if (task.objetivo_id == null) continue
-      const key = String(task.objetivo_id)
-      grouped[key] ??= []
-      grouped[key].push(task)
-    }
-    return grouped
-  }, [tasks])
+  const tasksByObjetivo = useMemo(() => groupObjectiveTasks(tasks), [tasks])
 
   async function createTask(payload) {
     if (!enabled || !token || formLoading) return false
@@ -97,7 +72,6 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
       })
       return false
     }
-    // Não permite nova submissão de uma tarefa já persistida se a releitura falhar.
     void refresh()
     return true
   }
@@ -112,4 +86,27 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     formStatus,
     setFormStatus,
   }
+}
+
+export function groupObjectiveTasks(tasks: Task[]): Record<string, Task[]> {
+  const grouped: Record<string, Task[]> = {}
+  const seriesPositions = new Map<string, number>()
+  for (const task of tasks) {
+    if (task.objetivo_id == null) continue
+    const key = String(task.objetivo_id)
+    grouped[key] ??= []
+    const seriesId = task.recurrence?.series_id
+    if (seriesId) {
+      const seriesKey = `${key}:${seriesId}`
+      const position = seriesPositions.get(seriesKey)
+      if (position !== undefined) {
+        const selected = grouped[key][position]
+        if (selected.status === "CONCLUIDA" && task.status !== "CONCLUIDA") grouped[key][position] = task
+        continue
+      }
+      seriesPositions.set(seriesKey, grouped[key].length)
+    }
+    grouped[key].push(task)
+  }
+  return grouped
 }

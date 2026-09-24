@@ -148,8 +148,6 @@ function TasksRoute() {
       <TasksPage
         board={board}
         onStartFocus={startFocus}
-        onUnauthorized={auth.handleUnauthorized}
-        token={auth.token}
         user={auth.user}
       />
     </AppShell>

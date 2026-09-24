@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
+import { getOverview, updateOverview } from "../../../state/overviewCache"
 
 function sortObjetivosByOrder(objetivos = []) {
   return [...objetivos].sort((left, right) => {
@@ -12,7 +13,7 @@ function sortObjetivosByOrder(objetivos = []) {
 }
 
 export function useObjectives({ onUnauthorized, token }) {
-  const [objetivos, setObjetivos] = useState([])
+  const [objetivos, setObjetivos] = useState(() => getOverview(token).objectives ?? [])
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
   const [status, setStatus] = useState(emptyStatus)
@@ -47,9 +48,9 @@ export function useObjectives({ onUnauthorized, token }) {
         return false
       }
 
-      setObjetivos(
-        sortObjetivosByOrder(Array.isArray(objetivosResult.data) ? objetivosResult.data : [])
-      )
+      const sorted = sortObjetivosByOrder(Array.isArray(objetivosResult.data) ? objetivosResult.data : [])
+      setObjetivos(sorted)
+      updateOverview(token, { objectives: sorted })
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
@@ -92,6 +93,12 @@ export function useObjectives({ onUnauthorized, token }) {
       return false
     }
 
+    if (result.data && typeof result.data === "object" && "id" in result.data) {
+      const current = getOverview(token).objectives
+      if (current) updateOverview(token, { objectives: current.map((item) => item.id === result.data.id ? result.data : item) })
+    } else {
+      updateOverview(token, { objectives: null })
+    }
     await loadObjectives(successMessage)
     return true
   }

@@ -221,11 +221,12 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
   ]) {
     assert.match(result.rendered, new RegExp(marker), JSON.stringify(result.calls))
   }
-  for (const marker of ["Tarefa concluída", "Objetivo concluído", "Objetivo abandonado"]) {
+  for (const marker of ["Objetivo concluído", "Objetivo abandonado"]) {
     assert.doesNotMatch(result.rendered, new RegExp(marker))
   }
+  assert.match(result.rendered, /Tarefa concluída/)
   assert.equal(result.rendered.match(/Não deve aparecer/g)?.length ?? 0, 0)
-  assert.equal(result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")), true)
+  assert.equal(result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")), false)
   assert.equal(result.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), true)
   assert.equal(result.calls.some((call) => call.endsWith("/objetivos")), true)
 })

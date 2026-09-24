@@ -73,6 +73,57 @@ function prismaMock() {
 describe("Tasks clean domain", () => {
   const calendar = new OperationalCalendarService();
 
+  it("limits daily query to the operational date and nearby completions", async () => {
+    const prisma = prismaMock();
+    const service = new TasksService(prisma as never, calendar);
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-09T12:00:00Z"));
+    try {
+      await service.listDailyOperational(user());
+      expect(prisma.missoes.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.missoes.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            responsavel_id: 7,
+            OR: [
+              { prazo: new Date("2026-09-09T00:00:00Z") },
+              { completed_at: { gte: new Date("2026-09-08T00:00:00Z"), lt: new Date("2026-09-11T00:00:00Z") } },
+            ],
+          }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("does not write when the recurrence window is already materialized", async () => {
+    const prisma = prismaMock();
+    const series = {
+      recurrence_series_id: 21,
+      responsavel_id: 7,
+      objetivo_id: null,
+      objetivos: null,
+      start_date: new Date("2026-09-09T00:00:00Z"),
+      end_date: null,
+      termination_policy: "sem_termino",
+      recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6],
+    };
+    prisma.series_recorrencia.findMany.mockResolvedValue([series]);
+    prisma.missoes.findMany.mockResolvedValue(Array.from({ length: 14 }, (_, offset) => ({
+      recurrence_series_id: 21,
+      prazo: new Date(Date.UTC(2026, 8, 9 + offset)),
+    })));
+    const service = new TasksService(prisma as never, calendar);
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-09T12:00:00Z"));
+    try {
+      await service.materializeRecurrences(user());
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.missoes.createManyAndReturn).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   describe.each(["completed_at"] as const)("operational day of %s", (field) => {
     it.each([
       ["America/Recife", "2026-09-08T15:00:00Z", "2026-09-08T16:00:00Z", true],

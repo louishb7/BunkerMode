@@ -59,14 +59,6 @@ function normalizeWeekdays(values: unknown): number[] {
   return [...new Set(values.filter(Number.isInteger))].sort((left, right) => left - right)
 }
 
-function weekdayForDate(value) {
-  const [year, month, day] = String(value).split("-").map(Number)
-  if (!year || !month || !day) {
-    return 0
-  }
-  return (new Date(year, month - 1, day).getDay() + 6) % 7
-}
-
 function defaultPrazo(initialPrazo, timezone) {
   return initialPrazo || formatDateForApi(operationalDateFor(timezone))
 }
@@ -110,7 +102,7 @@ function toApiDateValue(value) {
   return value.split("-")[0]?.length === 4 ? fromDateInputValue(value) : value
 }
 
-function repeatTypeFor(weekdays, prazo) {
+function repeatTypeFor(weekdays) {
   const normalized = normalizeWeekdays(weekdays)
   if (normalized.length === 0) {
     return "nao"
@@ -120,9 +112,6 @@ function repeatTypeFor(weekdays, prazo) {
   }
   if (normalized.join(",") === BUSINESS_WEEKDAYS.join(",")) {
     return "dias_uteis"
-  }
-  if (normalized.length === 1 && normalized[0] === weekdayForDate(toDateInputValue(prazo))) {
-    return "semanal"
   }
   return "personalizado"
 }
@@ -143,22 +132,19 @@ function formForExistingTask(task, initialPrazo) {
     titulo: task.titulo || "",
     instrucao: task.instrucao || "",
     prazo,
-    repeat_type: repeatTypeFor(recurrenceWeekdays, prazo),
+    repeat_type: repeatTypeFor(recurrenceWeekdays),
     recurrence_weekdays: recurrenceWeekdays,
     termination_policy: task.recurrence?.termination_policy || "sem_termino",
     recurrence_end_date: toApiDateValue(task.recurrence?.end_date || ""),
   }
 }
 
-function weekdaysForRepeatType(repeatType, prazo) {
+function weekdaysForRepeatType(repeatType) {
   if (repeatType === "todos_dias") {
     return WEEKDAYS
   }
   if (repeatType === "dias_uteis") {
     return BUSINESS_WEEKDAYS
-  }
-  if (repeatType === "semanal") {
-    return [weekdayForDate(toDateInputValue(prazo))]
   }
   return []
 }
@@ -211,7 +197,7 @@ export default function TaskForm({
       recurrence_weekdays:
         repeatType === "personalizado"
           ? current.recurrence_weekdays
-          : weekdaysForRepeatType(repeatType, current.prazo),
+          : weekdaysForRepeatType(repeatType),
     }))
   }
 
@@ -224,14 +210,7 @@ export default function TaskForm({
 
   function handlePrazoChange(event) {
     const prazo = fromDateInputValue(event.target.value)
-    setForm((current) => ({
-      ...current,
-      prazo,
-      recurrence_weekdays:
-        current.repeat_type === "semanal"
-          ? weekdaysForRepeatType("semanal", prazo)
-          : current.recurrence_weekdays,
-    }))
+    setForm((current) => ({ ...current, prazo }))
   }
 
   function toggleWeekday(weekday) {
@@ -363,7 +342,6 @@ export default function TaskForm({
             <option value="nao">Não repetir</option>
             <option value="todos_dias">Todos os dias</option>
             <option value="dias_uteis">Dias úteis</option>
-            <option value="semanal">Semanalmente</option>
             <option value="personalizado">Personalizado</option>
           </select>
         </label>

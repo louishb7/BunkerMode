@@ -89,6 +89,7 @@ test("criação geral mantém tarefa independente mesmo com Objetivos ativo", ()
   assert.equal(payload.objetivo_id, null)
   assert.equal(payload.duration_type, "pontual")
   assert.equal(JSON.stringify(tree).includes("Objetivo opcional"), false)
+  assert.equal(JSON.stringify(tree).includes("Semanalmente"), false)
 })
 
 test("recorrência independente envia dias e término por data", () => {

@@ -92,7 +92,7 @@ function TasksCompartment({ preview, onComplete, completingId }) {
                 aria-label={`${task.status === "CONCLUIDA" ? "Concluída" : "Concluir"}: ${task.titulo}`}
                 disabled={task.status === "CONCLUIDA" || completingId === task.id || !task.permissions?.can_complete}
                 onClick={() => onComplete(task)}
-                className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-control text-text-muted hover:bg-peripheral disabled:cursor-default"
+                className="mt-1 grid size-[17px] shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 text-text-muted focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default"
               >
                 {task.status === "CONCLUIDA" ? <Check size={17} aria-hidden="true" /> : <Circle size={17} aria-hidden="true" />}
               </button>

@@ -17,7 +17,6 @@ import {
   operationalDateFor,
   startOfDay,
 } from "../../calendar/calendarUtils"
-import StartFocusDialog from "../components/StartFocusDialog"
 import TasksPanel from "../components/TasksPanel"
 import WeekPanel from "../components/WeekPanel"
 
@@ -25,9 +24,7 @@ export default function TasksPage({ board, onStartFocus, user }) {
   const [selectedDate, setSelectedDate] = useState(() => operationalDateFor(user?.timezone))
   const [formOpen, setFormOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
-  const [showFocusConfirm, setShowFocusConfirm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
-  const [modeLoading, setModeLoading] = useState(false)
 
   const weekDays = useMemo(() => getWeekDays(selectedDate), [selectedDate])
   const weekLabel = formatWeekLabel(weekDays)
@@ -36,10 +33,6 @@ export default function TasksPage({ board, onStartFocus, user }) {
   const selectedTasks = useMemo(
     () => board.dailyTasks.filter((task) => taskBelongsToDate(task, selectedDate, user?.timezone)),
     [board.dailyTasks, selectedDate, user?.timezone]
-  )
-  const todayTasks = useMemo(
-    () => board.dailyTasks.filter((task) => taskBelongsToDate(task, todayDate, user?.timezone)),
-    [board.dailyTasks, todayDate, user?.timezone]
   )
   function openCreateForm() {
     setEditingTask(null)
@@ -77,26 +70,14 @@ export default function TasksPage({ board, onStartFocus, user }) {
     }
   }
 
-  async function confirmStartFocus() {
-    setModeLoading(true)
-    const started = await onStartFocus()
-    setModeLoading(false)
-    if (started) {
-      setShowFocusConfirm(false)
-      setFormOpen(false)
-      setEditingTask(null)
-    }
-  }
-
   return (
     <>
       <section className="mx-auto grid max-w-[900px] gap-5">
         <PageHeader
           actions={
             <Button
-              loading={modeLoading}
               variant="secondary"
-              onClick={() => setShowFocusConfirm(true)}
+              onClick={onStartFocus}
             >
               <Focus size={18} aria-hidden="true" />
               Foco
@@ -165,16 +146,6 @@ export default function TasksPage({ board, onStartFocus, user }) {
             timezone={user?.timezone}
           />
         </Dialog>
-      )}
-
-      {showFocusConfirm && (
-        <StartFocusDialog
-          loading={modeLoading}
-          onCancel={() => setShowFocusConfirm(false)}
-          onConfirm={confirmStartFocus}
-          todayTasks={todayTasks}
-          timezone={user?.timezone}
-        />
       )}
 
       {deleteTarget !== null && (

@@ -183,7 +183,9 @@ function FocusRoute() {
   return (
     <ExecutionLayout onReturnToTasks={returnToTasks}>
       <FocusPage
-        actionTasks={board.actionTasks}
+        key={auth.user.id}
+        userId={auth.user.id}
+        onExit={returnToTasks}
         board={board}
         dailyTasks={board.dailyTasks}
         timezone={auth.user?.timezone}

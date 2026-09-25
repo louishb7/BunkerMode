@@ -41,7 +41,7 @@ test('sinais são fatos limitados a dois; datas, ausência e última ocorrência
   assert.equal(trackerOccurrenceLabel({ ...tracker, ocorrencias: [{ occurred_at: '2026-09-10T12:00:00Z' }, ...tracker.ocorrencias] }, timezone, now), signals[0].detail)
   assert.deepEqual(summarizeObjective({ objetivo, tasks: [{ ...task, status_code: 'NAO_REALIZADA' }] }), [])
   assert.equal(summarizeObjective({ objetivo: { ...objetivo, data_alvo: '2026-09-30' } })[0].detail, '30/09/2026')
-  assert.deepEqual(selectHomeObjectives([objetivo, { ...objetivo, id: 5, status: 'pausado' }]).map(o => o.id), [4])
+  assert.deepEqual(selectHomeObjectives([objetivo, { ...objetivo, id: 5, status: 'pausado' }]).map(o => o.id), [4, 5])
 })
 
 test('resumo tem fallback curto, detalhes locais e distingue erro, vazio real e carregamento', async () => {
@@ -74,8 +74,10 @@ test('Home e Objetivos exibem os mesmos sinais usando ocorrências já entregues
       const select = view => view.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').textContent
       assert.equal(select(home), select(page))
       assert.match(select(home), /Não fumarÚltima ocorrência/)
-      assert.doesNotMatch(home.container.textContent, /Objetivo pausado/)
-      assert.match(page.container.textContent, /Objetivo pausadoPausado/)
+      assert.match(home.container.textContent, /PausadoObjetivo pausado/)
+      assert.doesNotMatch(home.container.textContent, /Em andamento/)
+      assert.match(page.container.querySelector('[aria-label="Pausados"]').textContent, /Objetivo pausado/)
+      assert.doesNotMatch(page.container.querySelector('[aria-label="Em andamento"]').textContent, /Objetivo pausado/)
     } finally { await home.close(); await page.close() }
   } finally { Object.assign(api, original); cache.clearOverview() }
 })
@@ -119,4 +121,68 @@ test('refresh preserva snapshot em loading e erro; 401 de leitura segue tratamen
     await act(async () => finish({ ok: false, status: 401 }))
     assert.equal(unauthorized, 1)
   } finally { await view.close(); api.listTrackers = original; cache.clearOverview() }
+})
+
+test('Home prioriza ativos, identifica pausados e não inclui encerrados', async () => {
+  const paused = { ...objetivo, id: 5, titulo: 'Aprender fotografia', status: 'pausado' }
+  assert.deepEqual(selectHomeObjectives([paused, objetivo, { ...objetivo, id: 6, status: 'concluido' }]).map(item => item.id), [4, 5])
+  const original = { ...api }
+  api.listObjetivos = async () => ({ ok: true, data: [paused] })
+  api.listTrackers = async () => ({ ok: true, data: [] })
+  const home = await mount(Home, { token: 'only-paused', user, onUnauthorized: () => false })
+  try {
+    assert.match(home.container.textContent, /PausadoAprender fotografia/)
+    assert.doesNotMatch(home.container.textContent, /Em andamento|Nenhum objetivo ativo/)
+    assert.equal(home.container.querySelector('h3 a').getAttribute('href'), '/objetivos#objetivo-5')
+  } finally { await home.close(); Object.assign(api, original); cache.clearOverview() }
+})
+
+test('síntese enxerga a ocorrência de hoje mesmo quando a lista agrupa a série', async () => {
+  const { groupObjectiveTasks } = await load('features/objectives/hooks/useObjectiveTasks.ts')
+  const now = new Date('2026-09-25T12:00:00Z')
+  const recurring = { id: 1, titulo: 'Caminhar', objetivo_id: 4, status: 'PENDENTE', status_code: 'PENDENTE', prazo: '24-09-2026', recurrence: { series_id: 7, weekdays: [0, 1, 2, 3, 4, 5, 6] } }
+  const tasks = [recurring, { ...recurring, id: 2, prazo: '25-09-2026' }]
+  assert.equal(groupObjectiveTasks(tasks)[4].length, 1)
+  const summary = groupObjectiveTasks(tasks, false)[4]
+  assert.equal(summary.length, 2)
+  assert.equal(summarizeObjective({ objetivo, tasks: summary, timezone: user.timezone, now })[0].detail, 'Prevista para hoje')
+  assert.equal(summarizeObjective({ objetivo, tasks: [recurring], timezone: user.timezone, now })[0].detail, 'Tarefa recorrente em aberto')
+})
+
+test('sem sinais há orientação; erro não afirma vazio e prazo permanece com dois sinais', async () => {
+  const empty = await mount(Card, { ...cardProps, objetivo: { ...objetivo, descricao: null } })
+  try { assert.match(empty.container.textContent, /Ainda sem sinais/); assert.ok(empty.container.querySelector('summary')) }
+  finally { await empty.close() }
+  const failed = await mount(Card, { ...cardProps, trackersLoaded: false, trackersError: 'Falha na leitura' })
+  try { assert.doesNotMatch(failed.container.textContent, /Ainda sem sinais|Nenhum acompanhamento/); assert.match(failed.container.textContent, /Acompanhamentos indisponíveis/) }
+  finally { await failed.close() }
+  const populated = await mount(Card, { ...cardProps, objetivo: { ...objetivo, data_alvo: '2026-10-30' }, trackers: [tracker], tasks: [{ id: 1, titulo: 'Caminhar', status_code: 'PENDENTE' }] })
+  try {
+    assert.match(populated.container.querySelector('header').textContent, /Data-alvo: 30\/10\/2026/)
+    assert.equal(populated.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').children.length, 2)
+    assert.equal(populated.container.querySelector('article > details').open, false)
+    populated.container.querySelector('summary').click()
+    assert.equal(populated.container.querySelector('article > details').open, true)
+    assert.ok(populated.container.querySelector('[aria-label="Acompanhamentos de Cuidar da saúde"]'))
+    assert.ok(populated.container.querySelector('[aria-label="Tarefas de Cuidar da saúde"]'))
+  } finally { await populated.close() }
+})
+
+test('descrição extensa expande sem esconder ou abrir a operação do objetivo', async () => {
+  const view = await mount(Card, { ...cardProps, trackers: [tracker] })
+  try {
+    const description = view.container.querySelector('header p')
+    Object.defineProperties(description, { scrollHeight: { configurable: true, value: 240 }, clientHeight: { configurable: true, value: 72 } })
+    await act(async () => window.dispatchEvent(new window.Event('resize')))
+    const toggle = [...view.container.querySelectorAll('button')].find(button => button.textContent === 'Ler descrição completa')
+    assert.ok(toggle)
+    assert.equal(toggle.getAttribute('aria-controls'), description.id)
+    await act(async () => toggle.click())
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+    assert.equal(toggle.textContent, 'Recolher descrição')
+    assert.equal(view.container.querySelector('article > details').open, false)
+    assert.match(view.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').textContent, /Última ocorrência/)
+    await act(async () => toggle.click())
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  } finally { await view.close() }
 })

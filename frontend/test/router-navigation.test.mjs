@@ -239,7 +239,7 @@ test("Home consulta apenas os módulos habilitados e integra estados vazios", as
   assert.equal(tasksOnly.calls.some((call) => call.endsWith("/acompanhamentos")), false)
 
   const objectivesOnly = await navigate("/", users.objectives, { objectives: [] })
-  assert.match(objectivesOnly.rendered, /Nenhum objetivo em andamento/)
+  assert.match(objectivesOnly.rendered, /Nenhum objetivo ativo ou pausado/)
   assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), false)
   assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")), false)
   assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/objetivos")), true)

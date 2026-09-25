@@ -1,25 +1,12 @@
-import React from "react"
-import { CalendarDays, Check, Plus, Circle, ListTodo, ListChecks } from "lucide-react"
+import React, { useEffect, useId, useRef, useState } from "react"
+import { CalendarDays, Check, ChevronDown } from "lucide-react"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
-import Badge from "../../../components/ui/Badge"
+import ObjectiveStatus from "./ObjectiveStatus"
+import ObjectiveOperationalPanel from "./ObjectiveOperationalPanel"
 
 import Button from "../../../components/ui/Button"
 import ObjectiveSummary from "./ObjectiveSummary"
-import { trackerOccurrenceLabel } from "../objectiveSummary"
 import { normalizeTaskDate } from "../../calendar/calendarUtils"
-
-const statusLabels = {
-  ativo: "Ativo",
-  pausado: "Pausado",
-  abandonado: "Abandonado",
-  concluido: "Concluído",
-}
-
-const taskStatus = {
-  PENDENTE: { label: "Em aberto", className: "text-text-secondary" },
-  CONCLUIDA: { label: "Concluída", className: "text-success" },
-  NAO_REALIZADA: { label: "Não realizada", className: "text-text-muted" },
-}
 
 function formatDateOnly(value, fallback) {
   const normalized = normalizeTaskDate(value)
@@ -31,20 +18,11 @@ function formatDateOnly(value, fallback) {
   return `${day}/${month}/${year}`
 }
 
-function getTaskStatus(task) {
-  const statusCode = String(task?.status_code || "").toUpperCase()
-  return (
-    taskStatus[statusCode] || {
-      label: task?.status_label || "Sem status",
-      className: "text-text-secondary",
-    }
-  )
-}
-
 export default function ObjetivoCard({
   tasksEnabled,
   loading,
   tasks,
+  summaryTasks = tasks,
   tasksLoading,
   tasksError,
   onRetryTasks,
@@ -69,6 +47,20 @@ export default function ObjetivoCard({
   onDeleteOccurrence,
   timezone,
 }) {
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false)
+  const [descriptionClipped, setDescriptionClipped] = useState(false)
+  const descriptionRef = useRef<HTMLParagraphElement | null>(null)
+  const descriptionId = useId()
+  useEffect(() => {
+    if (descriptionExpanded || !objetivo.descricao) return
+    const checkClipping = () => {
+      const element = descriptionRef.current
+      if (element) setDescriptionClipped(element.scrollHeight > element.clientHeight + 1)
+    }
+    checkClipping()
+    window.addEventListener("resize", checkClipping)
+    return () => window.removeEventListener("resize", checkClipping)
+  }, [descriptionExpanded, objetivo.descricao])
   const targetDate = objetivo.data_alvo ? formatDateOnly(objetivo.data_alvo, "") : ""
 
   const menuItems = [
@@ -82,57 +74,114 @@ export default function ObjetivoCard({
     { label: "Remover objetivo", onSelect: onDelete, danger: true },
   ]
   return (
-    <article className="work-surface min-w-0">
-      <div className="px-4 pt-3 pb-2 sm:px-5">
-        <header className="flex items-start justify-between gap-2">
-          <div className="min-w-0 pt-2">
-            <h2 className="m-0 break-words text-lg font-semibold leading-snug tracking-tight text-text-primary">
-              {objetivo.titulo}
-            </h2>
-            <div className="mt-1 text-xs">
-              <Badge variant={objetivo.status === "concluido" ? "success" : "neutral"}>
-                {statusLabels[objetivo.status] || objetivo.status}
-              </Badge>
-            </div>
+    <article
+      id={`objetivo-${objetivo.id}`}
+      aria-label={`Objetivo: ${objetivo.titulo}`}
+      className="work-surface min-w-0 scroll-mt-6"
+    >
+      <div className="grid md:grid-cols-[1.1fr_1fr]">
+        <header className="min-w-0 p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <ObjectiveStatus status={objetivo.status} />
+            <ActionsMenu
+              label={`Ações do objetivo: ${objetivo.titulo}`}
+              disabled={loading}
+              items={menuItems}
+            />
           </div>
-          <ActionsMenu
-            label={`Ações do objetivo: ${objetivo.titulo}`}
-            disabled={loading}
-            items={menuItems}
-          />
-        </header>
-        <ObjectiveSummary
-          objetivo={objetivo}
-          trackers={trackers}
-          tasks={tasksEnabled ? tasks : []}
-          timezone={timezone}
-          trackersLoading={trackersLoading}
-          trackersError={trackersError}
-          trackersLoaded={trackersLoaded}
-          onRetryTrackers={onRetryTrackers}
-          tasksLoading={tasksEnabled && tasksLoading}
-          tasksError={tasksEnabled ? tasksError : ""}
-        />
-      </div>
-      <details className="group/details">
-        <summary className="mx-4 mb-2 min-h-9 cursor-pointer rounded-control py-2 text-xs font-medium text-text-secondary hover:text-text-primary focus-visible:outline-2 focus-visible:outline-focus-ring sm:mx-5">
-          Detalhes e ações
-        </summary>
-        <div className="border-t border-border px-4 py-2 sm:px-5">
+          <h2 className="m-0 break-words text-2xl font-semibold leading-tight tracking-tight text-text-primary sm:text-[28px]">
+            {objetivo.titulo}
+          </h2>
           {objetivo.descricao && (
-            <p className="my-2 whitespace-pre-line break-words text-sm leading-6 text-text-secondary">
+            <p
+              ref={descriptionRef}
+              id={descriptionId}
+              className={`mt-3 mb-0 whitespace-pre-line break-words text-sm leading-6 text-text-secondary ${descriptionExpanded ? "" : "line-clamp-3"}`}
+            >
               {objetivo.descricao}
             </p>
           )}
+          {(descriptionClipped || descriptionExpanded) && objetivo.descricao && (
+            <button
+              type="button"
+              aria-expanded={descriptionExpanded}
+              aria-controls={descriptionId}
+              className="mt-1 min-h-9 rounded-control border-0 bg-transparent px-0 text-xs font-medium text-text-secondary underline hover:text-text-primary"
+              onClick={() => setDescriptionExpanded((expanded) => !expanded)}
+            >
+              {descriptionExpanded ? "Recolher descrição" : "Ler descrição completa"}
+            </button>
+          )}
           {targetDate && (
-            <p className="my-2 flex items-center gap-2 text-xs text-text-secondary">
+            <p className="mt-4 mb-0 flex items-center gap-2 text-xs text-text-secondary">
               <CalendarDays size={14} aria-hidden="true" />
               Data-alvo: {targetDate}
             </p>
           )}
-          {objetivo.status !== "concluido" && objetivo.status !== "abandonado" && (
+        </header>
+        <section
+          aria-label={`Sinais de ${objetivo.titulo}`}
+          className="min-w-0 border-t border-border p-4 sm:p-6 md:border-t-0 md:border-l"
+        >
+          <h3 className="mt-0 mb-4 text-xs font-semibold uppercase tracking-wider text-text-muted">
+            Sinais atuais
+          </h3>
+          <ObjectiveSummary
+            objetivo={objetivo}
+            trackers={trackers}
+            tasks={tasksEnabled ? summaryTasks : []}
+            timezone={timezone}
+            trackersLoading={trackersLoading}
+            trackersError={trackersError}
+            trackersLoaded={trackersLoaded}
+            onRetryTrackers={onRetryTrackers}
+            tasksLoading={tasksEnabled && tasksLoading}
+            tasksError={tasksEnabled ? tasksError : ""}
+            variant="featured"
+            tasksEnabled={tasksEnabled}
+          />
+        </section>
+      </div>
+      <details className="group/operations border-t border-border">
+        <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-control px-4 py-3 text-sm font-medium text-text-secondary hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-focus-ring sm:px-6 [&::-webkit-details-marker]:hidden">
+          <span>Acompanhamentos{tasksEnabled ? " e tarefas" : ""}</span>
+          <span className="flex items-center gap-2 text-xs">
+            <span className="group-open/operations:hidden">Abrir detalhes</span>
+            <span className="hidden group-open/operations:inline">Recolher detalhes</span>
+            <ChevronDown
+              size={16}
+              className="group-open/operations:rotate-180"
+              aria-hidden="true"
+            />
+          </span>
+        </summary>
+        <ObjectiveOperationalPanel
+          {...{
+            tasksEnabled,
+            tasks,
+            tasksLoading,
+            tasksError,
+            onRetryTasks,
+            objetivo,
+            onCreateTask,
+            onUnlinkTask,
+            unlinkingId,
+            trackers,
+            trackersLoading,
+            trackersError,
+            trackersLoaded,
+            trackerBusyId,
+            onCreateTracker,
+            onEditTracker,
+            onDeleteTracker,
+            onRecordOccurrence,
+            onDeleteOccurrence,
+            timezone,
+          }}
+        />
+        {objetivo.status !== "concluido" && objetivo.status !== "abandonado" && (
+          <footer className="flex justify-end border-t border-border px-4 py-3 sm:px-6">
             <Button
-              className="mt-1"
               disabled={loading}
               size="small"
               variant="ghost"
@@ -141,209 +190,8 @@ export default function ObjetivoCard({
               <Check size={16} aria-hidden="true" />
               Concluir objetivo
             </Button>
-          )}
-        </div>
-        {tasksEnabled && (
-          <section
-            aria-label={`Tarefas de ${objetivo.titulo}`}
-            className="border-t border-border bg-surface-subtle px-5 py-3 sm:px-6"
-          >
-            {tasks.length > 0 && (
-              <header className="flex items-center justify-between gap-3">
-                <h3 className="m-0 flex items-center gap-2 text-xs font-semibold text-text-secondary">
-                  <ListTodo size={15} aria-hidden="true" />
-                  Tarefas
-                </h3>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onCreateTask}
-                  aria-label={`Adicionar tarefa a ${objetivo.titulo}`}
-                  title="Adicionar tarefa"
-                >
-                  <Plus size={18} aria-hidden="true" />
-                </Button>
-              </header>
-            )}
-            {tasksLoading && tasks.length === 0 ? (
-              <p role="status" className="m-0 py-3 text-sm text-text-secondary">
-                Carregando tarefas…
-              </p>
-            ) : tasksError && tasks.length === 0 ? (
-              <div role="status" className="grid gap-2">
-                <p className="m-0 text-sm text-text-secondary">
-                  Tarefas indisponíveis. {tasksError}
-                </p>
-                <Button variant="ghost" onClick={onRetryTasks}>
-                  Tentar novamente
-                </Button>
-              </div>
-            ) : tasks.length > 0 ? (
-              <ul className="m-0 grid list-none p-0">
-                {tasks.map((task) => {
-                  const status = getTaskStatus(task)
-                  return (
-                    <li
-                      key={task.id}
-                      className="flex items-start gap-2 border-t border-border py-2.5 first:border-0"
-                    >
-                      <span className="mt-1 text-text-muted" aria-hidden="true">
-                        {task.status_code === "CONCLUIDA" ? (
-                          <Check size={14} />
-                        ) : (
-                          <Circle size={14} />
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1 break-words text-sm leading-5 text-text-secondary">
-                        {task.titulo}
-                        <span className="sr-only"> — {status.label}</span>
-                        {task.recurrence && (
-                          <span className="block text-xs text-text-muted">
-                            Recorrente ·{" "}
-                            {task.recurrence.weekdays.length === 7
-                              ? "Todos os dias"
-                              : task.recurrence.weekdays.length === 5 &&
-                                  task.recurrence.weekdays.join(",") === "0,1,2,3,4"
-                                ? "Dias úteis"
-                                : ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-                                    .filter((_, index) => task.recurrence.weekdays.includes(index))
-                                    .join(", ")}
-                          </span>
-                        )}
-                      </span>
-                      {task.status_code === "NAO_REALIZADA" && (
-                        <span className="text-xs text-text-muted">Não realizada</span>
-                      )}
-                      <ActionsMenu
-                        label={`Ações da tarefa: ${task.titulo}`}
-                        disabled={unlinkingId === task.id}
-                        items={[
-                          { label: "Desvincular do objetivo", onSelect: () => onUnlinkTask(task) },
-                        ]}
-                      />
-                    </li>
-                  )
-                })}
-              </ul>
-            ) : null}
-            {tasks.length === 0 && (
-              <Button size="small" variant="ghost" onClick={onCreateTask}>
-                <Plus size={16} aria-hidden="true" />
-                Adicionar tarefa
-              </Button>
-            )}
-          </section>
+          </footer>
         )}
-        <section
-          aria-label={`Acompanhamentos de ${objetivo.titulo}`}
-          className="rounded-b-card border-t border-border bg-surface-subtle px-5 py-3 sm:px-6"
-        >
-          <header className="flex items-center justify-between gap-3">
-            <h3 className="m-0 flex items-center gap-2 text-xs font-semibold text-text-secondary">
-              <ListChecks size={15} aria-hidden="true" />
-              Acompanhamentos
-            </h3>
-            <Button
-              size="icon"
-              variant="ghost"
-              disabled={!trackersLoaded}
-              onClick={onCreateTracker}
-              aria-label={`Adicionar acompanhamento a ${objetivo.titulo}`}
-              title="Adicionar acompanhamento"
-            >
-              <Plus size={18} aria-hidden="true" />
-            </Button>
-          </header>
-          {trackersError && (
-            <p role="alert" className="m-0 py-2 text-sm text-danger">
-              {trackersError}
-            </p>
-          )}
-          {trackersLoading && trackers.length === 0 && (
-            <p className="m-0 py-2 text-sm text-text-secondary">Carregando acompanhamentos…</p>
-          )}
-          {!trackersLoading && !trackersError && trackersLoaded && trackers.length === 0 && (
-            <p className="m-0 py-2 text-sm text-text-muted">Nenhum acompanhamento ainda.</p>
-          )}
-          {trackers.length > 0 && (
-            <ul className="m-0 list-none p-0">
-              {trackers.map((tracker) => {
-                const occurrences = tracker.ocorrencias ?? []
-                return (
-                  <li key={tracker.id} className="border-t border-border py-3 first:border-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="m-0 break-words text-sm font-medium text-text-primary">
-                          {tracker.titulo}
-                        </p>
-                        {tracker.descricao && (
-                          <p className="mt-1 mb-0 break-words text-sm text-text-secondary">
-                            {tracker.descricao}
-                          </p>
-                        )}
-                        <p className="mt-1 mb-0 text-xs text-text-muted">
-                          {trackerOccurrenceLabel(tracker, timezone)}
-                        </p>
-                      </div>
-                      <ActionsMenu
-                        label={`Ações do acompanhamento: ${tracker.titulo}`}
-                        disabled={trackerBusyId === tracker.id}
-                        items={[
-                          {
-                            label: "Editar acompanhamento",
-                            onSelect: () => onEditTracker(tracker),
-                          },
-                          {
-                            label: "Excluir acompanhamento",
-                            onSelect: () => onDeleteTracker(tracker),
-                            danger: true,
-                          },
-                        ]}
-                      />
-                    </div>
-                    <Button
-                      className="mt-2"
-                      size="small"
-                      variant="ghost"
-                      loading={trackerBusyId === tracker.id}
-                      onClick={() => onRecordOccurrence(tracker)}
-                    >
-                      Registrar ocorrência
-                    </Button>
-                    {occurrences.length > 0 && (
-                      <details className="mt-2 text-xs text-text-secondary">
-                        <summary className="cursor-pointer">Ocorrências recentes</summary>
-                        <ul className="mt-2 grid list-none gap-1 p-0">
-                          {occurrences.slice(0, 5).map((occurrence) => (
-                            <li
-                              key={occurrence.id}
-                              className="flex items-center justify-between gap-2"
-                            >
-                              <span>
-                                {new Date(occurrence.occurred_at).toLocaleDateString("pt-BR", {
-                                  timeZone: timezone,
-                                })}
-                              </span>
-                              <Button
-                                size="small"
-                                variant="ghost"
-                                disabled={trackerBusyId === tracker.id}
-                                onClick={() => onDeleteOccurrence(tracker, occurrence)}
-                                aria-label={`Remover ocorrência de ${tracker.titulo}`}
-                              >
-                                Remover
-                              </Button>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
       </details>
     </article>
   )

@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react"
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import Button from "../../../components/ui/Button"
@@ -30,6 +30,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const [deleteTrackerTarget, setDeleteTrackerTarget] = useState(null)
   const [unlinkTarget, setUnlinkTarget] = useState(null)
   const busy = objectives.loading || objectives.mutating
+
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (/^objetivo-\d+$/.test(id)) document.getElementById(id)?.scrollIntoView?.({ block: "start" })
+  }, [objectives.objetivos])
 
   function openCreateObjective() {
     setEditingObjetivo(null)
@@ -77,7 +82,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   }
 
   return (
-    <section className="mx-auto grid max-w-[820px] gap-5">
+    <section className="mx-auto grid max-w-[1080px] gap-5">
       <PageHeader
         actions={
           <Button disabled={busy} onClick={openCreateObjective}>
@@ -112,6 +117,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         objectivesLoading={objectives.loading}
         objectivesError={objectives.status.type === "error" ? objectives.status.message : ""}
         tasksByObjetivo={objectiveTasks.tasksByObjetivo}
+        summaryTasksByObjetivo={objectiveTasks.summaryTasksByObjetivo}
         tasksLoading={objectiveTasks.loading}
         tasksError={objectiveTasks.error}
         onRetryTasks={objectiveTasks.refresh}

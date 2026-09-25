@@ -3,6 +3,8 @@ import { CalendarDays, ListChecks, ListTodo } from "lucide-react"
 import { summarizeObjective } from "../objectiveSummary"
 
 export default function ObjectiveSummary({
+  variant = "compact",
+  tasksEnabled = true,
   objetivo,
   trackers = [],
   tasks = [],
@@ -15,8 +17,11 @@ export default function ObjectiveSummary({
   onRetryTrackers = undefined,
 }) {
   const signals = summarizeObjective({ objetivo, trackers, tasks, timezone })
+  const featured = variant === "featured"
+  const settled =
+    !trackersLoading && !trackersError && trackersLoaded && !tasksLoading && !tasksError
   return (
-    <div className="mt-2 grid min-w-0 gap-2">
+    <div className="grid min-w-0 gap-3">
       {signals.length > 0 ? (
         <ul aria-label={`Resumo de ${objetivo.titulo}`} className="m-0 grid list-none gap-2 p-0">
           {signals.map((signal, index) => {
@@ -29,23 +34,35 @@ export default function ObjectiveSummary({
             return (
               <li
                 key={index}
-                className="flex min-w-0 items-start gap-2 text-xs leading-5 text-text-secondary"
+                className={`flex min-w-0 items-start gap-3 text-text-secondary ${featured ? "rounded-xl bg-surface-subtle p-3 text-sm leading-5" : "text-xs leading-5"}`}
               >
-                <Icon size={14} className="mt-0.5 shrink-0 text-text-muted" aria-hidden="true" />
+                <Icon size={14} className="mt-1 shrink-0 text-text-muted" aria-hidden="true" />
                 <span className="min-w-0 break-words">
-                  <span className="block line-clamp-1 font-medium" title={signal.label}>
+                  <span
+                    className="block break-words font-medium text-text-primary"
+                    title={signal.label}
+                  >
                     {signal.label}
                   </span>
-                  <span>{signal.detail}</span>
+                  <span className="mt-1 block">{signal.detail}</span>
                 </span>
               </li>
             )
           })}
         </ul>
-      ) : objetivo.descricao ? (
-        <p className="m-0 line-clamp-2 break-words text-sm leading-5 text-text-secondary">
-          {objetivo.descricao}
-        </p>
+      ) : settled ? (
+        <div className="grid gap-2">
+          {!featured && objetivo.descricao && (
+            <p className="m-0 line-clamp-2 break-words text-sm leading-5 text-text-secondary">
+              {objetivo.descricao}
+            </p>
+          )}
+          <p className="m-0 text-sm leading-6 text-text-secondary">
+            {featured
+              ? `Ainda sem sinais. Adicione um acompanhamento${tasksEnabled ? " ou uma tarefa vinculada" : ""} para dar contexto a este objetivo.`
+              : "Sem sinais disponíveis neste resumo."}
+          </p>
+        </div>
       ) : null}
       {trackersError ? (
         <div role="status" className="text-xs leading-5 text-text-secondary">

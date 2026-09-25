@@ -43,13 +43,20 @@ export function summarizeObjective({
   if (trackerSignals.length) signals.push(trackerSignals[0])
   const open = tasks.filter((task) => (task.status_code || task.status) === "PENDENTE")
   const today = formatDateForApi(operationalDateFor(timezone, now))
-  const todayTask = open.find((task) => normalizeTaskDate(task.prazo) === today)
-  const task = todayTask || open[0]
+  const byPriority = [...open].sort(
+    (a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned))
+  )
+  const todayTask = byPriority.find((task) => normalizeTaskDate(task.prazo) === today)
+  const task = todayTask || byPriority.find((task) => task.recurrence) || byPriority[0]
   if (task)
     signals.push({
       kind: "task",
       label: task.titulo,
-      detail: todayTask ? "Prevista para hoje" : "Tarefa em aberto",
+      detail: todayTask
+        ? "Prevista para hoje"
+        : task.recurrence
+          ? "Tarefa recorrente em aberto"
+          : "Tarefa em aberto",
     })
   if (signals.length < 2 && trackerSignals.length > 1) signals.push(trackerSignals[1])
   const target = normalizeTaskDate(objetivo.data_alvo)

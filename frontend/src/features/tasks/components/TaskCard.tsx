@@ -105,7 +105,7 @@ export default function TaskCard({
           </div>
         )}
         <div
-          className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-3" : "pt-3 pb-1"}`}
+          className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-3" : "pt-3 pb-3"}`}
         >
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <h3
@@ -139,7 +139,7 @@ export default function TaskCard({
             <p
               ref={descriptionRef}
               id={descriptionId}
-              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-0.5 text-xs leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
+              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-1 text-sm leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
             >
               {task.instrucao}
             </p>
@@ -147,7 +147,7 @@ export default function TaskCard({
           {((!compactCompleted && (notPerformed || showDeadline || inlineRecurrence)) ||
             (focus && completed)) && (
             <div
-              className={`${focus ? "mt-2 gap-2" : "mt-0.5 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}
+              className={`${focus ? "mt-2 gap-2" : "mt-2 gap-x-3 gap-y-1"} flex flex-wrap items-center text-xs text-text-muted`}
             >
               {inlineRecurrence && !compactCompleted && (
                 <span className="inline-flex items-center gap-1" title="Tarefa recorrente">

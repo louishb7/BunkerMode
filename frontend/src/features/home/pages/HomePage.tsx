@@ -14,6 +14,7 @@ import {
   updateOverview,
 } from "../../../state/overviewCache"
 import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
+import ObjectiveStatus from "../../objectives/components/ObjectiveStatus"
 import ObjectiveSummary from "../../objectives/components/ObjectiveSummary"
 import { useTrackers } from "../../objectives/hooks/useTrackers"
 import { groupObjectiveTasks } from "../../objectives/hooks/useObjectiveTasks"
@@ -36,7 +37,10 @@ function dailyFromBoard(tasks, timezone) {
 }
 
 export function selectHomeObjectives(objetivos = []) {
-  return objetivos.filter((objetivo) => objetivo?.status === "ativo").slice(0, 2)
+  return [
+    ...objetivos.filter((objetivo) => objetivo?.status === "ativo"),
+    ...objetivos.filter((objetivo) => objetivo?.status === "pausado"),
+  ].slice(0, 2)
 }
 
 function CompartmentLink({ children, to }) {
@@ -136,6 +140,7 @@ function ObjectivesCompartment({
   preview,
   trackers,
   tasksByObjective,
+  tasksEnabled,
   timezone,
   tasksLoading,
   tasksError,
@@ -151,7 +156,7 @@ function ObjectivesCompartment({
             <h2 id="home-objectives-title" className="m-0 text-base font-semibold">
               Objetivos
             </h2>
-            <span className="text-xs text-text-secondary">Em andamento</span>
+            <span className="text-xs text-text-secondary">Suas direções</span>
           </div>
         </div>
         <Link
@@ -163,16 +168,23 @@ function ObjectivesCompartment({
           <ArrowUpRight size={21} aria-hidden="true" />
         </Link>
       </header>
-      <PreviewState preview={preview} empty="Nenhum objetivo em andamento." />
+      <PreviewState preview={preview} empty="Nenhum objetivo ativo ou pausado." />
       {!preview.loading && !preview.error && (
         <ol className="m-0 grid list-none gap-5 p-0">
           {preview.items.map((objetivo) => (
-            <li key={objetivo.id} className="border-l-2 border-selection-border pl-4">
-              <h3 className="m-0 break-words text-lg font-semibold leading-snug tracking-tight">
-                {objetivo.titulo}
+            <li key={objetivo.id} className="min-w-0 border-t border-border pt-4">
+              <ObjectiveStatus status={objetivo.status} />
+              <h3 className="mt-2 mb-3 break-words text-lg font-semibold leading-snug tracking-tight">
+                <Link
+                  to={`${APP_ROUTES.OBJECTIVES}#objetivo-${objetivo.id}`}
+                  className="text-text-primary no-underline hover:underline"
+                >
+                  {objetivo.titulo}
+                </Link>
               </h3>
               <ObjectiveSummary
                 objetivo={objetivo}
+                tasksEnabled={tasksEnabled}
                 trackers={trackers.byObjective[String(objetivo.id)] || []}
                 trackersLoading={trackers.loading}
                 trackersLoaded={trackers.loaded}
@@ -372,10 +384,12 @@ export default function HomePage({ onUnauthorized, token, user }) {
               />
               <ObjectivesCompartment
                 preview={objectiveView}
+                tasksEnabled={tasksEnabled}
                 trackers={trackers}
                 timezone={user?.timezone}
                 tasksByObjective={groupObjectiveTasks(
-                  tasksEnabled ? (knownDaily ?? cached.all ?? []) : []
+                  tasksEnabled ? (cached.all ?? knownDaily ?? []) : [],
+                  false
                 )}
                 tasksLoading={tasksEnabled && tasksPreview.loading}
                 tasksError={tasksEnabled ? tasksPreview.error : ""}

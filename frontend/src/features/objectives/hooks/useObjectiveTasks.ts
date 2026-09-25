@@ -4,7 +4,13 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
-import { detachObjectiveTaskList, getOverview, unlinkCachedObjectiveTask, unlinkTaskList, updateOverview } from "../../../state/overviewCache"
+import {
+  detachObjectiveTaskList,
+  getOverview,
+  unlinkCachedObjectiveTask,
+  unlinkTaskList,
+  updateOverview,
+} from "../../../state/overviewCache"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
 export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
@@ -105,6 +111,7 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
 
   return {
     tasksByObjetivo,
+    summaryTasksByObjetivo: groupObjectiveTasks(tasks, false),
     loading,
     error,
     refresh,
@@ -118,7 +125,10 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
   }
 }
 
-export function groupObjectiveTasks(tasks: Task[]): Record<string, Task[]> {
+export function groupObjectiveTasks(
+  tasks: Task[],
+  deduplicateSeries = true
+): Record<string, Task[]> {
   const grouped: Record<string, Task[]> = {}
   const seriesPositions = new Map<string, number>()
   for (const task of tasks) {
@@ -126,12 +136,13 @@ export function groupObjectiveTasks(tasks: Task[]): Record<string, Task[]> {
     const key = String(task.objetivo_id)
     grouped[key] ??= []
     const seriesId = task.recurrence?.series_id
-    if (seriesId) {
+    if (seriesId && deduplicateSeries) {
       const seriesKey = `${key}:${seriesId}`
       const position = seriesPositions.get(seriesKey)
       if (position !== undefined) {
         const selected = grouped[key][position]
-        if (selected.status === "CONCLUIDA" && task.status !== "CONCLUIDA") grouped[key][position] = task
+        if (selected.status === "CONCLUIDA" && task.status !== "CONCLUIDA")
+          grouped[key][position] = task
         continue
       }
       seriesPositions.set(seriesKey, grouped[key].length)

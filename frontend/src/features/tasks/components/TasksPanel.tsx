@@ -1,4 +1,6 @@
 import React from "react"
+import { Focus, Plus } from "lucide-react"
+import Button from "../../../components/ui/Button"
 
 import EmptyState from "../../../components/ui/EmptyState"
 import { isCompleted, isNotPerformed } from "../../../utils/taskStatus"
@@ -17,6 +19,8 @@ function groupTasks(tasks) {
 }
 
 export default function TasksPanel({
+  onCreateTask = undefined,
+  onStartFocus = undefined,
   completeLoadingId,
   loading,
   onCompleteTask,
@@ -67,7 +71,7 @@ export default function TasksPanel({
   }
 
   return (
-    <section className="grid gap-0">
+    <section aria-label="Execução do dia selecionado" className="grid gap-0">
       {loading ? (
         <EmptyState
           flat
@@ -87,6 +91,20 @@ export default function TasksPanel({
           title="Sem tarefas neste dia"
         />
       )}
+      <footer
+        role="group"
+        aria-label="Ações do dia selecionado"
+        className="flex flex-wrap items-center justify-end gap-2 border-t border-border p-3 sm:p-4"
+      >
+        <Button variant="secondary" onClick={onStartFocus}>
+          <Focus size={17} aria-hidden="true" />
+          Foco
+        </Button>
+        <Button onClick={onCreateTask}>
+          <Plus size={17} aria-hidden="true" />
+          Nova tarefa
+        </Button>
+      </footer>
     </section>
   )
 }

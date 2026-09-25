@@ -109,6 +109,8 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       <ObjetivoList
         tasksEnabled={tasksEnabled}
         loading={busy}
+        objectivesLoading={objectives.loading}
+        objectivesError={objectives.status.type === "error" ? objectives.status.message : ""}
         tasksByObjetivo={objectiveTasks.tasksByObjetivo}
         tasksLoading={objectiveTasks.loading}
         tasksError={objectiveTasks.error}
@@ -127,10 +129,17 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         unlinkingId={objectiveTasks.unlinkingId}
         trackersByObjective={trackers.byObjective}
         trackersLoading={trackers.loading}
-        trackersError=""
+        trackersError={trackers.error}
+        trackersLoaded={trackers.loaded}
+        onRetryTrackers={trackers.refresh}
         trackerBusyId={trackers.busyId}
         onCreateTracker={(objetivo) => setTrackerForm({ objetivo, tracker: null })}
-        onEditTracker={(tracker) => setTrackerForm({ objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id), tracker })}
+        onEditTracker={(tracker) =>
+          setTrackerForm({
+            objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id),
+            tracker,
+          })
+        }
         onDeleteTracker={setDeleteTrackerTarget}
         onRecordOccurrence={trackers.recordOccurrence}
         onDeleteOccurrence={trackers.deleteOccurrence}
@@ -138,7 +147,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       />
 
       {trackerForm && (
-        <Dialog closeOnBackdrop={false} onClose={() => setTrackerForm(null)} title={trackerForm.tracker ? "Editar acompanhamento" : "Novo acompanhamento"}>
+        <Dialog
+          closeOnBackdrop={false}
+          onClose={() => setTrackerForm(null)}
+          title={trackerForm.tracker ? "Editar acompanhamento" : "Novo acompanhamento"}
+        >
           <TrackerForm
             key={trackerForm.tracker?.id ?? `new-${trackerForm.objetivo.id}`}
             tracker={trackerForm.tracker}
@@ -166,9 +179,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       {unlinkTarget && (
         <ConfirmDialog
           title="Desvincular do objetivo"
-          message={unlinkTarget.recurrence
-            ? `A série "${unlinkTarget.titulo}" e suas ocorrências continuarão em Tarefas sem vínculo com este objetivo.`
-            : `"${unlinkTarget.titulo}" continuará em Tarefas com o mesmo status e histórico.`}
+          message={
+            unlinkTarget.recurrence
+              ? `A série "${unlinkTarget.titulo}" e suas ocorrências continuarão em Tarefas sem vínculo com este objetivo.`
+              : `"${unlinkTarget.titulo}" continuará em Tarefas com o mesmo status e histórico.`
+          }
           confirmLabel="Desvincular"
           loading={objectiveTasks.unlinkingId === unlinkTarget.id}
           onCancel={() => setUnlinkTarget(null)}

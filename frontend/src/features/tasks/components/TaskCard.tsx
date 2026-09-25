@@ -104,10 +104,12 @@ export default function TaskCard({
             )}
           </div>
         )}
-        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-3" : "py-2"}`}>
+        <div
+          className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-3" : "pt-3 pb-1"}`}
+        >
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <h3
-              className={`m-0 min-w-0 max-w-full break-words font-medium ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "line-clamp-2 text-text-secondary line-through" : "text-text-primary"}`}
+              className={`m-0 min-w-0 max-w-full break-words ${!focus && !completed ? "font-semibold" : "font-medium"} ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "line-clamp-2 text-text-secondary line-through" : "text-text-primary"}`}
             >
               {!focus && !compactCompleted && task.is_pinned && (
                 <>
@@ -121,7 +123,7 @@ export default function TaskCard({
               )}
               {title}
             </h3>
-            {inlineRecurrence && (
+            {inlineRecurrence && compactCompleted && (
               <span
                 className="inline-flex items-center gap-1 text-xs text-text-muted"
                 title="Recorrente"
@@ -137,10 +139,27 @@ export default function TaskCard({
             <p
               ref={descriptionRef}
               id={descriptionId}
-              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-0.5 text-sm leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
+              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-0.5 text-xs leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
             >
               {task.instrucao}
             </p>
+          )}
+          {((!compactCompleted && (notPerformed || showDeadline || inlineRecurrence)) ||
+            (focus && completed)) && (
+            <div
+              className={`${focus ? "mt-2 gap-2" : "mt-0.5 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}
+            >
+              {inlineRecurrence && !compactCompleted && (
+                <span className="inline-flex items-center gap-1" title="Tarefa recorrente">
+                  <Repeat2 size={12} aria-hidden="true" />
+                  <span className="sr-only">Recorrente · </span>
+                  {recurrenceLabel || "Recorrente"}
+                </span>
+              )}
+              {notPerformed && <Badge>Não realizada</Badge>}
+              {focus && completed && <span className="text-success">Concluída</span>}
+              {showDeadline && !compactCompleted && <span>Prazo {deadline}</span>}
+            </div>
           )}
           {!focus && !compactCompleted && (descriptionClipped || detailsOpen) && (
             <button
@@ -155,15 +174,6 @@ export default function TaskCard({
           )}
           {task?.instrucao && compactCompleted && (
             <span className="sr-only">Instrução: {task.instrucao}</span>
-          )}
-          {((!compactCompleted && (notPerformed || showDeadline)) || (focus && completed)) && (
-            <div
-              className={`${focus ? "mt-2 gap-2" : "mt-1 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}
-            >
-              {notPerformed && <Badge>Não realizada</Badge>}
-              {focus && completed && <span className="text-success">Concluída</span>}
-              {showDeadline && !compactCompleted && <span>Prazo {deadline}</span>}
-            </div>
           )}
           {focus && permissions.can_complete && (
             <Button className="mt-5" loading={completing} disabled={busy} onClick={onComplete}>

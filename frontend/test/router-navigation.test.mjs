@@ -203,7 +203,7 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
     objectives: [
       { id: 1, titulo: "Construir portfólio", descricao: "Projetos publicados", status: "ativo" },
       { id: 2, titulo: "Estudar arquitetura", descricao: null, status: "pausado" },
-      { id: 3, titulo: "Não deve aparecer", descricao: null, status: "ativo" },
+      { id: 3, titulo: "Objetivo ativo seguinte", descricao: null, status: "ativo" },
       { id: 4, titulo: "Objetivo concluído", descricao: null, status: "concluido" },
       { id: 5, titulo: "Objetivo abandonado", descricao: null, status: "abandonado" },
     ],
@@ -215,13 +215,13 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
     "Organizar notas",
     "Construir portfólio",
     "Projetos publicados",
-    "Estudar arquitetura",
+    "Objetivo ativo seguinte",
 
 
   ]) {
     assert.match(result.rendered, new RegExp(marker), JSON.stringify(result.calls))
   }
-  for (const marker of ["Objetivo concluído", "Objetivo abandonado"]) {
+  for (const marker of ["Estudar arquitetura", "Objetivo concluído", "Objetivo abandonado"]) {
     assert.doesNotMatch(result.rendered, new RegExp(marker))
   }
   assert.match(result.rendered, /Tarefa concluída/)
@@ -236,6 +236,7 @@ test("Home consulta apenas os módulos habilitados e integra estados vazios", as
   assert.match(tasksOnly.rendered, /Nenhuma tarefa aberta para hoje/)
   assert.equal(tasksOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), true)
   assert.equal(tasksOnly.calls.some((call) => call.endsWith("/objetivos")), false)
+  assert.equal(tasksOnly.calls.some((call) => call.endsWith("/acompanhamentos")), false)
 
   const objectivesOnly = await navigate("/", users.objectives, { objectives: [] })
   assert.match(objectivesOnly.rendered, /Nenhum objetivo em andamento/)

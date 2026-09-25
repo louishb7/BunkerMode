@@ -65,7 +65,8 @@ test("ações no cabeçalho do dia abrem Foco e criação mantém hoje, outro di
       1
     )
     assert.equal(container.querySelector("h1").closest("header").querySelectorAll("button").length, 0)
-    const dayHeader = container.querySelector("h2").closest("header")
+    const dayHeader = container.querySelector('[aria-label="Ações do dia selecionado"]')
+    assert.ok(dayHeader.closest('[aria-label="Calendário semanal"]'))
     assert.deepEqual(
       [...dayHeader.querySelectorAll("button")].map((el) => el.textContent.trim()),
       ["Foco", "Nova tarefa"]

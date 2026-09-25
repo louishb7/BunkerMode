@@ -78,6 +78,8 @@ export default function TasksPage({ board, onStartFocus, user }) {
         </div>
         <div className="work-surface min-w-0">
           <WeekPanel
+            onCreateTask={openCreateForm}
+            onStartFocus={onStartFocus}
             onToday={() => setSelectedDate(todayDate)}
             onNextWeek={() => setSelectedDate((current) => addDays(current, 7))}
             onPreviousWeek={() => setSelectedDate((current) => addDays(current, -7))}
@@ -92,11 +94,9 @@ export default function TasksPage({ board, onStartFocus, user }) {
             completeLoadingId={board.completeLoadingId}
             loading={board.taskLoading && !board.hasBoardSnapshot}
             onCompleteTask={board.completeTask}
-            onCreateTask={openCreateForm}
             onDeleteTask={setDeleteTarget}
             onEditTask={openEditForm}
             onReopenTask={board.reopenTask}
-            onStartFocus={onStartFocus}
             onTogglePin={board.toggleTaskPin}
             pinLoadingId={board.pinLoadingId}
             reopenLoadingId={board.reopenLoadingId}

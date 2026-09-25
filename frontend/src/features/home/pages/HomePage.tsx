@@ -14,6 +14,9 @@ import {
   updateOverview,
 } from "../../../state/overviewCache"
 import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
+import ObjectiveSummary from "../../objectives/components/ObjectiveSummary"
+import { useTrackers } from "../../objectives/hooks/useTrackers"
+import { groupObjectiveTasks } from "../../objectives/hooks/useObjectiveTasks"
 import { formatDateForApi } from "../../../utils/date"
 
 const emptyOverview = { daily: null, dailyDate: null, all: null, objectives: null, trackers: null }
@@ -33,9 +36,7 @@ function dailyFromBoard(tasks, timezone) {
 }
 
 export function selectHomeObjectives(objetivos = []) {
-  return objetivos
-    .filter((objetivo) => objetivo?.status !== "concluido" && objetivo?.status !== "abandonado")
-    .slice(0, 2)
+  return objetivos.filter((objetivo) => objetivo?.status === "ativo").slice(0, 2)
 }
 
 function CompartmentLink({ children, to }) {
@@ -131,7 +132,14 @@ function TasksCompartment({ preview, onComplete, completingId }) {
     </section>
   )
 }
-function ObjectivesCompartment({ preview }) {
+function ObjectivesCompartment({
+  preview,
+  trackers,
+  tasksByObjective,
+  timezone,
+  tasksLoading,
+  tasksError,
+}) {
   return (
     <section aria-labelledby="home-objectives-title" className="work-surface p-5 sm:p-6">
       <header className="mb-5 flex items-center justify-between gap-3">
@@ -163,11 +171,18 @@ function ObjectivesCompartment({ preview }) {
               <h3 className="m-0 break-words text-lg font-semibold leading-snug tracking-tight">
                 {objetivo.titulo}
               </h3>
-              {objetivo.descricao && (
-                <p className="mt-2 mb-0 break-words text-sm leading-6 text-text-secondary">
-                  {objetivo.descricao}
-                </p>
-              )}
+              <ObjectiveSummary
+                objetivo={objetivo}
+                trackers={trackers.byObjective[String(objetivo.id)] || []}
+                trackersLoading={trackers.loading}
+                trackersLoaded={trackers.loaded}
+                trackersError={trackers.error}
+                onRetryTrackers={trackers.refresh}
+                tasks={tasksByObjective[String(objetivo.id)] || []}
+                tasksLoading={tasksLoading}
+                tasksError={tasksError}
+                timezone={timezone}
+              />
             </li>
           ))}
         </ol>
@@ -180,6 +195,7 @@ export default function HomePage({ onUnauthorized, token, user }) {
   const enabledModules = getEnabledModules(user)
   const tasksEnabled = enabledModules.some((module) => module.key === "tasks")
   const objectivesEnabled = enabledModules.some((module) => module.key === "objectives")
+  const trackers = useTrackers({ token, onUnauthorized, enabled: objectivesEnabled })
   const cached = useSyncExternalStore(
     subscribeOverview,
     () => getOverview(token),
@@ -354,7 +370,16 @@ export default function HomePage({ onUnauthorized, token, user }) {
                     : null
                 }
               />
-              <ObjectivesCompartment preview={objectiveView} />
+              <ObjectivesCompartment
+                preview={objectiveView}
+                trackers={trackers}
+                timezone={user?.timezone}
+                tasksByObjective={groupObjectiveTasks(
+                  tasksEnabled ? (knownDaily ?? cached.all ?? []) : []
+                )}
+                tasksLoading={tasksEnabled && tasksPreview.loading}
+                tasksError={tasksEnabled ? tasksPreview.error : ""}
+              />
             </div>
           )}
         </div>

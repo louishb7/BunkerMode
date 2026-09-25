@@ -4,6 +4,8 @@ import EmptyState from "../../../components/ui/EmptyState"
 import ObjetivoCard from "./ObjetivoCard"
 
 export default function ObjetivoList({
+  objectivesLoading = false,
+  objectivesError = "",
   tasksEnabled,
   loading,
   tasksByObjetivo,
@@ -22,6 +24,8 @@ export default function ObjetivoList({
   trackersByObjective = {},
   trackersLoading,
   trackersError,
+  trackersLoaded,
+  onRetryTrackers,
   trackerBusyId,
   onCreateTracker,
   onEditTracker,
@@ -30,6 +34,13 @@ export default function ObjetivoList({
   onDeleteOccurrence,
   timezone,
 }) {
+  if (objetivos.length === 0 && objectivesLoading)
+    return (
+      <p role="status" className="text-sm text-text-secondary">
+        Carregando objetivos…
+      </p>
+    )
+  if (objetivos.length === 0 && objectivesError) return null
   if (objetivos.length === 0) {
     return (
       <EmptyState
@@ -63,6 +74,8 @@ export default function ObjetivoList({
           trackers={trackersByObjective[String(objetivo.id)] || []}
           trackersLoading={trackersLoading}
           trackersError={trackersError}
+          trackersLoaded={trackersLoaded}
+          onRetryTrackers={onRetryTrackers}
           trackerBusyId={trackerBusyId}
           onCreateTracker={() => onCreateTracker(objetivo)}
           onEditTracker={onEditTracker}

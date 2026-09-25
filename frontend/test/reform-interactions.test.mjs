@@ -65,7 +65,8 @@ test('detalhes longos expandem localmente; conclusão, menu e recorrência ficam
  const details=[...view.container.querySelectorAll('button')].find(button=>button.textContent==='Mostrar detalhes')
  assert.ok(details)
  assert.equal(details.getAttribute('aria-expanded'),'false')
- assert.match(view.container.textContent,/Recorrente/)
+ assert.match(view.container.textContent,/Recorrente · Todos os dias/)
+ assert.equal(details.getAttribute("aria-controls"),description.id)
  await click(view.container.querySelector('[aria-label="Concluir: Ler livro"]'));assert.equal(complete,1)
  await click(view.container.querySelector('[aria-haspopup=menu]'))
  await click(document.querySelector('[role=menuitem]'));assert.equal(edit,1)
@@ -146,4 +147,24 @@ test('política de cadastro e login possui limites distintos e não normaliza se
 test('tema local aplica light/dark e devolve controle ao sistema',()=>{
  for(const value of ['light','dark']) {preference.setThemePreference(value);assert.equal(document.documentElement.dataset.theme,value);assert.equal(preference.getThemePreference(),value)}
  preference.setThemePreference('system');assert.equal(document.documentElement.hasAttribute('data-theme'),false);assert.equal(preference.getThemePreference(),'system')
+})
+
+
+test('recorrência semanal permanece legível e expandir uma tarefa não abre as demais',async()=>{
+ const task={id:21,titulo:'Revisar notas',instrucao:'Descrição com detalhes para consultar.',status_code:'PENDENTE',recurrence:{series_id:2,weekdays:[0,2,4]},permissions:{can_complete:true}}
+ const first=await mount(TaskCard,{task,onComplete:()=>{}})
+ const second=await mount(TaskCard,{task:{...task,id:22},onComplete:()=>{}})
+ try {
+  for(const view of [first,second]) {
+   const description=view.container.querySelector('p')
+   Object.defineProperties(description,{scrollHeight:{configurable:true,value:80},clientHeight:{configurable:true,value:20}})
+  }
+  await act(async()=>window.dispatchEvent(new window.Event('resize')))
+  assert.match(first.container.textContent,/Recorrente · Seg, Qua, Sex/)
+  const toggle=view=>view.container.querySelector('[aria-controls]')
+  await click(toggle(first))
+  assert.equal(toggle(first).getAttribute('aria-expanded'),'true')
+  assert.equal(toggle(second).getAttribute('aria-expanded'),'false')
+  assert.notEqual(toggle(first).getAttribute('aria-controls'),toggle(second).getAttribute('aria-controls'))
+ } finally {await first.close();await second.close()}
 })

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useId, useRef, useState } from "react"
 import { Check, Circle, Repeat2, Pin, RotateCcw } from "lucide-react"
 import Button from "../../../components/ui/Button"
 import { operationalDateFor, normalizeTaskDate } from "../../calendar/calendarUtils"
@@ -28,9 +28,17 @@ export default function TaskCard({
   const focus = variant === "focus"
   const compactCompleted = !focus && completed
   const inlineRecurrence = !focus && task.recurrence
+  const weekdays = task.recurrence?.weekdays || []
+  const recurrenceLabel =
+    weekdays.length === 7
+      ? "Todos os dias"
+      : ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+          .filter((_, index) => weekdays.includes(index))
+          .join(", ")
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [descriptionClipped, setDescriptionClipped] = useState(false)
   const descriptionRef = useRef(null)
+  const descriptionId = useId()
   useEffect(() => {
     if (focus || compactCompleted || !task?.instrucao || detailsOpen) return undefined
     const description = descriptionRef.current
@@ -96,14 +104,18 @@ export default function TaskCard({
             )}
           </div>
         )}
-        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : "py-3"}`}>
+        <div className={`min-w-0 flex-1 ${focus ? "pt-2" : compactCompleted ? "py-3" : "py-2"}`}>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <h3
               className={`m-0 min-w-0 max-w-full break-words font-medium ${focus ? "text-xl leading-6 tracking-tight" : "text-sm leading-5 sm:text-base"} ${completed ? "line-clamp-2 text-text-secondary line-through" : "text-text-primary"}`}
             >
               {!focus && !compactCompleted && task.is_pinned && (
                 <>
-                  <Pin size={13} className="mr-1 inline-block align-[-2px] text-text-muted" aria-hidden="true" />
+                  <Pin
+                    size={13}
+                    className="mr-1 inline-block align-[-2px] text-text-muted"
+                    aria-hidden="true"
+                  />
                   <span className="sr-only">Prioridade alta: </span>
                 </>
               )}
@@ -115,13 +127,16 @@ export default function TaskCard({
                 title="Recorrente"
               >
                 <Repeat2 size={13} aria-hidden="true" />
-                <span className={compactCompleted ? "sr-only" : ""}>Recorrente</span>
+                <span className={compactCompleted ? "sr-only" : ""}>
+                  Recorrente{!compactCompleted && recurrenceLabel ? ` · ${recurrenceLabel}` : ""}
+                </span>
               </span>
             )}
           </div>
           {task?.instrucao && !compactCompleted && (
             <p
               ref={descriptionRef}
+              id={descriptionId}
               className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-0.5 text-sm leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
             >
               {task.instrucao}
@@ -131,7 +146,8 @@ export default function TaskCard({
             <button
               type="button"
               aria-expanded={detailsOpen}
-              className="mt-0.5 min-h-7 rounded-control border-0 bg-transparent px-1 text-xs font-medium text-text-secondary hover:bg-peripheral hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+              aria-controls={descriptionId}
+              className="mt-0.5 min-h-6 rounded-control border-0 bg-transparent px-1 text-xs font-medium text-text-secondary hover:bg-peripheral hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               onClick={() => setDetailsOpen((open) => !open)}
             >
               {detailsOpen ? "Ocultar detalhes" : "Mostrar detalhes"}
@@ -140,8 +156,7 @@ export default function TaskCard({
           {task?.instrucao && compactCompleted && (
             <span className="sr-only">Instrução: {task.instrucao}</span>
           )}
-          {((!compactCompleted && (notPerformed || showDeadline)) ||
-            (focus && completed)) && (
+          {((!compactCompleted && (notPerformed || showDeadline)) || (focus && completed)) && (
             <div
               className={`${focus ? "mt-2 gap-2" : "mt-1 gap-x-2 gap-y-0.5"} flex flex-wrap items-center text-xs text-text-muted`}
             >

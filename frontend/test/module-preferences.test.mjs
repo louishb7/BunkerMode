@@ -33,8 +33,9 @@ test("preferências filtram o catálogo sem criar módulos adicionais", () => {
   assert.deepEqual(keysFor({ enabled_modules: ["tasks"] }), ["tasks"])
   assert.deepEqual(keysFor({ enabled_modules: ["objectives"] }), ["objectives"])
   assert.deepEqual(keysFor({ enabled_modules: [] }), [])
+  assert.deepEqual(keysFor({ enabled_modules: ["finances"] }), ["finances"])
 })
 
-test("sessão antiga sem enabled_modules usa todos os módulos como fallback", () => {
+test("sessão antiga sem enabled_modules preserva os dois módulos originais como fallback", () => {
   assert.deepEqual(keysFor({}), ["tasks", "objectives"])
 })

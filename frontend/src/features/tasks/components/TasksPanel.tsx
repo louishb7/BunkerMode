@@ -2,6 +2,7 @@ import React from "react"
 import { Focus, Plus } from "lucide-react"
 import Button from "../../../components/ui/Button"
 
+import LoadingLines from "../../../components/ui/LoadingLines"
 import EmptyState from "../../../components/ui/EmptyState"
 import { isCompleted, isNotPerformed } from "../../../utils/taskStatus"
 import TaskCard from "./TaskCard"
@@ -41,13 +42,13 @@ export default function TasksPanel({
     }
 
     return (
-      <section className="grid gap-0">
+      <section className="grid grid-cols-1 gap-0">
         <h3
           className={`m-0 bg-surface-subtle px-4 text-xs font-medium ${tone === "default" ? "py-2 text-text-primary" : "py-1.5 text-text-secondary"}`}
         >
           {label}
         </h3>
-        <div className="grid gap-0">
+        <div className="grid grid-cols-1 gap-0">
           {tasks.map((task) => (
             <TaskCard
               key={task.id}
@@ -71,15 +72,11 @@ export default function TasksPanel({
   }
 
   return (
-    <section aria-label="Execução do dia selecionado" className="grid gap-0">
+    <section aria-label="Execução do dia selecionado" className="grid grid-cols-1 gap-0">
       {loading ? (
-        <EmptyState
-          flat
-          title="Sincronizando tarefas"
-          message="Carregando tarefas do dia selecionado."
-        />
+        <LoadingLines label="Carregando tarefas" />
       ) : selectedTasks.length > 0 ? (
-        <div className="grid">
+        <div className="grid grid-cols-1">
           {renderTaskGroup("Em aberto", groups.open)}
           {renderTaskGroup("Concluídas", groups.completed, "subdued")}
           {renderTaskGroup("Não realizadas", groups.unperformed, "subdued")}

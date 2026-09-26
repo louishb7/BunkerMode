@@ -7,7 +7,7 @@ export type TrackerOccurrence = {
 
 export type Tracker = {
   id: number
-  objetivo_id: number
+  objetivo_id: number | null
   titulo: string
   descricao: string | null
   created_at: string

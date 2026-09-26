@@ -64,12 +64,8 @@ export class TasksController {
     const user = request.currentUser!;
     const board = await this.tasksService.focusBoard(user);
     return {
-      tasks: board.action_tasks.map((task) =>
-        toTaskResponse(task, user),
-      ),
-      daily_tasks: board.daily_tasks.map((task) =>
-        toTaskResponse(task, user),
-      ),
+      tasks: board.action_tasks.map((task) => toTaskResponse(task, user)),
+      daily_tasks: board.daily_tasks.map((task) => toTaskResponse(task, user)),
     };
   }
 
@@ -105,9 +101,28 @@ export class TasksController {
     return toTaskResponse(task, user);
   }
 
+  @Post("tarefas/:id/vincular-objetivo")
+  linkToObjective(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() payload: { objetivo_id?: unknown },
+  ) {
+    return this.tasksService.linkToObjective(
+      taskId(id),
+      request.currentUser!,
+      payload?.objetivo_id,
+    );
+  }
+
   @Post("tarefas/:id/desvincular-objetivo")
-  unlinkFromObjective(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
-    return this.tasksService.unlinkFromObjective(taskId(id), request.currentUser!);
+  unlinkFromObjective(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") id: string,
+  ) {
+    return this.tasksService.unlinkFromObjective(
+      taskId(id),
+      request.currentUser!,
+    );
   }
 
   @Patch("tarefas/:id/toggle-pin")
@@ -122,9 +137,15 @@ export class TasksController {
 
   @Post("tarefas/:id/reabrir")
   @HttpCode(200)
-  async reopenTask(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
+  async reopenTask(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") id: string,
+  ) {
     const user = request.currentUser!;
-    return toTaskResponse(await this.tasksService.reopen(taskId(id), user), user);
+    return toTaskResponse(
+      await this.tasksService.reopen(taskId(id), user),
+      user,
+    );
   }
 
   @Delete("tarefas/:id")

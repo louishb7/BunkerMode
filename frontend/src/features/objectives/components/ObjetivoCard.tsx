@@ -19,6 +19,12 @@ function formatDateOnly(value, fallback) {
 }
 
 export default function ObjetivoCard({
+  onAdd = undefined,
+  reserves = [],
+  onEditReserve = undefined,
+  onUnlinkReserve = undefined,
+  onUnlinkTracker = undefined,
+  onCompleteTask = undefined,
   tasksEnabled,
   loading,
   tasks,
@@ -66,6 +72,9 @@ export default function ObjetivoCard({
   const menuItems = [
     { label: "Editar objetivo", onSelect: onEdit },
     ...(onMoveToTop ? [{ label: "Mover para o início", onSelect: onMoveToTop }] : []),
+    ...(objetivo.status === "concluido" || objetivo.status === "abandonado"
+      ? [{ label: "Retomar objetivo", onSelect: () => onUpdateStatus("ativo") }]
+      : []),
     ...(objetivo.status === "ativo"
       ? [{ label: "Pausar objetivo", onSelect: () => onUpdateStatus("pausado") }]
       : objetivo.status === "pausado"
@@ -77,10 +86,10 @@ export default function ObjetivoCard({
     <article
       id={`objetivo-${objetivo.id}`}
       aria-label={`Objetivo: ${objetivo.titulo}`}
-      className="work-surface min-w-0 scroll-mt-6"
+      className={`objective-direction min-w-0 scroll-mt-6 objective-${objetivo.status}`}
     >
-      <div className="grid md:grid-cols-[1.1fr_1fr]">
-        <header className="min-w-0 p-4 sm:p-6">
+      <div className="direction-reading">
+        <header className="min-w-0">
           <div className="mb-4 flex items-center justify-between gap-3">
             <ObjectiveStatus status={objetivo.status} />
             <ActionsMenu
@@ -119,14 +128,12 @@ export default function ObjetivoCard({
             </p>
           )}
         </header>
-        <section
-          aria-label={`Sinais de ${objetivo.titulo}`}
-          className="min-w-0 border-t border-border p-4 sm:p-6 md:border-t-0 md:border-l"
-        >
+        <section aria-label={`Sinais de ${objetivo.titulo}`} className="min-w-0">
           <h3 className="mt-0 mb-4 text-xs font-semibold uppercase tracking-wider text-text-muted">
             Sinais atuais
           </h3>
           <ObjectiveSummary
+            reserves={reserves}
             objetivo={objetivo}
             trackers={trackers}
             tasks={tasksEnabled ? summaryTasks : []}
@@ -142,9 +149,19 @@ export default function ObjetivoCard({
           />
         </section>
       </div>
+      <div className="flex justify-end py-3">
+        <Button variant="ghost" size="small" onClick={onAdd || onCreateTracker || onCreateTask}>
+          Adicionar ao objetivo +
+        </Button>
+      </div>
       <details className="group/operations border-t border-border">
         <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-control px-4 py-3 text-sm font-medium text-text-secondary hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-focus-ring sm:px-6 [&::-webkit-details-marker]:hidden">
-          <span>Acompanhamentos{tasksEnabled ? " e tarefas" : ""}</span>
+          <span>
+            Vínculos{" "}
+            <span className="ml-2 text-text-muted">
+              {trackers.length + (tasksEnabled ? tasks.length : 0) + reserves.length}
+            </span>
+          </span>
           <span className="flex items-center gap-2 text-xs">
             <span className="group-open/operations:hidden">Abrir detalhes</span>
             <span className="hidden group-open/operations:inline">Recolher detalhes</span>
@@ -156,6 +173,11 @@ export default function ObjetivoCard({
           </span>
         </summary>
         <ObjectiveOperationalPanel
+          reserves={reserves}
+          onEditReserve={onEditReserve}
+          onUnlinkReserve={onUnlinkReserve}
+          onUnlinkTracker={onUnlinkTracker}
+          onCompleteTask={onCompleteTask}
           {...{
             tasksEnabled,
             tasks,

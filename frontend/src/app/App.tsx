@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext"
 import { TaskBoardProvider, useTaskBoardContext } from "../context/TaskBoardContext"
 import AuthScreen from "../features/auth/components/AuthScreen"
 import ResetPasswordScreen from "../features/auth/components/ResetPasswordScreen"
+import FinancesPage from "../features/finances/pages/FinancesPage"
 import HomePage from "../features/home/pages/HomePage"
 import ObjectivesPage from "../features/objectives/pages/ObjectivesPage"
 import SettingsPage from "../features/settings/pages/SettingsPage"
@@ -36,6 +37,14 @@ export default function App() {
         }
       >
         <Route path={APP_ROUTES.ROOT} element={<HomeRoute />} />
+        <Route
+          path={APP_ROUTES.FINANCES}
+          element={
+            <EnabledModuleRoute moduleKey="finances">
+              <FinancesRoute />
+            </EnabledModuleRoute>
+          }
+        />
         <Route path={APP_ROUTES.SETTINGS} element={<SettingsRoute />} />
         <Route
           path={APP_ROUTES.OBJECTIVES}
@@ -145,11 +154,7 @@ function TasksRoute() {
 
   return (
     <AppShell onLogout={logout} user={auth.user}>
-      <TasksPage
-        board={board}
-        onStartFocus={startFocus}
-        user={auth.user}
-      />
+      <TasksPage board={board} onStartFocus={startFocus} user={auth.user} />
     </AppShell>
   )
 }
@@ -202,4 +207,14 @@ function useLogout() {
     auth.clearSession()
     navigate(APP_ROUTES.AUTH, { replace: true })
   }
+}
+
+function FinancesRoute() {
+  const auth = useAuth()
+  const logout = useLogout()
+  return (
+    <AppShell onLogout={logout} user={auth.user}>
+      <FinancesPage token={auth.token} user={auth.user} onUnauthorized={auth.handleUnauthorized} />
+    </AppShell>
+  )
 }

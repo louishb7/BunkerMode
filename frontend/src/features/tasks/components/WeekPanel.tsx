@@ -14,10 +14,9 @@ export default function WeekPanel({
   weekLabel,
   weekDays,
 }) {
-  const currentWeek = weekDays.some((date) => date.getTime() === todayDate.getTime())
   return (
     <section
-      className="mx-auto grid w-full max-w-[680px] gap-2 p-3 sm:px-6 sm:py-4"
+      className="mx-auto grid w-full max-w-[780px] gap-2 py-3 sm:py-4"
       aria-label="Calendário semanal"
     >
       <header className="relative grid grid-cols-[44px_minmax(0,1fr)_44px] items-center">
@@ -37,7 +36,7 @@ export default function WeekPanel({
             <CalendarDays size={16} aria-hidden="true" />
             {weekLabel}
           </p>
-          {!currentWeek && onToday && (
+          {onToday && (
             <Button size="small" variant="ghost" onClick={onToday}>
               Hoje
             </Button>

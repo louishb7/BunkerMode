@@ -1,3 +1,5 @@
+import { OrientationModule } from "./orientation/orientation.module";
+import { FinancesModule } from "./finances/finances.module";
 import { Module } from "@nestjs/common";
 
 import { AuthModule } from "./auth/auth.module";
@@ -7,7 +9,14 @@ import { TasksModule } from "./tasks/tasks.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
-  imports: [AuthModule, GoalsModule, TasksModule, PrismaModule],
+  imports: [
+    OrientationModule,
+    FinancesModule,
+    AuthModule,
+    GoalsModule,
+    TasksModule,
+    PrismaModule,
+  ],
   controllers: [HealthController],
 })
 export class AppModule {}

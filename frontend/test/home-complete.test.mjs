@@ -5,75 +5,173 @@ import { createRoot } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { JSDOM } from "jsdom"
 import { createServer } from "vite"
-
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" })
-Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true })
-const vite = await createServer({ appType: "custom", logLevel: "silent", root: new URL("..", import.meta.url).pathname, server: { middlewareMode: true } })
-const [{ default: HomePage }, { api }, cache] = await Promise.all([
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.window.document,
+  IS_REACT_ACT_ENVIRONMENT: true,
+})
+const vite = await createServer({
+  appType: "custom",
+  logLevel: "silent",
+  root: new URL("..", import.meta.url).pathname,
+  server: { middlewareMode: true },
+})
+const [{ default: Home }, { api }, focus] = await Promise.all([
   vite.ssrLoadModule("/src/features/home/pages/HomePage.tsx"),
   vite.ssrLoadModule("/src/services/bunkermodeApi.ts"),
-  vite.ssrLoadModule("/src/state/overviewCache.ts"),
+  vite.ssrLoadModule("/src/features/tasks/focusSession.ts"),
 ])
 after(() => vite.close())
-const todayKey = () => {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Recife", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date())
-  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return `${byType.day}-${byType.month}-${byType.year}`
+const user = {
+  id: 71,
+  enabled_modules: ["tasks", "objectives", "finances"],
+  timezone: "America/Recife",
 }
-
-test("Home conclui imediatamente, ordena pendentes antes e sincroniza resposta", async () => {
-  const task = (id, status = "PENDENTE") => ({ id, titulo: `Tarefa ${id}`, status, status_code: status, permissions: { can_complete: status === "PENDENTE" } })
-  const token = "home-complete-test"
-  cache.updateOverview(token, { daily: [task(1), task(2)], dailyDate: todayKey() })
-  let finish
-  const original = { listDailyTasks: api.listDailyTasks, completeTask: api.completeTask }
-  api.listDailyTasks = async () => ({ ok: true, data: [task(1), task(2)] })
-  api.completeTask = async () => new Promise((resolve) => { finish = resolve })
+const task = { id: 1, titulo: "Ler", status: "PENDENTE", permissions: { can_complete: true } }
+const snapshot = () => ({
+  tarefas: [task],
+  direcoes: [
+    {
+      id: 1,
+      titulo: "Aprender",
+      status: "ativo",
+      descricao: "Não repetir na Home",
+      trackers: [],
+      tasks: [],
+      reserves: [{ titulo: "Curso", valor_centavos: 420000, alvo_centavos: 1000000 }],
+    },
+  ],
+  financeiro: null,
+})
+async function mount(props = {}) {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
+  const render = async (p) =>
+    act(async () =>
+      root.render(
+        React.createElement(
+          MemoryRouter,
+          null,
+          React.createElement(Home, {
+            token: "orientation-test",
+            user,
+            onUnauthorized: () => false,
+            ...p,
+          })
+        )
+      )
+    )
+  await render(props)
+  return {
+    container,
+    render,
+    async close() {
+      await act(async () => root.unmount())
+      container.remove()
+      window.localStorage.clear()
+    },
+  }
+}
+test("Home espera confirmação e releitura; não replica concluídas nem descrição", async () => {
+  const original = { ...api }
+  let finish
+  let done = false
+  const calls = []
+  api.materializeTaskRecurrences = async () => {
+    calls.push("prepare")
+    return { ok: true }
+  }
+  api.getOrientation = async () => {
+    calls.push("read")
+    return { ok: true, data: { ...snapshot(), tarefas: done ? [] : [task] } }
+  }
+  api.completeTask = () =>
+    new Promise((resolve) => {
+      finish = () => {
+        done = true
+        resolve({ ok: true, data: { ...task, status: "CONCLUIDA" } })
+      }
+    })
+  const view = await mount()
   try {
-    await act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(HomePage, { token, user: { enabled_modules: ["tasks"], timezone: "America/Recife" }, onUnauthorized: () => false }))))
-    await act(async () => container.querySelector('[aria-label="Concluir: Tarefa 1"]').click())
-    assert.match(container.querySelector("ul").textContent, /Tarefa 2Tarefa 1/)
-    assert.equal(container.querySelector(".line-through")?.textContent, "Tarefa 1")
-    await act(async () => finish({ ok: true, data: task(1, "CONCLUIDA") }))
-    assert.equal(cache.getOverview(token).daily[0].status, "CONCLUIDA")
+    assert.deepEqual(calls, ["prepare", "read"])
+    assert.doesNotMatch(view.container.textContent, /Não repetir na Home|Finanças/)
+    await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
+    assert.match(view.container.textContent, /Ler/)
+    assert.equal(view.container.querySelector(".line-through"), null)
+    await act(async () => finish())
+    assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
+    assert.deepEqual(calls, ["prepare", "read", "prepare", "read"])
   } finally {
-    api.listDailyTasks = original.listDailyTasks
-    api.completeTask = original.completeTask
-    await act(async () => root.unmount())
-    container.remove()
-    cache.clearOverview()
+    await view.close()
+    Object.assign(api, original)
   }
 })
-
-test("Home mantém cache visível durante releitura e desfaz conclusão rejeitada", async () => {
-  const token = "home-complete-rollback"
-  const first = { id: 1, titulo: "Ler", status: "PENDENTE", status_code: "PENDENTE", permissions: { can_complete: true } }
-  const second = { ...first, id: 2, titulo: "Escrever" }
-  cache.updateOverview(token, { daily: [first, second], dailyDate: todayKey() })
-  let finish
-  const original = { listDailyTasks: api.listDailyTasks, completeTask: api.completeTask }
-  api.listDailyTasks = async () => new Promise(() => {})
-  api.completeTask = async () => new Promise((resolve) => { finish = resolve })
-  const container = document.createElement("div")
-  document.body.append(container)
-  const root = createRoot(container)
+test("falha de conclusão preserva snapshot e 401 é global", async () => {
+  const original = { ...api }
+  let unauthorized = 0
+  api.materializeTaskRecurrences = async () => ({ ok: true })
+  api.getOrientation = async () => ({ ok: true, data: snapshot() })
+  api.completeTask = async () => ({ ok: false, status: 503, data: { message: "Falha ao salvar" } })
+  const view = await mount({
+    onUnauthorized: (r) => {
+      if (r.status === 401) unauthorized++
+      return r.status === 401
+    },
+  })
   try {
-    await act(async () => root.render(React.createElement(MemoryRouter, null, React.createElement(HomePage, { token, user: { enabled_modules: ["tasks"], timezone: "America/Recife" }, onUnauthorized: () => false }))))
-    assert.match(container.textContent, /Ler/)
-    assert.doesNotMatch(container.textContent, /Carregando/)
-    await act(async () => container.querySelector('[aria-label="Concluir: Ler"]').click())
-    assert.equal(container.querySelector(".line-through")?.textContent, "Ler")
-    await act(async () => finish({ ok: false, status: 503, data: { message: "Falha" } }))
-    assert.equal(container.querySelector(".line-through"), null)
-    assert.equal(cache.getOverview(token).daily[0].status, "PENDENTE")
+    await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
+    assert.match(view.container.textContent, /Ler|Falha ao salvar/)
+    api.completeTask = async () => ({ ok: false, status: 401 })
+    await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
+    assert.equal(unauthorized, 1)
   } finally {
-    api.listDailyTasks = original.listDailyTasks
-    api.completeTask = original.completeTask
-    await act(async () => root.unmount())
-    container.remove()
-    cache.clearOverview()
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+test("módulo financeiro desativado não expõe valores, inclusive em dados residuais", async () => {
+  const original = { ...api }
+  api.getOrientation = async () => ({
+    ok: true,
+    data: { ...snapshot(), financeiro: { livre_centavos: -10000 } },
+  })
+  api.materializeTaskRecurrences = async () => ({ ok: true })
+  const view = await mount({ user: { ...user, enabled_modules: ["objectives"] } })
+  try {
+    assert.doesNotMatch(
+      view.container.textContent,
+      /4.200|10.000|100,00|Reservas sem cobertura|Concluir: Ler/
+    )
+    assert.match(view.container.textContent, /Aprender/)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+test("foco temporário substitui lista de ações; carregar não vira copy de produto", async () => {
+  const original = { ...api }
+  let finish
+  api.materializeTaskRecurrences = async () => ({ ok: true })
+  api.getOrientation = () =>
+    new Promise((resolve) => {
+      finish = resolve
+    })
+  window.localStorage.setItem(
+    focus.focusStorageKey(user.id),
+    JSON.stringify(focus.newFocusBlock({ activityText: "Escrever capítulo" }, 45))
+  )
+  const view = await mount()
+  try {
+    assert.ok(view.container.querySelector('[role=status][aria-label="Carregando seu Bunker"]'))
+    assert.doesNotMatch(view.container.textContent, /Carregando|Atualizando|Dados anteriores/)
+    await act(async () => finish({ ok: true, data: snapshot() }))
+    assert.match(view.container.textContent, /Escrever capítulo/)
+    assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
   }
 })

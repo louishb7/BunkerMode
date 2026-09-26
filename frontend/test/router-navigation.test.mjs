@@ -96,6 +96,32 @@ async function navigate(path, user = null, preview = {}) {
   globalThis.fetch = async (url) => {
     const pathname = new URL(url).pathname
     calls.push(pathname)
+    if (pathname.endsWith("/orientacao")) {
+      return Response.json(
+        {
+          tarefas: Array.isArray(preview.dailyTasks)
+            ? preview.dailyTasks.filter((t) => t.status !== "CONCLUIDA").slice(0, 3)
+            : [],
+          direcoes: (preview.objectives || [])
+            .filter((o) => o.status === "ativo")
+            .slice(0, 3)
+            .map((o) => ({ ...o, trackers: [], tasks: [], reserves: [] })),
+          financeiro: null,
+        },
+        { status: preview.orientationStatus || 200 }
+      )
+    }
+    if (pathname.endsWith("/financas"))
+      return Response.json({
+        mes: "2026-09",
+        saldo_centavos: 0,
+        reservado_centavos: 0,
+        livre_centavos: 0,
+        receitas_centavos: 0,
+        despesas_centavos: 0,
+        lancamentos: [],
+        reservas: [],
+      })
     if (pathname.endsWith("/usuarios/me")) {
       return Response.json(user, { status: 200 })
     }
@@ -144,7 +170,14 @@ async function navigate(path, user = null, preview = {}) {
   return { calls, path: currentPath, rendered }
 }
 
-for (const path of ["/", "/tarefas", "/tarefas/foco", "/objetivos", "/configuracoes"]) {
+for (const path of [
+  "/",
+  "/tarefas",
+  "/tarefas/foco",
+  "/objetivos",
+  "/configuracoes",
+  "/financas",
+]) {
   test(`não autenticado: ${path} redireciona para /auth`, async () => {
     const result = await navigate(path)
     assert.equal(result.path, "/auth")
@@ -214,52 +247,88 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
     "Revisar contrato",
     "Organizar notas",
     "Construir portfólio",
-    "Projetos publicados",
     "Objetivo ativo seguinte",
-
-
   ]) {
     assert.match(result.rendered, new RegExp(marker), JSON.stringify(result.calls))
   }
   for (const marker of ["Estudar arquitetura", "Objetivo concluído", "Objetivo abandonado"]) {
     assert.doesNotMatch(result.rendered, new RegExp(marker))
   }
-  assert.match(result.rendered, /Tarefa concluída/)
+  assert.doesNotMatch(result.rendered, /Tarefa concluída|Projetos publicados/)
   assert.equal(result.rendered.match(/Não deve aparecer/g)?.length ?? 0, 0)
-  assert.equal(result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")), false)
-  assert.equal(result.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), true)
-  assert.equal(result.calls.some((call) => call.endsWith("/objetivos")), true)
+  assert.equal(
+    result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")),
+    true
+  )
+  assert.equal(
+    result.calls.some((call) => call.endsWith("/orientacao")),
+    true
+  )
+  assert.equal(
+    result.calls.some((call) => call.endsWith("/objetivos")),
+    false
+  )
 })
 
 test("Home consulta apenas os módulos habilitados e integra estados vazios", async () => {
   const tasksOnly = await navigate("/", users.tasks, { dailyTasks: [] })
-  assert.match(tasksOnly.rendered, /Nenhuma tarefa aberta para hoje/)
-  assert.equal(tasksOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), true)
-  assert.equal(tasksOnly.calls.some((call) => call.endsWith("/objetivos")), false)
-  assert.equal(tasksOnly.calls.some((call) => call.endsWith("/acompanhamentos")), false)
+  assert.match(tasksOnly.rendered, /O dia está aberto/)
+  assert.equal(
+    tasksOnly.calls.some((call) => call.endsWith("/orientacao")),
+    true
+  )
+  assert.equal(
+    tasksOnly.calls.some((call) => call.endsWith("/objetivos")),
+    false
+  )
+  assert.equal(
+    tasksOnly.calls.some((call) => call.endsWith("/acompanhamentos")),
+    false
+  )
 
   const objectivesOnly = await navigate("/", users.objectives, { objectives: [] })
-  assert.match(objectivesOnly.rendered, /Nenhum objetivo ativo ou pausado/)
-  assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), false)
-  assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")), false)
-  assert.equal(objectivesOnly.calls.some((call) => call.endsWith("/objetivos")), true)
+  assert.match(objectivesOnly.rendered, /Nenhuma direção ativa/)
+  assert.equal(
+    objectivesOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")),
+    false
+  )
+  assert.equal(
+    objectivesOnly.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")),
+    false
+  )
+  assert.equal(
+    objectivesOnly.calls.some((call) => call.endsWith("/orientacao")),
+    true
+  )
 
   const none = await navigate("/", users.none)
   assert.match(none.rendered, /Nenhuma ferramenta habilitada/)
-  assert.match(none.rendered, /Configurações/)
-  assert.equal(none.calls.some((call) => call.endsWith("/tarefas/dia-operacional")), false)
-  assert.equal(none.calls.some((call) => call.endsWith("/objetivos")), false)
+  assert.match(none.rendered, /Escolher ferramentas/)
+  assert.equal(
+    none.calls.some((call) => call.endsWith("/tarefas/dia-operacional")),
+    false
+  )
+  assert.equal(
+    none.calls.some((call) => call.endsWith("/objetivos")),
+    false
+  )
 })
 
-test("erro local de Tarefas preserva o recorte de Objetivos na Home", async () => {
-  const result = await navigate("/", users.both, {
-    dailyTasks: { message: "Tarefas indisponíveis" },
-    dailyTasksStatus: 503,
-    objectives: [{ id: 1, titulo: "Objetivo disponível", descricao: null, status: "ativo" }],
-  })
+test("falha na orientação é explícita sem afirmar vazio", async () => {
+  const result = await navigate("/", users.both, { orientationStatus: 503 })
+  assert.match(result.rendered, /Não foi possível carregar seu Bunker/)
+  assert.doesNotMatch(result.rendered, /O dia está aberto|Nenhuma direção ativa/)
+})
 
-  assert.match(result.rendered, /Tarefas indisponíveis/)
-  assert.match(result.rendered, /Objetivo disponível/)
+test("Finanças respeita guard e habilitação independente", async () => {
+  assert.equal((await navigate("/financas", users.both)).path, "/")
+  const result = await navigate("/financas", { ...users.both, enabled_modules: ["finances"] })
+  assert.equal(result.path, "/financas")
+  assert.match(result.rendered, /Livre após reservas|Novo lançamento/)
+  assert.equal(
+    result.calls.some((path) => /objetivos|tarefas/.test(path)),
+    false
+  )
 })
 
 test("/auth autenticado redireciona para Home", async () => {
@@ -272,7 +341,10 @@ test("/reset-password permanece público mesmo com sessão e não carrega módul
     assert.equal(result.path, "/reset-password")
     assert.match(result.rendered, /Criar nova senha/)
     assert.doesNotMatch(result.rendered, /Link inválido/)
-    assert.equal(result.calls.some((call) => /tarefas|objetivos/.test(call)), false)
+    assert.equal(
+      result.calls.some((call) => /tarefas|objetivos/.test(call)),
+      false
+    )
   }
 })
 
@@ -280,5 +352,8 @@ test("rota desconhecida segue fallback genérico conforme autenticação", async
   assert.equal((await navigate("/desconhecida")).path, "/auth")
   const authenticated = await navigate("/desconhecida", users.both)
   assert.equal(authenticated.path, "/")
-  assert.equal(authenticated.calls.some((call) => call.endsWith("/tarefas/foco")), false)
+  assert.equal(
+    authenticated.calls.some((call) => call.endsWith("/tarefas/foco")),
+    false
+  )
 })

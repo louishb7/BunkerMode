@@ -83,6 +83,7 @@ model objetivos {
   missoes            missoes[]
   series_recorrencia series_recorrencia[]
   acompanhamentos   acompanhamentos[]
+  reservas           reservas_financeiras[]
   usuarios           usuarios             @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([usuario_id, status])
@@ -105,19 +106,25 @@ model usuarios {
   missoes_recebidas  missoes[]            @relation("missoes_responsavel")
   series_recorrencia series_recorrencia[] @relation("series_recorrencia_responsavel")
   objetivos          objetivos[]
+  acompanhamentos    acompanhamentos[]
+  lancamentos        lancamentos_financeiros[]
+  reservas           reservas_financeiras[]
 }
 
 model acompanhamentos {
   id          Int                            @id @default(autoincrement())
-  objetivo_id Int
+  objetivo_id Int?
+  usuario_id  Int
+  usuario     usuarios                       @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade)
   titulo      String                         @db.VarChar(200)
   descricao   String?
   created_at  DateTime                       @default(now()) @db.Timestamp(6)
   updated_at  DateTime                       @updatedAt @db.Timestamp(6)
-  objetivo    objetivos                      @relation(fields: [objetivo_id], references: [id], onDelete: Cascade)
+  objetivo    objetivos?                     @relation(fields: [objetivo_id], references: [id], onDelete: SetNull)
   ocorrencias ocorrencias_acompanhamento[]
 
   @@index([objetivo_id])
+  @@index([usuario_id])
 }
 
 model ocorrencias_acompanhamento {
@@ -142,4 +149,36 @@ model PasswordReset {
   @@index([userId, usedAt])
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+// BRL em centavos inteiros; nenhum cálculo monetário usa ponto flutuante.
+model lancamentos_financeiros {
+  id             Int      @id @default(autoincrement())
+  usuario_id     Int
+  titulo         String   @db.VarChar(200)
+  tipo           String   @db.VarChar(20)
+  categoria      String   @db.VarChar(60)
+  valor_centavos Int
+  data           DateTime @db.Date
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  updated_at     DateTime @updatedAt @db.Timestamp(6)
+  usuario        usuarios @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade)
+
+  @@index([usuario_id, data, id])
+}
+
+model reservas_financeiras {
+  id                Int        @id @default(autoincrement())
+  usuario_id        Int
+  objetivo_id       Int?
+  titulo            String     @db.VarChar(200)
+  valor_centavos    Int        @default(0)
+  alvo_centavos     Int?
+  created_at        DateTime   @default(now()) @db.Timestamp(6)
+  updated_at        DateTime   @updatedAt @db.Timestamp(6)
+  usuario           usuarios   @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade)
+  objetivo          objetivos? @relation(fields: [objetivo_id], references: [id], onDelete: SetNull)
+
+  @@index([usuario_id, id])
+  @@index([objetivo_id])
 }

@@ -144,6 +144,10 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
     timezone: "America/Recife",
   }
   Object.assign(api, {
+    getOrientation: async () => ({
+      ok: true,
+      data: { tarefas: [], direcoes: [], financeiro: null },
+    }),
     getCurrentUser: async () => ({ ok: true, data: user }),
     materializeTaskRecurrences: async () => ({ ok: true }),
     listTasks: async () => ({ ok: true, data: [] }),
@@ -171,13 +175,9 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
         if (route === "/") {
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
-          const card = container.querySelector('[aria-labelledby="home-tasks-title"]')
+          const card = container.querySelector('[aria-labelledby="now-title"]')
           assert.equal(card.querySelectorAll('a[href="/tarefas/foco"]').length, 1)
-          assert.equal(
-            card.querySelector('header a[href="/tarefas/foco"]').getAttribute("aria-label"),
-            "Abrir modo foco"
-          )
-          assert.doesNotMatch(card.textContent, /Abrir modo foco/)
+          assert.match(card.textContent, /Entrar em Foco/)
         }
         const trigger =
           route === "/"

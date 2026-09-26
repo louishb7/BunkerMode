@@ -15,7 +15,12 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
     useState(initial) {
       const slot = index++
       if (!(slot in values)) values[slot] = typeof initial === "function" ? initial() : initial
-      return [values[slot], (value) => { values[slot] = value }]
+      return [
+        values[slot],
+        (value) => {
+          values[slot] = value
+        },
+      ]
     },
     useRef(initial) {
       const slot = index++
@@ -24,7 +29,9 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
     },
     useCallback: (callback) => callback,
     useMemo: (callback) => callback(),
-    useEffect(callback) { effect = callback },
+    useEffect(callback) {
+      effect = callback
+    },
   }
   const source = readFileSync(new URL(file, import.meta.url), "utf8")
   const compiled = ts.transpileModule(source, {
@@ -37,10 +44,12 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
       if (path === "react") return react
       if (path.endsWith("bunkermodeApi")) return { api }
       if (path.endsWith("uiState")) return { emptyStatus: { type: "", message: "" } }
-      if (path.endsWith("httpClient")) return {
-        getErrorMessage: (result, fallback) => result.data?.message || fallback,
-      }
-      if (path.endsWith("overviewCache")) return { getOverview: () => ({ all: null, objectives: null }), updateOverview: () => {} }
+      if (path.endsWith("httpClient"))
+        return {
+          getErrorMessage: (result, fallback) => result.data?.message || fallback,
+        }
+      if (path.endsWith("overviewCache"))
+        return { getOverview: () => ({ all: null, objectives: null }), updateOverview: () => {} }
       throw new Error(path)
     },
   })
@@ -60,11 +69,24 @@ test("desativar integração invalida leitura e criação ainda pendentes", asyn
   let finishRead
   let create
   let reads = 0
-  const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-    listTasks: () => { reads++; return new Promise((resolve) => { finishRead = resolve }) },
-    createTask: () => new Promise((resolve) => { create = resolve }),
-  })
+  const render = loadHook(
+    "../src/features/objectives/hooks/useObjectiveTasks.ts",
+    "useObjectiveTasks",
+    {
+      listTasks: () => {
+        reads++
+        return new Promise((resolve) => {
+          finishRead = resolve
+        })
+      },
+      createTask: () =>
+        new Promise((resolve) => {
+          create = resolve
+        }),
+    }
+  )
   render.activate({ enabled: true })
+  await new Promise((resolve) => setImmediate(resolve))
   const creation = render().createTask({ titulo: "Tarefa vinculada" })
   render.activate({ enabled: false })
   finishRead({ ok: true, data: [] })
@@ -76,11 +98,21 @@ test("desativar integração invalida leitura e criação ainda pendentes", asyn
 })
 
 test("integração desativada não consulta nem cria tarefas", async () => {
-  const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-    listTasks: () => { throw new Error("Não deveria listar") },
-    materializeTaskRecurrences: () => { throw new Error("Não deveria materializar") },
-    createTask: () => { throw new Error("Não deveria criar") },
-  })
+  const render = loadHook(
+    "../src/features/objectives/hooks/useObjectiveTasks.ts",
+    "useObjectiveTasks",
+    {
+      listTasks: () => {
+        throw new Error("Não deveria listar")
+      },
+      materializeTaskRecurrences: () => {
+        throw new Error("Não deveria materializar")
+      },
+      createTask: () => {
+        throw new Error("Não deveria criar")
+      },
+    }
+  )
   assert.equal(await render({ enabled: false }).refresh(), false)
   assert.equal(await render({ enabled: false }).createTask({ titulo: "Tarefa" }), false)
 })
@@ -92,9 +124,17 @@ test("Objetivos lista e executa todo CRUD sem consultar Tarefas", async () => {
       calls.push("list")
       return { ok: true, data: [{ id: 1, titulo: "Objetivo independente" }] }
     },
-    listTasks: () => { throw new Error("Tarefas indisponível") },
+    listTasks: () => {
+      throw new Error("Tarefas indisponível")
+    },
   }
-  for (const method of ["createObjetivo", "updateObjetivo", "updateObjetivoStatus", "reorderObjetivos", "deleteObjetivo"]) {
+  for (const method of [
+    "createObjetivo",
+    "updateObjetivo",
+    "updateObjetivoStatus",
+    "reorderObjetivos",
+    "deleteObjetivo",
+  ]) {
     api[method] = async () => {
       calls.push(method)
       return { ok: true, data: null }
@@ -103,7 +143,13 @@ test("Objetivos lista e executa todo CRUD sem consultar Tarefas", async () => {
   const render = loadHook("../src/features/objectives/hooks/useObjectives.ts", "useObjectives", api)
   assert.equal(await render().refresh(), true)
   assert.equal(render().objetivos[0].titulo, "Objetivo independente")
-  for (const method of ["createObjetivo", "updateObjetivo", "updateObjetivoStatus", "reorderObjetivos", "deleteObjetivo"]) {
+  for (const method of [
+    "createObjetivo",
+    "updateObjetivo",
+    "updateObjetivoStatus",
+    "reorderObjetivos",
+    "deleteObjetivo",
+  ]) {
     assert.equal(await render()[method](1, {}), true)
     assert.equal(calls.at(-2), method)
     assert.equal(calls.at(-1), "list")
@@ -112,11 +158,22 @@ test("Objetivos lista e executa todo CRUD sem consultar Tarefas", async () => {
 
 test("integração mostra falha local e recupera tarefas agrupadas por objetivo", async () => {
   let available = false
-  const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-    listTasks: async () => available
-      ? { ok: true, data: [{ id: 10, objetivo_id: 1 }, { id: 11, objetivo_id: null }] }
-      : { ok: false, status: 503, data: { message: "Serviço indisponível" } },
-  })
+  const render = loadHook(
+    "../src/features/objectives/hooks/useObjectiveTasks.ts",
+    "useObjectiveTasks",
+    {
+      listTasks: async () =>
+        available
+          ? {
+              ok: true,
+              data: [
+                { id: 10, objetivo_id: 1 },
+                { id: 11, objetivo_id: null },
+              ],
+            }
+          : { ok: false, status: 503, data: { message: "Serviço indisponível" } },
+    }
+  )
   assert.equal(await render().refresh(), false)
   assert.equal(render().error, "Serviço indisponível")
   assert.equal(render().loading, false)
@@ -130,15 +187,25 @@ test("integração mostra falha local e recupera tarefas agrupadas por objetivo"
 test("criação vinculada preserva payload e distingue persistência de falha na releitura", async () => {
   let available = false
   let received
-  const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-    createTask: async (_token, payload) => {
-      received = payload
-      return available ? { ok: true, data: { id: 10 } }
-        : { ok: false, data: { message: "Criação indisponível" } }
-    },
-    listTasks: async () => ({ ok: false, data: { message: "Leitura indisponível" } }),
-  })
-  const payload = { titulo: "Tarefa", objetivo_id: 1, duration_type: "ate_objetivo", recurrence_weekdays: [0] }
+  const render = loadHook(
+    "../src/features/objectives/hooks/useObjectiveTasks.ts",
+    "useObjectiveTasks",
+    {
+      createTask: async (_token, payload) => {
+        received = payload
+        return available
+          ? { ok: true, data: { id: 10 } }
+          : { ok: false, data: { message: "Criação indisponível" } }
+      },
+      listTasks: async () => ({ ok: false, data: { message: "Leitura indisponível" } }),
+    }
+  )
+  const payload = {
+    titulo: "Tarefa",
+    objetivo_id: 1,
+    duration_type: "ate_objetivo",
+    recurrence_weekdays: [0],
+  }
   assert.equal(await render().createTask(payload), false)
   assert.equal(render().formStatus.message, "Criação indisponível")
   available = true
@@ -160,7 +227,7 @@ test("respostas 401 da integração acionam a sessão global sem erro local", as
     (result) => {
       if (result.status === 401) unauthorizedResults.push(result)
       return result.status === 401
-    },
+    }
   )
 
   assert.equal(await render().refresh(), false)
@@ -168,7 +235,10 @@ test("respostas 401 da integração acionam a sessão global sem erro local", as
   assert.equal(await render().createTask({ titulo: "Tarefa vinculada" }), false)
   assert.equal(render().formStatus.message, "")
   assert.equal(unauthorizedResults.length, 2)
-  assert.equal(unauthorizedResults.every((result) => result.status === 401), true)
+  assert.equal(
+    unauthorizedResults.every((result) => result.status === 401),
+    true
+  )
 })
 
 test("resposta stale não aciona o tratamento global de sessão", async () => {
@@ -184,7 +254,7 @@ test("resposta stale não aciona o tratamento global de sessão", async () => {
       if (result.status !== 401) return false
       unauthorizedCalls += 1
       return true
-    },
+    }
   )
 
   const staleRequest = render().refresh()
@@ -198,16 +268,34 @@ test("resposta stale não aciona o tratamento global de sessão", async () => {
   assert.equal(unauthorizedCalls, 0)
 })
 
-test("integração lê sem materializar e preserva 401 global", async () => {
+test("integração prepara recorrências e preserva 401 global", async () => {
   for (const status of [200, 503, 401]) {
     const calls = []
     let unauthorized = 0
-    const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-      materializeTaskRecurrences: () => { throw new Error("Leitura não materializa") },
-      listTasks: async () => { calls.push("GET"); return { ok: status === 200, status, data: status === 200 ? [] : { message: "Leitura indisponível" } } },
-    }, (result) => { if (result.status === 401) unauthorized++; return result.status === 401 })
+    const render = loadHook(
+      "../src/features/objectives/hooks/useObjectiveTasks.ts",
+      "useObjectiveTasks",
+      {
+        materializeTaskRecurrences: async () => {
+          calls.push("POST")
+          return { ok: true }
+        },
+        listTasks: async () => {
+          calls.push("GET")
+          return {
+            ok: status === 200,
+            status,
+            data: status === 200 ? [] : { message: "Leitura indisponível" },
+          }
+        },
+      },
+      (result) => {
+        if (result.status === 401) unauthorized++
+        return result.status === 401
+      }
+    )
     assert.equal(await render().refresh(), status === 200)
-    assert.deepEqual(calls, ["GET"])
+    assert.deepEqual(calls, ["POST", "GET"])
     assert.equal(unauthorized, status === 401 ? 1 : 0)
     assert.equal(render().error, status === 503 ? "Leitura indisponível" : "")
   }
@@ -218,11 +306,24 @@ test("leitura stale não aplica erro ou 401", async () => {
     const pending = []
     let reads = 0
     let unauthorized = 0
-    const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
-      listTasks: () => { reads++; return new Promise((resolve) => pending.push(resolve)) },
-    }, (result) => { if (result.status === 401) unauthorized++; return result.status === 401 })
+    const render = loadHook(
+      "../src/features/objectives/hooks/useObjectiveTasks.ts",
+      "useObjectiveTasks",
+      {
+        listTasks: () => {
+          reads++
+          return new Promise((resolve) => pending.push(resolve))
+        },
+      },
+      (result) => {
+        if (result.status === 401) unauthorized++
+        return result.status === 401
+      }
+    )
     const old = render().refresh()
+    await new Promise((resolve) => setImmediate(resolve))
     const latest = render().refresh()
+    await new Promise((resolve) => setImmediate(resolve))
     pending[1]({ ok: true, status: 200, data: [{ id: 2, objetivo_id: 1 }] })
     await latest
     pending[0]({ ok: status === 200, status, data: status === 200 ? [] : { message: "Antigo" } })

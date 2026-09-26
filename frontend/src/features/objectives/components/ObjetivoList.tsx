@@ -1,9 +1,16 @@
 import React from "react"
 
+import LoadingLines from "../../../components/ui/LoadingLines"
 import EmptyState from "../../../components/ui/EmptyState"
 import ObjetivoCard from "./ObjetivoCard"
 
 export default function ObjetivoList({
+  onAdd = undefined,
+  reserves = [],
+  onEditReserve = undefined,
+  onUnlinkReserve = undefined,
+  onUnlinkTracker = undefined,
+  onCompleteTask = undefined,
   objectivesLoading = false,
   objectivesError = "",
   tasksEnabled,
@@ -36,11 +43,7 @@ export default function ObjetivoList({
   timezone,
 }) {
   if (objetivos.length === 0 && objectivesLoading)
-    return (
-      <p role="status" className="text-sm text-text-secondary">
-        Carregando objetivos…
-      </p>
-    )
+    return <LoadingLines label="Carregando objetivos" />
   if (objetivos.length === 0 && objectivesError) return null
   if (objetivos.length === 0) {
     return (
@@ -69,6 +72,12 @@ export default function ObjetivoList({
             </p>
             {items.map((objetivo, index) => (
               <ObjetivoCard
+                onAdd={onAdd ? () => onAdd(objetivo) : undefined}
+                reserves={reserves.filter((r) => r.objetivo_id === objetivo.id)}
+                onEditReserve={onEditReserve}
+                onUnlinkReserve={onUnlinkReserve}
+                onUnlinkTracker={onUnlinkTracker}
+                onCompleteTask={onCompleteTask}
                 tasksEnabled={tasksEnabled}
                 key={objetivo.id}
                 loading={loading}
@@ -81,9 +90,7 @@ export default function ObjetivoList({
                 onCreateTask={() => onCreateTask(objetivo)}
                 onDelete={() => onDelete(objetivo)}
                 onEdit={() => onEdit(objetivo)}
-                onMoveToTop={
-                  index > 0 ? () => onMoveToTop(objetivo.id) : null
-                }
+                onMoveToTop={index > 0 ? () => onMoveToTop(objetivo.id) : null}
                 onUpdateStatus={(status) => onUpdateStatus(objetivo.id, status)}
                 onUnlinkTask={onUnlinkTask}
                 unlinkingId={unlinkingId}

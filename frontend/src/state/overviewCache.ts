@@ -1,10 +1,22 @@
 import type { Task } from "../types/taskContract"
 import type { Tracker } from "../types/trackerContract"
 
-type Snapshot = { daily: Task[] | null; dailyDate: string | null; all: Task[] | null; objectives: any[] | null; trackers: Tracker[] | null }
+type Snapshot = {
+  daily: Task[] | null
+  dailyDate: string | null
+  all: Task[] | null
+  objectives: any[] | null
+  trackers: Tracker[] | null
+}
 const snapshots = new Map<string, Snapshot>()
 const listeners = new Set<() => void>()
-const empty: Snapshot = { daily: null, dailyDate: null, all: null, objectives: null, trackers: null }
+const empty: Snapshot = {
+  daily: null,
+  dailyDate: null,
+  all: null,
+  objectives: null,
+  trackers: null,
+}
 
 export function getOverview(token: string): Snapshot {
   return snapshots.get(token) ?? empty
@@ -18,7 +30,8 @@ export function updateOverview(token: string, patch: Partial<Snapshot>) {
 
 export function updateCachedTask(token: string, task: Task) {
   const current = getOverview(token)
-  const replace = (tasks: Task[] | null) => tasks?.map((item) => item.id === task.id ? task : item) ?? null
+  const replace = (tasks: Task[] | null) =>
+    tasks?.map((item) => (item.id === task.id ? task : item)) ?? null
   updateOverview(token, { daily: replace(current.daily), all: replace(current.all) })
 }
 
@@ -29,9 +42,10 @@ export function unlinkTaskList(items: Task[], task: Task): Task[] {
     return {
       ...item,
       objetivo_id: null,
-      recurrence: item.recurrence?.termination_policy === "ate_objetivo"
-        ? { ...item.recurrence, termination_policy: "sem_termino" as const }
-        : item.recurrence,
+      recurrence:
+        item.recurrence?.termination_policy === "ate_objetivo"
+          ? { ...item.recurrence, termination_policy: "sem_termino" as const }
+          : item.recurrence,
     }
   })
 }
@@ -45,9 +59,9 @@ export function unlinkCachedObjectiveTask(token: string, task: Task) {
 }
 
 export function detachObjectiveTaskList(items: Task[], objectiveId: number): Task[] {
-  return items.map((item) => item.objetivo_id === objectiveId
-    ? { ...item, objetivo_id: null }
-    : item)
+  return items.map((item) =>
+    item.objetivo_id === objectiveId ? { ...item, objetivo_id: null } : item
+  )
 }
 
 export function removeObjectiveFromOverview(token: string, objectiveId: number) {
@@ -55,13 +69,18 @@ export function removeObjectiveFromOverview(token: string, objectiveId: number) 
   updateOverview(token, {
     all: current.all ? detachObjectiveTaskList(current.all, objectiveId) : null,
     daily: current.daily ? detachObjectiveTaskList(current.daily, objectiveId) : null,
-    trackers: current.trackers?.filter((item) => item.objetivo_id !== objectiveId) ?? null,
+    trackers:
+      current.trackers?.map((item) =>
+        item.objetivo_id === objectiveId ? { ...item, objetivo_id: null } : item
+      ) ?? null,
   })
 }
 
 export function subscribeOverview(listener: () => void) {
   listeners.add(listener)
-  return () => { listeners.delete(listener) }
+  return () => {
+    listeners.delete(listener)
+  }
 }
 
 export function clearOverview() {

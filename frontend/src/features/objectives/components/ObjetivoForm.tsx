@@ -54,6 +54,7 @@ export default function ObjetivoForm({ editingObjetivo = null, loading, onCancel
         Título
         <input
           className={fieldClass}
+          maxLength={200}
           name="titulo"
           onChange={updateField}
           placeholder="Ex.: Consolidar rotina de treino"
@@ -100,12 +101,12 @@ export default function ObjetivoForm({ editingObjetivo = null, loading, onCancel
       </section>
 
       <label className={labelClass}>
-        Descrição
+        Propósito (opcional)
         <textarea
           className={`${fieldClass} min-h-28 resize-y`}
           name="descricao"
           onChange={updateField}
-          placeholder="Contexto opcional para orientar decisões futuras"
+          placeholder="Por que esta direção importa para você?"
           rows={4}
           value={form.descricao}
         />

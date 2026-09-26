@@ -70,13 +70,13 @@ export default function TasksPage({ board, onStartFocus, user }) {
 
   return (
     <>
-      <section className="mx-auto grid max-w-[900px] gap-5">
+      <section className="mx-auto grid max-w-[800px] gap-5">
         <PageHeader title="Tarefas" />
 
         <div className="empty:hidden">
           <StatusNotice status={board.status} />
         </div>
-        <div className="work-surface min-w-0">
+        <div className="min-w-0 border-t-2 border-accent">
           <WeekPanel
             onToday={() => setSelectedDate(todayDate)}
             onNextWeek={() => setSelectedDate((current) => addDays(current, 7))}

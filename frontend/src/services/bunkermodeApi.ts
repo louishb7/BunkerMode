@@ -78,6 +78,35 @@ async function requestFocusBoard(
 }
 
 export const api = {
+  getOrientation(token, includeTasks = true) {
+    return request(`/orientacao${includeTasks ? "" : "?incluir_tarefas=false"}`, { token })
+  },
+  getFinances(token, month?) {
+    return request<import("../types/financeContract").FinanceOverview>(
+      `/financas${month ? `?mes=${encodeURIComponent(month)}` : ""}`,
+      { token }
+    )
+  },
+  saveFinanceEntry(token, payload, id?) {
+    return request(`/financas/lancamentos${id ? `/${id}` : ""}`, {
+      token,
+      method: id ? "PATCH" : "POST",
+      body: payload,
+    })
+  },
+  deleteFinanceEntry(token, id) {
+    return request(`/financas/lancamentos/${id}`, { token, method: "DELETE" })
+  },
+  saveReserve(token, payload, id?) {
+    return request(`/financas/reservas${id ? `/${id}` : ""}`, {
+      token,
+      method: id ? "PATCH" : "POST",
+      body: payload,
+    })
+  },
+  deleteReserve(token, id) {
+    return request(`/financas/reservas/${id}`, { token, method: "DELETE" })
+  },
   forgotPassword(payload: { email: string }) {
     return request<{ message: string }>("/auth/forgot-password", { method: "POST", body: payload })
   },
@@ -129,9 +158,17 @@ export const api = {
   deleteTask(token, taskId) {
     return request(`/tarefas/${taskId}`, { token, method: "DELETE" })
   },
+  linkTaskToObjective(token, taskId, objetivoId) {
+    return request(`/tarefas/${taskId}/vincular-objetivo`, {
+      token,
+      method: "POST",
+      body: { objetivo_id: objetivoId },
+    })
+  },
   unlinkTaskFromObjective(token, taskId) {
     return request<{ tarefa_id: number; series_id: number | null; objetivo_id: null }>(
-      `/tarefas/${taskId}/desvincular-objetivo`, { token, method: "POST" }
+      `/tarefas/${taskId}/desvincular-objetivo`,
+      { token, method: "POST" }
     )
   },
   getTaskHistory(token, taskId) {
@@ -168,9 +205,15 @@ export const api = {
     return request(`/acompanhamentos/${id}`, { token, method: "DELETE" })
   },
   recordTrackerOccurrence(token, id) {
-    return request<TrackerOccurrence>(`/acompanhamentos/${id}/ocorrencias`, { token, method: "POST" })
+    return request<TrackerOccurrence>(`/acompanhamentos/${id}/ocorrencias`, {
+      token,
+      method: "POST",
+    })
   },
   deleteTrackerOccurrence(token, id, occurrenceId) {
-    return request(`/acompanhamentos/${id}/ocorrencias/${occurrenceId}`, { token, method: "DELETE" })
+    return request(`/acompanhamentos/${id}/ocorrencias/${occurrenceId}`, {
+      token,
+      method: "DELETE",
+    })
   },
 }

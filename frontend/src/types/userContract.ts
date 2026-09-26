@@ -1,4 +1,4 @@
-export type ModuleKey = "tasks" | "objectives"
+export type ModuleKey = "tasks" | "objectives" | "finances"
 
 export type User = {
   id: number

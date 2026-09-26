@@ -139,7 +139,7 @@ export default function TaskCard({
             <p
               ref={descriptionRef}
               id={descriptionId}
-              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-1 text-sm leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
+              className={`mb-0 break-words text-text-secondary ${focus ? "mt-1.5 text-base leading-6" : `mt-1 text-xs leading-5 ${detailsOpen ? "" : "line-clamp-1"}`}`}
             >
               {task.instrucao}
             </p>
@@ -152,7 +152,7 @@ export default function TaskCard({
               {inlineRecurrence && !compactCompleted && (
                 <span className="inline-flex items-center gap-1" title="Tarefa recorrente">
                   <Repeat2 size={12} aria-hidden="true" />
-                  <span className="sr-only">Recorrente · </span>
+                  <span className="sr-only">Tarefa recorrente: </span>
                   {recurrenceLabel || "Recorrente"}
                 </span>
               )}

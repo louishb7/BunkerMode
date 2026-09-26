@@ -1,402 +1,271 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { ArrowUpRight, ListTodo, Compass, Circle, Check, Focus } from "lucide-react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { ArrowUpRight, Circle, Focus } from "lucide-react"
 import { Link } from "react-router-dom"
-
-import { getErrorMessage } from "../../../api/httpClient"
-import StatusNotice from "../../../components/ui/StatusNotice"
-import { getEnabledModules } from "../../../modules/moduleCatalog"
-import { APP_ROUTES } from "../../../routes/routeConstants"
 import { api } from "../../../services/bunkermodeApi"
-import {
-  getOverview,
-  subscribeOverview,
-  updateCachedTask,
-  updateOverview,
-} from "../../../state/overviewCache"
-import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
-import ObjectiveStatus from "../../objectives/components/ObjectiveStatus"
+import { getErrorMessage } from "../../../api/httpClient"
+import { getEnabledModules } from "../../../modules/moduleCatalog"
+import LoadingLines from "../../../components/ui/LoadingLines"
+import Button from "../../../components/ui/Button"
 import ObjectiveSummary from "../../objectives/components/ObjectiveSummary"
-import { useTrackers } from "../../objectives/hooks/useTrackers"
-import { groupObjectiveTasks } from "../../objectives/hooks/useObjectiveTasks"
-import { formatDateForApi } from "../../../utils/date"
+import { money } from "../../finances/money"
+import { readFocusSession } from "../../tasks/focusSession"
 
-const emptyOverview = { daily: null, dailyDate: null, all: null, objectives: null, trackers: null }
+export const selectHomeTasks = (tasks = []) =>
+  tasks.filter((task) => task.status !== "CONCLUIDA").slice(0, 3)
+export const selectHomeObjectives = (goals = []) =>
+  goals.filter((goal) => goal.status === "ativo").slice(0, 3)
 
-const emptyPreview = { error: "", items: [], loading: false }
-
-export function selectHomeTasks(tasks = []) {
-  return [
-    ...tasks.filter((task) => task?.status !== "CONCLUIDA").slice(0, 3),
-    ...tasks.filter((task) => task?.status === "CONCLUIDA").slice(0, 3),
-  ]
-}
-
-function dailyFromBoard(tasks, timezone) {
-  const date = operationalDateFor(timezone)
-  return tasks.filter((task) => taskBelongsToDate(task, date, timezone))
-}
-
-export function selectHomeObjectives(objetivos = []) {
-  return [
-    ...objetivos.filter((objetivo) => objetivo?.status === "ativo"),
-    ...objetivos.filter((objetivo) => objetivo?.status === "pausado"),
-  ].slice(0, 2)
-}
-
-function CompartmentLink({ children, to }) {
-  return (
-    <Link
-      className="inline-flex min-h-11 items-center gap-2 rounded-control px-2 text-sm font-semibold text-text-primary no-underline hover:bg-surface-subtle"
-      to={to}
-    >
-      {children}
-      <ArrowUpRight size={18} aria-hidden="true" />
-    </Link>
+export default function HomePage({ token, user, onUnauthorized }) {
+  const modules = getEnabledModules(user)
+  const tasksEnabled = modules.some((m) => m.key === "tasks")
+  const objectivesEnabled = modules.some((m) => m.key === "objectives")
+  const financesEnabled = modules.some((m) => m.key === "finances")
+  const preferenceKey = modules.map((m) => m.key).join(",")
+  const key = `${token}:${preferenceKey}`
+  const [snapshot, setSnapshot] = useState(null)
+  const data = snapshot?.key === key ? snapshot.data : null
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(null)
+  const [tasksError, setTasksError] = useState("")
+  const version = useRef(0)
+  const [focus, setFocus] = useState(() =>
+    tasksEnabled ? readFocusSession(window.localStorage, user.id) : null
   )
-}
-function PreviewState({ preview, empty }) {
-  if (preview.loading)
-    return (
-      <p role="status" className="m-0 py-5 text-sm text-text-secondary">
-        Carregando…
-      </p>
+  const refresh = useCallback(async () => {
+    const current = ++version.current
+    const prepared = tasksEnabled
+      ? await api.materializeTaskRecurrences(token)
+      : { ok: true as const, status: 200, data: null }
+    if (current !== version.current || onUnauthorized?.(prepared)) return
+    setTasksError(
+      prepared.ok ? "" : getErrorMessage(prepared, "Não foi possível preparar as tarefas de hoje.")
     )
-  if (preview.error) return <StatusNotice status={{ type: "error", message: preview.error }} />
-  if (!preview.items.length) return <p className="m-0 py-5 text-sm text-text-secondary">{empty}</p>
-  return null
-}
-function TasksCompartment({ preview, onComplete, completingId }) {
-  return (
-    <section aria-labelledby="home-tasks-title" className="work-surface p-5 sm:p-6">
-      <header className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-peripheral text-text-primary">
-            <ListTodo size={21} aria-hidden="true" />
-          </span>
-          <div>
-            <h2 id="home-tasks-title" className="m-0 text-base font-semibold">
-              Tarefas
-            </h2>
-            <span className="text-xs text-text-secondary">Hoje</span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Link
-            to={APP_ROUTES.TASKS_FOCUS}
-            aria-label="Abrir modo foco"
-            title="Abrir modo foco"
-            className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-          >
-            <Focus size={19} aria-hidden="true" />
-          </Link>
-          <Link
-            to={APP_ROUTES.TASKS}
-            aria-label="Abrir Tarefas"
-            title="Abrir Tarefas"
-            className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral"
-          >
-            <ArrowUpRight size={21} aria-hidden="true" />
-          </Link>
-        </div>
-      </header>
-      <PreviewState preview={preview} empty="Nenhuma tarefa aberta para hoje." />
-      {!preview.loading && !preview.error && (
-        <ul className="m-0 list-none p-0">
-          {preview.items.map((task) => (
-            <li
-              key={task.id}
-              className="flex items-start gap-3 border-t border-border py-4 text-sm font-medium leading-6"
-            >
-              <button
-                type="button"
-                aria-label={`${task.status === "CONCLUIDA" ? "Concluída" : "Concluir"}: ${task.titulo}`}
-                disabled={
-                  task.status === "CONCLUIDA" ||
-                  completingId === task.id ||
-                  !task.permissions?.can_complete
-                }
-                onClick={() => onComplete(task)}
-                className="mt-1 grid size-[17px] shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 text-text-muted focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default"
-              >
-                {task.status === "CONCLUIDA" ? (
-                  <Check size={17} aria-hidden="true" />
-                ) : (
-                  <Circle size={17} aria-hidden="true" />
-                )}
-              </button>
-              <span
-                className={`min-w-0 break-words ${task.status === "CONCLUIDA" ? "text-text-muted line-through" : ""}`}
-              >
-                {task.titulo}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
-}
-function ObjectivesCompartment({
-  preview,
-  trackers,
-  tasksByObjective,
-  tasksEnabled,
-  timezone,
-  tasksLoading,
-  tasksError,
-}) {
-  return (
-    <section aria-labelledby="home-objectives-title" className="work-surface p-5 sm:p-6">
-      <header className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-peripheral text-text-primary">
-            <Compass size={21} aria-hidden="true" />
-          </span>
-          <div>
-            <h2 id="home-objectives-title" className="m-0 text-base font-semibold">
-              Objetivos
-            </h2>
-            <span className="text-xs text-text-secondary">Suas direções</span>
-          </div>
-        </div>
-        <Link
-          to={APP_ROUTES.OBJECTIVES}
-          aria-label="Abrir Objetivos"
-          title="Abrir Objetivos"
-          className="grid size-11 place-items-center rounded-control text-text-secondary hover:bg-peripheral"
-        >
-          <ArrowUpRight size={21} aria-hidden="true" />
-        </Link>
-      </header>
-      <PreviewState preview={preview} empty="Nenhum objetivo ativo ou pausado." />
-      {!preview.loading && !preview.error && (
-        <ol className="m-0 grid list-none gap-5 p-0">
-          {preview.items.map((objetivo) => (
-            <li key={objetivo.id} className="min-w-0 border-t border-border pt-4">
-              <ObjectiveStatus status={objetivo.status} />
-              <h3 className="mt-2 mb-3 break-words text-lg font-semibold leading-snug tracking-tight">
-                <Link
-                  to={`${APP_ROUTES.OBJECTIVES}#objetivo-${objetivo.id}`}
-                  className="text-text-primary no-underline hover:underline"
-                >
-                  {objetivo.titulo}
-                </Link>
-              </h3>
-              <ObjectiveSummary
-                objetivo={objetivo}
-                tasksEnabled={tasksEnabled}
-                trackers={trackers.byObjective[String(objetivo.id)] || []}
-                trackersLoading={trackers.loading}
-                trackersLoaded={trackers.loaded}
-                trackersError={trackers.error}
-                onRetryTrackers={trackers.refresh}
-                tasks={tasksByObjective[String(objetivo.id)] || []}
-                tasksLoading={tasksLoading}
-                tasksError={tasksError}
-                timezone={timezone}
-              />
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  )
-}
-
-export default function HomePage({ onUnauthorized, token, user }) {
-  const enabledModules = getEnabledModules(user)
-  const tasksEnabled = enabledModules.some((module) => module.key === "tasks")
-  const objectivesEnabled = enabledModules.some((module) => module.key === "objectives")
-  const trackers = useTrackers({ token, onUnauthorized, enabled: objectivesEnabled })
-  const cached = useSyncExternalStore(
-    subscribeOverview,
-    () => getOverview(token),
-    () => emptyOverview
-  )
-  const [tasksPreview, setTasksPreview] = useState(emptyPreview)
-  const [objectivesPreview, setObjectivesPreview] = useState(emptyPreview)
-  const [completingId, setCompletingId] = useState(null)
-  const [completeError, setCompleteError] = useState("")
-  const mutationVersion = useRef(0)
-  const todayKey = formatDateForApi(operationalDateFor(user?.timezone))
-  const knownDaily =
-    cached.dailyDate === todayKey
-      ? cached.daily
-      : cached.all
-        ? dailyFromBoard(cached.all, user?.timezone)
-        : null
-  const taskView = knownDaily
-    ? { error: "", items: selectHomeTasks(knownDaily), loading: false }
-    : tasksPreview
-  const objectiveView = cached.objectives
-    ? { error: "", items: selectHomeObjectives(cached.objectives), loading: false }
-    : objectivesPreview
-
-  async function completeTask(task) {
-    if (!task.permissions?.can_complete || completingId) return
-    setCompletingId(task.id)
-    setCompleteError("")
-    mutationVersion.current += 1
-    const previous = task
-    updateCachedTask(token, {
-      ...task,
-      status: "CONCLUIDA",
-      status_code: "CONCLUIDA",
-      status_label: "Concluída",
-      completed_at: new Date().toISOString(),
-      permissions: { ...task.permissions, can_complete: false },
-    })
-    const result = await api.completeTask(token, task.id)
-    setCompletingId(null)
-    if (onUnauthorized?.(result)) return
+    const result = await api.getOrientation(token, prepared.ok)
+    if (current !== version.current || onUnauthorized?.(result)) return
     if (!result.ok) {
-      updateCachedTask(token, previous)
-      setCompleteError(getErrorMessage(result, "Não foi possível concluir a tarefa."))
+      setError(getErrorMessage(result, "Não foi possível carregar seu Bunker."))
       return
     }
-    updateCachedTask(token, result.data)
+    setSnapshot((previous) => ({
+      key,
+      data: {
+        ...result.data,
+        tarefas:
+          (!prepared.ok || result.data.falhas?.tarefas) && previous?.key === key
+            ? previous.data.tarefas
+            : result.data.tarefas,
+        financeiro:
+          result.data.falhas?.recursos && previous?.key === key
+            ? previous.data.financeiro
+            : result.data.financeiro,
+        direcoes:
+          result.data.falhas?.direcoes && previous?.key === key
+            ? previous.data.direcoes
+            : result.data.direcoes,
+      },
+    }))
+    setError("")
+  }, [key, tasksEnabled, token, onUnauthorized])
+  useEffect(() => {
+    version.current += 1
+    setError("")
+    setBusy(null)
+    void refresh()
+    const updateFocus = () =>
+      setFocus(tasksEnabled ? readFocusSession(window.localStorage, user.id) : null)
+    updateFocus()
+    const timer = setInterval(updateFocus, 30000)
+    window.addEventListener("storage", updateFocus)
+    return () => {
+      version.current++
+      clearInterval(timer)
+      window.removeEventListener("storage", updateFocus)
+    }
+  }, [refresh, tasksEnabled, user.id])
+  async function complete(task) {
+    if (busy !== null) return
+    setBusy(task.id)
+    const current = ++version.current
+    const result = await api.completeTask(token, task.id)
+    if (current !== version.current) return
+    setBusy(null)
+    if (onUnauthorized?.(result)) return
+    if (!result.ok) {
+      setError(getErrorMessage(result, "Não foi possível concluir a tarefa."))
+      return
+    }
+    await refresh()
   }
-
-  useEffect(() => {
-    let cancelled = false
-
-    if (!tasksEnabled || !token) {
-      setTasksPreview(emptyPreview)
-      return () => {
-        cancelled = true
-      }
-    }
-
-    async function loadTasks() {
-      const startedAtVersion = mutationVersion.current
-      const known = getOverview(token)
-      if (!(known.daily && known.dailyDate === todayKey) && !known.all)
-        setTasksPreview({ error: "", items: [], loading: true })
-
-      const result = await api.listDailyTasks(token)
-      if (cancelled || onUnauthorized?.(result)) {
-        return
-      }
-      if (startedAtVersion !== mutationVersion.current) return
-
-      if (!result.ok) {
-        setTasksPreview({
-          error: getErrorMessage(result, "Não foi possível carregar as tarefas de hoje."),
-          items: [],
-          loading: false,
-        })
-        return
-      }
-
-      updateOverview(token, { daily: result.data, dailyDate: todayKey })
-      setTasksPreview({ error: "", items: selectHomeTasks(result.data), loading: false })
-    }
-
-    void loadTasks()
-    return () => {
-      cancelled = true
-    }
-  }, [onUnauthorized, tasksEnabled, token, todayKey])
-
-  useEffect(() => {
-    let cancelled = false
-
-    if (!objectivesEnabled || !token) {
-      setObjectivesPreview(emptyPreview)
-      return () => {
-        cancelled = true
-      }
-    }
-
-    async function loadObjectives() {
-      if (!getOverview(token).objectives)
-        setObjectivesPreview({ error: "", items: [], loading: true })
-      const result = await api.listObjetivos(token)
-      if (cancelled || onUnauthorized?.(result)) {
-        return
-      }
-
-      if (!result.ok) {
-        setObjectivesPreview({
-          error: getErrorMessage(result, "Não foi possível carregar objetivos."),
-          items: [],
-          loading: false,
-        })
-        return
-      }
-
-      const objetivos = Array.isArray(result.data) ? result.data : []
-      updateOverview(token, { objectives: objetivos })
-      setObjectivesPreview({ error: "", items: selectHomeObjectives(objetivos), loading: false })
-    }
-
-    void loadObjectives()
-    return () => {
-      cancelled = true
-    }
-  }, [objectivesEnabled, onUnauthorized, token])
-
   return (
-    <section className="grid gap-7">
-      <header className="pt-2 pb-3">
-        <h1 className="m-0 text-3xl font-semibold tracking-tight">Seu Bunker</h1>
+    <section className="home-orientation">
+      <header className="home-heading">
+        <p className="eyebrow">Orientação</p>
+        <h1>Seu Bunker</h1>
+        <p>O que importa agora.</p>
       </header>
-      {enabledModules.length === 0 ? (
-        <section className="work-surface grid gap-3 p-6" aria-labelledby="home-empty-title">
-          <h2 id="home-empty-title" className="m-0 text-lg font-semibold">
-            Nenhuma ferramenta habilitada
-          </h2>
-          <p className="m-0 text-sm text-text-secondary">
-            Ative Tarefas ou Objetivos nas configurações do seu Bunker.
-          </p>
-          <div>
-            <CompartmentLink to={APP_ROUTES.SETTINGS}>Configurações</CompartmentLink>
-          </div>
-        </section>
+      {error && (
+        <div role="alert" className="text-sm text-danger">
+          {error}{" "}
+          <Button variant="ghost" onClick={refresh}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
+      {!modules.length ? (
+        <div className="empty-copy">
+          <p>Nenhuma ferramenta habilitada.</p>
+          <Link className="text-link" to="/configuracoes">
+            Escolher ferramentas
+          </Link>
+        </div>
+      ) : !data ? (
+        !error && <LoadingLines label="Carregando seu Bunker" />
       ) : (
-        <div
-          className={`grid items-start gap-5 ${tasksEnabled && objectivesEnabled ? "xl:grid-cols-[1fr_1.1fr]" : "max-w-2xl"}`}
-        >
+        <>
           {tasksEnabled && (
-            <div className="grid gap-2">
-              <StatusNotice
-                status={
-                  completeError || (knownDaily && tasksPreview.error)
-                    ? { type: "error", message: completeError || tasksPreview.error }
-                    : null
-                }
-              />
-              <TasksCompartment
-                preview={taskView}
-                onComplete={completeTask}
-                completingId={completingId}
-              />
-            </div>
+            <section className="home-now" aria-labelledby="now-title">
+              <header className="section-heading">
+                <h2 id="now-title">Agora</h2>
+                <Link className="text-link" to="/tarefas/foco">
+                  <Focus size={17} />
+                  {focus ? "Retomar foco" : "Entrar em Foco"}
+                </Link>
+              </header>
+              {(tasksError || data.falhas?.tarefas) && (
+                <p role="status" className="text-sm text-danger">
+                  {tasksError || "Não foi possível consultar as tarefas."}{" "}
+                  <Button variant="ghost" onClick={refresh}>
+                    Tentar novamente
+                  </Button>
+                </p>
+              )}
+              {focus ? (
+                <Link to="/tarefas/foco" className="home-focus">
+                  <span className="eyebrow">
+                    {focus.phase === "active"
+                      ? "Seu contexto escolhido"
+                      : focus.phase === "break"
+                        ? "Pausa em andamento"
+                        : "Bloco encerrado · escolha o próximo passo"}
+                  </span>
+                  <strong>{focus.activityText}</strong>
+                  <ArrowUpRight size={24} aria-hidden="true" />
+                </Link>
+              ) : data.tarefas.length ? (
+                <ol className="home-actions">
+                  {data.tarefas.map((task) => (
+                    <li key={task.id}>
+                      <button
+                        className="home-complete"
+                        disabled={busy !== null || !task.permissions?.can_complete}
+                        aria-label={`Concluir: ${task.titulo}`}
+                        onClick={() => complete(task)}
+                      >
+                        <Circle size={21} aria-hidden="true" />
+                      </button>
+                      <span>{task.titulo}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                !tasksError &&
+                !data.falhas?.tarefas && (
+                  <p className="empty-copy">
+                    O dia está aberto. Escolha uma atividade para o próximo bloco de foco.
+                  </p>
+                )
+              )}
+              <Link to="/tarefas" className="text-link">
+                Ver o dia <ArrowUpRight size={15} />
+              </Link>
+            </section>
           )}
           {objectivesEnabled && (
-            <div className="grid gap-2">
-              <StatusNotice
-                status={
-                  cached.objectives && objectivesPreview.error
-                    ? { type: "error", message: objectivesPreview.error }
-                    : null
-                }
-              />
-              <ObjectivesCompartment
-                preview={objectiveView}
-                tasksEnabled={tasksEnabled}
-                trackers={trackers}
-                timezone={user?.timezone}
-                tasksByObjective={groupObjectiveTasks(
-                  tasksEnabled ? (cached.all ?? knownDaily ?? []) : [],
-                  false
-                )}
-                tasksLoading={tasksEnabled && tasksPreview.loading}
-                tasksError={tasksEnabled ? tasksPreview.error : ""}
-              />
-            </div>
+            <section className="home-directions" aria-labelledby="directions-title">
+              <header className="section-heading">
+                <h2 id="directions-title">Direções</h2>
+                <Link to="/objetivos" className="text-link">
+                  Ver objetivos <ArrowUpRight size={15} />
+                </Link>
+              </header>
+              {data.falhas?.direcoes && (
+                <p role="status" className="text-sm text-danger">
+                  Não foi possível consultar suas direções.{" "}
+                  <Button variant="ghost" onClick={refresh}>
+                    Tentar novamente
+                  </Button>
+                </p>
+              )}
+              {data.direcoes.length ? (
+                <ol className="m-0 list-none p-0">
+                  {data.direcoes.map((goal, index) => (
+                    <li key={goal.id} className="home-direction">
+                      <span className="direction-number" aria-hidden="true">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0">
+                        <h3>
+                          <Link to={`/objetivos#objetivo-${goal.id}`}>{goal.titulo}</Link>
+                        </h3>
+                        <ObjectiveSummary
+                          variant="home"
+                          objetivo={goal}
+                          trackers={goal.trackers}
+                          tasks={
+                            tasksEnabled
+                              ? goal.tasks.filter(
+                                  (task) => !data.tarefas.some((shown) => shown.id === task.id)
+                                )
+                              : []
+                          }
+                          reserves={financesEnabled ? goal.reserves : []}
+                          timezone={user?.timezone}
+                        />
+                      </div>
+                      <Link
+                        aria-label={`Abrir objetivo: ${goal.titulo}`}
+                        className="direction-open"
+                        to={`/objetivos#objetivo-${goal.id}`}
+                      >
+                        <ArrowUpRight size={20} />
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                !data.falhas?.direcoes && (
+                  <p className="empty-copy">
+                    Nenhuma direção ativa. Seus objetivos pausados e encerrados continuam em
+                    Objetivos.
+                  </p>
+                )
+              )}
+            </section>
           )}
-        </div>
+          {financesEnabled && data.falhas?.recursos && (
+            <p role="status" className="text-sm text-danger">
+              Não foi possível verificar os recursos.{" "}
+              <Button variant="ghost" onClick={refresh}>
+                Tentar novamente
+              </Button>
+            </p>
+          )}
+          {financesEnabled && data.financeiro && (
+            <section className="home-attention" aria-label="Estado que pede atenção">
+              <p className="eyebrow">Recursos</p>
+              <h2>Reservas sem cobertura no saldo registrado</h2>
+              <p>Faltam {money(-data.financeiro.livre_centavos)} para cobrir o valor separado.</p>
+              <Link className="text-link" to="/financas">
+                Revisar recursos <ArrowUpRight size={15} />
+              </Link>
+            </section>
+          )}
+          {!tasksEnabled && !objectivesEnabled && !data.financeiro && (
+            <p className="empty-copy">
+              Nenhum estado pede atenção agora. Suas ferramentas estão na navegação.
+            </p>
+          )}
+        </>
       )}
     </section>
   )

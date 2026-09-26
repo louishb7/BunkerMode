@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { Home, ListTodo, Compass, Settings, LogOut, Menu, X } from "lucide-react"
+import { Wallet, Home, ListTodo, Compass, Settings, LogOut, Menu, X } from "lucide-react"
 import Brand from "../ui/Brand"
 import { NavLink } from "react-router-dom"
 
@@ -18,7 +18,7 @@ function NavigationLinks({ onNavigate = undefined, user }) {
     { key: "home", label: "Início", route: APP_ROUTES.ROOT },
     ...getEnabledModules(user),
   ]
-  const icons = { home: Home, tasks: ListTodo, objectives: Compass }
+  const icons = { home: Home, tasks: ListTodo, objectives: Compass, finances: Wallet }
   return (
     <nav aria-label="Navegação principal" className="grid gap-2">
       {items.map((item) => {

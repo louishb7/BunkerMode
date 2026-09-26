@@ -1,9 +1,15 @@
 import { normalizeTaskDate, operationalDateFor } from "../calendar/calendarUtils"
 import { formatDateForApi } from "../../utils/date"
+import { reserveSignal } from "../finances/money"
+import type { Reserve } from "../../types/financeContract"
 import type { Task } from "../../types/taskContract"
 import type { Tracker } from "../../types/trackerContract"
 
-export type ObjectiveSignal = { kind: "tracker" | "task" | "date"; label: string; detail: string }
+export type ObjectiveSignal = {
+  kind: "tracker" | "task" | "date" | "reserve"
+  label: string
+  detail: string
+}
 
 // Resume apenas fatos presentes no snapshot; ausência de ocorrências não implica sucesso.
 export function trackerOccurrenceLabel(tracker: Tracker, timezone?: string, now = new Date()) {
@@ -31,6 +37,7 @@ export function summarizeObjective({
   objetivo,
   trackers = [] as Tracker[],
   tasks = [] as Task[],
+  reserves = [] as Reserve[],
   timezone = undefined as string | undefined,
   now = new Date(),
 }) {
@@ -58,10 +65,12 @@ export function summarizeObjective({
           ? "Tarefa recorrente em aberto"
           : "Tarefa em aberto",
     })
+  for (const reserve of reserves.slice(0, 1))
+    signals.push({ kind: "reserve", label: reserve.titulo, detail: reserveSignal(reserve) })
   if (signals.length < 2 && trackerSignals.length > 1) signals.push(trackerSignals[1])
   const target = normalizeTaskDate(objetivo.data_alvo)
   if (signals.length < 2 && /^\d{2}-\d{2}-\d{4}$/.test(target)) {
     signals.push({ kind: "date", label: "Data-alvo", detail: target.replaceAll("-", "/") })
   }
-  return signals.slice(0, 2)
+  return signals.slice(0, 3)
 }

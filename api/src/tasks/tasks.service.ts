@@ -281,7 +281,8 @@ export class TasksService {
       (task) =>
         task.status === TASK_STATUS.completed ||
         (task.status === TASK_STATUS.pending &&
-          task.prazo !== null && task.prazo.toISOString().slice(0, 10) < today),
+          task.prazo !== null &&
+          task.prazo.toISOString().slice(0, 10) < today),
     );
   }
 
@@ -565,13 +566,69 @@ export class TasksService {
     });
   }
 
+  async linkToObjective(id: number, user: UserRecord, value: unknown) {
+    const current = await this.getTaskForUser(id, user);
+    const goalId = optionalId(value, "Objetivo vinculado não encontrado.");
+    if (goalId === null)
+      throw new HttpException("Informe um objetivo.", HttpStatus.BAD_REQUEST);
+    await this.ensureActiveGoal(user, goalId);
+    if (current.objetivo_id !== null && current.objetivo_id !== goalId)
+      throw new HttpException(
+        "Desvincule a tarefa do objetivo atual antes de vinculá-la a outro.",
+        HttpStatus.CONFLICT,
+      );
+    await this.prisma.$transaction(async (tx) => {
+      if (current.recurrence_series_id !== null) {
+        const series = await tx.series_recorrencia.findFirst({
+          where: {
+            recurrence_series_id: current.recurrence_series_id,
+            responsavel_id: user.usuario_id,
+          },
+        });
+        if (!series)
+          throw new HttpException(
+            "Série recorrente não encontrada.",
+            HttpStatus.NOT_FOUND,
+          );
+        await tx.series_recorrencia.update({
+          where: { recurrence_series_id: series.recurrence_series_id },
+          data: { objetivo_id: goalId },
+        });
+        await tx.missoes.updateMany({
+          where: {
+            recurrence_series_id: series.recurrence_series_id,
+            responsavel_id: user.usuario_id,
+          },
+          data: { objetivo_id: goalId },
+        });
+      } else {
+        await tx.missoes.update({
+          where: { missao_id: current.missao_id },
+          data: { objetivo_id: goalId },
+        });
+      }
+    });
+    return {
+      tarefa_id: current.missao_id,
+      series_id: current.recurrence_series_id,
+      objetivo_id: goalId,
+    };
+  }
+
   async unlinkFromObjective(
     id: number,
     user: UserRecord,
-  ): Promise<{ tarefa_id: number; series_id: number | null; objetivo_id: null }> {
+  ): Promise<{
+    tarefa_id: number;
+    series_id: number | null;
+    objetivo_id: null;
+  }> {
     const current = await this.getTaskForUser(id, user);
     if (current.objetivo_id === null) {
-      throw new HttpException("Tarefa não está vinculada a um objetivo.", HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        "Tarefa não está vinculada a um objetivo.",
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (current.recurrence_series_id === null) {
@@ -579,7 +636,11 @@ export class TasksService {
         where: { missao_id: current.missao_id },
         data: { objetivo_id: null },
       });
-      return { tarefa_id: current.missao_id, series_id: null, objetivo_id: null };
+      return {
+        tarefa_id: current.missao_id,
+        series_id: null,
+        objetivo_id: null,
+      };
     }
 
     const series = await this.prisma.series_recorrencia.findFirst({
@@ -589,7 +650,10 @@ export class TasksService {
       },
     });
     if (!series) {
-      throw new HttpException("Série recorrente não encontrada.", HttpStatus.NOT_FOUND);
+      throw new HttpException(
+        "Série recorrente não encontrada.",
+        HttpStatus.NOT_FOUND,
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -620,7 +684,10 @@ export class TasksService {
   async reopen(id: number, user: UserRecord): Promise<TaskRecord> {
     const current = await this.getTaskForUser(id, user);
     if (!canReopenTask(current, user)) {
-      throw new HttpException("Apenas tarefa finalizada pode ser reaberta.", HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        "Apenas tarefa finalizada pode ser reaberta.",
+        HttpStatus.BAD_REQUEST,
+      );
     }
     return this.updateExecutionState(id, user, {
       data: { status: TASK_STATUS.pending, completed_at: null },
@@ -728,42 +795,50 @@ export class TasksService {
       select: { recurrence_series_id: true, prazo: true },
     });
     const existingDates = new Set(
-      existing.map((task) => `${task.recurrence_series_id}:${isoDateFromDate(task.prazo)}`),
+      existing.map(
+        (task) => `${task.recurrence_series_id}:${isoDateFromDate(task.prazo)}`,
+      ),
     );
 
-    const missingBySeries: Array<{ series: series_recorrencia; dates: Date[] }> = [];
+    const missingBySeries: Array<{
+      series: series_recorrencia;
+      dates: Date[];
+    }> = [];
     const inactiveIds: number[] = [];
     for (const series of seriesList) {
-        if (series.termination_policy === "ate_objetivo") {
-          if (series.objetivo_id === null || series.objetivos === null) {
-            inactiveIds.push(series.recurrence_series_id);
-            continue;
-          }
-          if (series.objetivos.status !== GOAL_STATUS.active) {
-            continue;
-          }
-        }
-
-        const start = series.start_date > today ? series.start_date : today;
-        const limit =
-          series.termination_policy === "ate_data" &&
-          series.end_date &&
-          series.end_date < windowEnd
-            ? series.end_date
-            : windowEnd;
-        if (limit < start) {
+      if (series.termination_policy === "ate_objetivo") {
+        if (series.objetivo_id === null || series.objetivos === null) {
+          inactiveIds.push(series.recurrence_series_id);
           continue;
         }
+        if (series.objetivos.status !== GOAL_STATUS.active) {
+          continue;
+        }
+      }
 
-        const dates = datesForRecurrence(
-          start,
-          limit,
-          series.recurrence_weekdays,
-        );
-        const missing = dates.filter(
-          (date) => !existingDates.has(`${series.recurrence_series_id}:${isoDateFromDate(date)}`),
-        );
-        if (missing.length > 0) missingBySeries.push({ series, dates: missing });
+      const start = series.start_date > today ? series.start_date : today;
+      const limit =
+        series.termination_policy === "ate_data" &&
+        series.end_date &&
+        series.end_date < windowEnd
+          ? series.end_date
+          : windowEnd;
+      if (limit < start) {
+        continue;
+      }
+
+      const dates = datesForRecurrence(
+        start,
+        limit,
+        series.recurrence_weekdays,
+      );
+      const missing = dates.filter(
+        (date) =>
+          !existingDates.has(
+            `${series.recurrence_series_id}:${isoDateFromDate(date)}`,
+          ),
+      );
+      if (missing.length > 0) missingBySeries.push({ series, dates: missing });
     }
     if (missingBySeries.length === 0 && inactiveIds.length === 0) return;
 
@@ -890,7 +965,10 @@ export class TasksService {
       return true;
     }
     const eventDate = task.completed_at;
-    return eventDate !== null && this.calendar.currentDateFor(eventDate, timezone) === isoDate;
+    return (
+      eventDate !== null &&
+      this.calendar.currentDateFor(eventDate, timezone) === isoDate
+    );
   }
 
   private visibleInFocus(task: TaskRecord, isoDate: string): boolean {

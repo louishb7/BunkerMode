@@ -12,7 +12,7 @@ function sortObjetivosByOrder(objetivos = []) {
   })
 }
 
-export function useObjectives({ onUnauthorized, token }) {
+export function useObjectives({ onUnauthorized, token, enabled = true }) {
   const [objetivos, setObjetivos] = useState(() => getOverview(token).objectives ?? [])
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
@@ -23,7 +23,7 @@ export function useObjectives({ onUnauthorized, token }) {
 
   const loadObjectives = useCallback(
     async (successMessage = "") => {
-      if (!token) {
+      if (!token || !enabled) {
         return false
       }
 
@@ -48,24 +48,27 @@ export function useObjectives({ onUnauthorized, token }) {
         return false
       }
 
-      const sorted = sortObjetivosByOrder(Array.isArray(objetivosResult.data) ? objetivosResult.data : [])
+      const sorted = sortObjetivosByOrder(
+        Array.isArray(objetivosResult.data) ? objetivosResult.data : []
+      )
       setObjetivos(sorted)
       updateOverview(token, { objectives: sorted })
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token]
+    [onUnauthorized, token, enabled]
   )
 
   useEffect(() => {
     setMutating(false)
-    void loadObjectives()
+    if (enabled) void loadObjectives()
+    else setObjetivos([])
     return () => {
       loadRequestId.current += 1
       lifecycleId.current += 1
       mutationRequestId.current += 1
     }
-  }, [loadObjectives])
+  }, [loadObjectives, enabled])
 
   async function mutate(action, successMessage, fallbackMessage) {
     if (mutating) {
@@ -89,13 +92,15 @@ export function useObjectives({ onUnauthorized, token }) {
 
     if (!result.ok) {
       setStatus({ type: "error", message: getErrorMessage(result, fallbackMessage) })
-      await loadObjectives()
       return false
     }
 
     if (result.data && typeof result.data === "object" && "id" in result.data) {
       const current = getOverview(token).objectives
-      if (current) updateOverview(token, { objectives: current.map((item) => item.id === result.data.id ? result.data : item) })
+      if (current)
+        updateOverview(token, {
+          objectives: current.map((item) => (item.id === result.data.id ? result.data : item)),
+        })
     } else {
       updateOverview(token, { objectives: null })
     }

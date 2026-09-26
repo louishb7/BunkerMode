@@ -1,10 +1,18 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 
 import { UserRecord } from "../auth/auth.types";
-import { optionalText, positiveInt, requiredText } from "../common/domain-helpers";
+import {
+  optionalText,
+  positiveInt,
+  requiredText,
+} from "../common/domain-helpers";
 import { PrismaService } from "../prisma/prisma.service";
 
-type TrackerPayload = { objetivo_id?: unknown; titulo?: unknown; descricao?: unknown };
+type TrackerPayload = {
+  objetivo_id?: unknown;
+  titulo?: unknown;
+  descricao?: unknown;
+};
 
 @Injectable()
 export class TrackersService {
@@ -12,20 +20,36 @@ export class TrackersService {
 
   list(user: UserRecord) {
     return this.prisma.acompanhamentos.findMany({
-      where: { objetivo: { usuario_id: user.usuario_id } },
-      include: { ocorrencias: { orderBy: [{ occurred_at: "desc" }, { id: "desc" }], take: 5 } },
+      where: { usuario_id: user.usuario_id },
+      include: {
+        ocorrencias: {
+          orderBy: [{ occurred_at: "desc" }, { id: "desc" }],
+          take: 5,
+        },
+      },
       orderBy: [{ created_at: "asc" }, { id: "asc" }],
     });
   }
 
   async create(user: UserRecord, payload: TrackerPayload) {
-    const goalId = positiveInt(payload.objetivo_id, "Objetivo não encontrado.");
-    await this.ensureGoalOwner(user, goalId);
+    const goalId =
+      payload.objetivo_id == null
+        ? null
+        : positiveInt(payload.objetivo_id, "Objetivo não encontrado.");
+    if (goalId !== null) await this.ensureGoalOwner(user, goalId);
     return this.prisma.acompanhamentos.create({
       data: {
         objetivo_id: goalId,
-        titulo: requiredText(payload.titulo, "Título do acompanhamento é obrigatório.", 200),
-        descricao: optionalText(payload.descricao, "Descrição do acompanhamento inválida."),
+        usuario_id: user.usuario_id,
+        titulo: requiredText(
+          payload.titulo,
+          "Título do acompanhamento é obrigatório.",
+          200,
+        ),
+        descricao: optionalText(
+          payload.descricao,
+          "Descrição do acompanhamento inválida.",
+        ),
       },
       include: { ocorrencias: true },
     });
@@ -33,17 +57,40 @@ export class TrackersService {
 
   async update(user: UserRecord, id: number, payload: TrackerPayload) {
     const tracker = await this.findOwned(user, id);
+    const goalId =
+      payload.objetivo_id == null
+        ? null
+        : positiveInt(payload.objetivo_id, "Objetivo não encontrado.");
+    if (payload.objetivo_id !== undefined && goalId !== null)
+      await this.ensureGoalOwner(user, goalId);
     return this.prisma.acompanhamentos.update({
       where: { id: tracker.id },
       data: {
+        ...(payload.objetivo_id !== undefined ? { objetivo_id: goalId } : {}),
         ...(payload.titulo !== undefined
-          ? { titulo: requiredText(payload.titulo, "Título do acompanhamento é obrigatório.", 200) }
+          ? {
+              titulo: requiredText(
+                payload.titulo,
+                "Título do acompanhamento é obrigatório.",
+                200,
+              ),
+            }
           : {}),
         ...(payload.descricao !== undefined
-          ? { descricao: optionalText(payload.descricao, "Descrição do acompanhamento inválida.") }
+          ? {
+              descricao: optionalText(
+                payload.descricao,
+                "Descrição do acompanhamento inválida.",
+              ),
+            }
           : {}),
       },
-      include: { ocorrencias: { orderBy: [{ occurred_at: "desc" }, { id: "desc" }], take: 5 } },
+      include: {
+        ocorrencias: {
+          orderBy: [{ occurred_at: "desc" }, { id: "desc" }],
+          take: 5,
+        },
+      },
     });
   }
 
@@ -59,7 +106,11 @@ export class TrackersService {
     });
   }
 
-  async deleteOccurrence(user: UserRecord, id: number, occurrenceId: number): Promise<void> {
+  async deleteOccurrence(
+    user: UserRecord,
+    id: number,
+    occurrenceId: number,
+  ): Promise<void> {
     const tracker = await this.findOwned(user, id);
     const deleted = await this.prisma.ocorrencias_acompanhamento.deleteMany({
       where: {
@@ -68,7 +119,10 @@ export class TrackersService {
       },
     });
     if (deleted.count === 0) {
-      throw new HttpException("Ocorrência não encontrada.", HttpStatus.NOT_FOUND);
+      throw new HttpException(
+        "Ocorrência não encontrada.",
+        HttpStatus.NOT_FOUND,
+      );
     }
   }
 
@@ -77,18 +131,23 @@ export class TrackersService {
       where: { id: goalId, usuario_id: user.usuario_id },
       select: { id: true },
     });
-    if (!goal) throw new HttpException("Objetivo não encontrado.", HttpStatus.NOT_FOUND);
+    if (!goal)
+      throw new HttpException("Objetivo não encontrado.", HttpStatus.NOT_FOUND);
   }
 
   private async findOwned(user: UserRecord, id: number) {
     const tracker = await this.prisma.acompanhamentos.findFirst({
       where: {
         id: positiveInt(id, "Acompanhamento não encontrado."),
-        objetivo: { usuario_id: user.usuario_id },
+        usuario_id: user.usuario_id,
       },
       select: { id: true },
     });
-    if (!tracker) throw new HttpException("Acompanhamento não encontrado.", HttpStatus.NOT_FOUND);
+    if (!tracker)
+      throw new HttpException(
+        "Acompanhamento não encontrado.",
+        HttpStatus.NOT_FOUND,
+      );
     return tracker;
   }
 }

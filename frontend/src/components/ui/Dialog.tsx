@@ -120,7 +120,7 @@ export default function Dialog({
         tabIndex={-1}
       >
         {title && (
-          <h2 id={titleId} className="m-0 text-xl font-semibold leading-tight">
+          <h2 id={titleId} className="m-0 min-w-0 break-words text-xl font-semibold leading-tight">
             {title}
           </h2>
         )}

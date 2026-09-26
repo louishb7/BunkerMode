@@ -13,11 +13,17 @@ export const MODULE_CATALOG = Object.freeze([
     description: "Defina e organize os objetivos que orientam suas escolhas.",
     route: APP_ROUTES.OBJECTIVES,
   },
+  {
+    key: "finances",
+    label: "Finanças",
+    description: "Registre movimentos e separe recursos para suas escolhas.",
+    route: APP_ROUTES.FINANCES,
+  },
 ])
 
 export function getEnabledModules(user) {
   if (!Array.isArray(user?.enabled_modules)) {
-    return MODULE_CATALOG
+    return MODULE_CATALOG.filter((module) => module.key !== "finances")
   }
 
   const enabledKeys = new Set(user.enabled_modules)

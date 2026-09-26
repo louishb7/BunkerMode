@@ -4,13 +4,7 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
-import {
-  detachObjectiveTaskList,
-  getOverview,
-  unlinkCachedObjectiveTask,
-  unlinkTaskList,
-  updateOverview,
-} from "../../../state/overviewCache"
+import { detachObjectiveTaskList, getOverview, updateOverview } from "../../../state/overviewCache"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
 export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
@@ -27,6 +21,13 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     const currentRequest = ++requestId.current
     setLoading(!getOverview(token).all)
     setError("")
+    const materialized = await api.materializeTaskRecurrences(token)
+    if (currentRequest !== requestId.current || onUnauthorized?.(materialized)) return false
+    if (!materialized.ok) {
+      setLoading(false)
+      setError(getErrorMessage(materialized, "Não foi possível preparar as tarefas."))
+      return false
+    }
     const result = await api.listTasks(token)
     if (currentRequest !== requestId.current) return false
     if (onUnauthorized?.(result)) {
@@ -85,23 +86,33 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
 
   async function unlinkTask(task: Task) {
     if (!token || unlinkingId !== null) return false
-    const previous = tasks
-    const previousCache = getOverview(token)
     const currentRequest = ++requestId.current
     setUnlinkingId(task.id)
-    setTasks(unlinkTaskList(previous, task))
-    unlinkCachedObjectiveTask(token, task)
     const result = await api.unlinkTaskFromObjective(token, task.id)
     if (currentRequest !== requestId.current) return false
     setUnlinkingId(null)
     if (onUnauthorized?.(result)) return false
-    if (!result.ok || result.data?.series_id !== (task.recurrence?.series_id ?? null)) {
-      setTasks(previous)
-      updateOverview(token, { all: previousCache.all, daily: previousCache.daily })
+    if (!result.ok) {
       setError(getErrorMessage(result, "Não foi possível desvincular a tarefa."))
       return false
     }
-    return true
+    return refresh()
+  }
+  async function operateTask(task: Task, payload = null) {
+    if (!enabled || unlinkingId !== null) return false
+    const currentRequest = ++requestId.current
+    setUnlinkingId(task.id)
+    const result = payload
+      ? await api.linkTaskToObjective(token, task.id, payload.objetivo_id)
+      : await api.completeTask(token, task.id)
+    if (currentRequest !== requestId.current) return false
+    setUnlinkingId(null)
+    if (onUnauthorized?.(result)) return false
+    if (!result.ok) {
+      setError(getErrorMessage(result, "Não foi possível atualizar a tarefa."))
+      return false
+    }
+    return refresh()
   }
 
   function detachObjective(objectiveId: number) {
@@ -110,6 +121,8 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
   }
 
   return {
+    tasks,
+    operateTask,
     tasksByObjetivo,
     summaryTasksByObjetivo: groupObjectiveTasks(tasks, false),
     loading,

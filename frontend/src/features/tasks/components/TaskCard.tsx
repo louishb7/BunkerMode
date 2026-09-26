@@ -69,7 +69,7 @@ export default function TaskCard({
   const showDeadline = deadline && selected && deadline !== selected
   return (
     <article
-      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : "px-2 sm:px-4"}`}
+      className={`group relative border-b border-border last:border-b-0 ${focus ? "px-5 py-6 sm:px-7" : "task-row"}`}
     >
       <div className={`flex min-w-0 items-start ${focus ? "gap-4" : "gap-1 sm:gap-2"}`}>
         {!focus && (
@@ -144,10 +144,15 @@ export default function TaskCard({
               {task.instrucao}
             </p>
           )}
-          {((!compactCompleted && (notPerformed || showDeadline || inlineRecurrence)) ||
+          {((!compactCompleted &&
+            (notPerformed ||
+              showDeadline ||
+              inlineRecurrence ||
+              descriptionClipped ||
+              detailsOpen)) ||
             (focus && completed)) && (
             <div
-              className={`${focus ? "mt-2 gap-2" : "mt-2 gap-x-3 gap-y-1"} flex flex-wrap items-center text-xs text-text-muted`}
+              className={`${focus ? "mt-2 gap-2" : "task-meta"} flex flex-wrap items-center text-xs text-text-muted`}
             >
               {inlineRecurrence && !compactCompleted && (
                 <span className="inline-flex items-center gap-1" title="Tarefa recorrente">
@@ -159,18 +164,18 @@ export default function TaskCard({
               {notPerformed && <Badge>Não realizada</Badge>}
               {focus && completed && <span className="text-success">Concluída</span>}
               {showDeadline && !compactCompleted && <span>Prazo {deadline}</span>}
+              {!focus && !compactCompleted && (descriptionClipped || detailsOpen) && (
+                <button
+                  type="button"
+                  aria-expanded={detailsOpen}
+                  aria-controls={descriptionId}
+                  className="task-details"
+                  onClick={() => setDetailsOpen((open) => !open)}
+                >
+                  {detailsOpen ? "Recolher" : "Detalhes"}
+                </button>
+              )}
             </div>
-          )}
-          {!focus && !compactCompleted && (descriptionClipped || detailsOpen) && (
-            <button
-              type="button"
-              aria-expanded={detailsOpen}
-              aria-controls={descriptionId}
-              className="mt-0.5 min-h-6 rounded-control border-0 bg-transparent px-1 text-xs font-medium text-text-secondary hover:bg-peripheral hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-              onClick={() => setDetailsOpen((open) => !open)}
-            >
-              {detailsOpen ? "Ocultar detalhes" : "Mostrar detalhes"}
-            </button>
           )}
           {task?.instrucao && compactCompleted && (
             <span className="sr-only">Instrução: {task.instrucao}</span>

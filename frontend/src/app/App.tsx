@@ -1,4 +1,4 @@
-import React from "react"
+import React, { Suspense, lazy } from "react"
 import { Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom"
 
 import BootScreen from "../components/system/BootScreen"
@@ -9,14 +9,15 @@ import { useAuth } from "../context/AuthContext"
 import { TaskBoardProvider, useTaskBoardContext } from "../context/TaskBoardContext"
 import AuthScreen from "../features/auth/components/AuthScreen"
 import ResetPasswordScreen from "../features/auth/components/ResetPasswordScreen"
-import FinancesPage from "../features/finances/pages/FinancesPage"
 import HomePage from "../features/home/pages/HomePage"
-import ObjectivesPage from "../features/objectives/pages/ObjectivesPage"
-import SettingsPage from "../features/settings/pages/SettingsPage"
-import FocusPage from "../features/tasks/pages/FocusPage"
-import TasksPage from "../features/tasks/pages/TasksPage"
 import { getEnabledModules } from "../modules/moduleCatalog"
 import { APP_ROUTES } from "../routes/routeConstants"
+
+const FinancesPage = lazy(() => import("../features/finances/pages/FinancesPage"))
+const ObjectivesPage = lazy(() => import("../features/objectives/pages/ObjectivesPage"))
+const SettingsPage = lazy(() => import("../features/settings/pages/SettingsPage"))
+const FocusPage = lazy(() => import("../features/tasks/pages/FocusPage"))
+const TasksPage = lazy(() => import("../features/tasks/pages/TasksPage"))
 
 export default function App() {
   const auth = useAuth()
@@ -109,12 +110,14 @@ function SettingsRoute() {
 
   return (
     <AppShell onLogout={logout} user={auth.user}>
-      <SettingsPage
-        onUnauthorized={auth.handleUnauthorized}
-        onUpdateUser={auth.updateCurrentUser}
-        token={auth.token}
-        user={auth.user}
-      />
+      <Suspense fallback={<div className="route-loading" aria-label="Carregando configurações" />}>
+        <SettingsPage
+          onUnauthorized={auth.handleUnauthorized}
+          onUpdateUser={auth.updateCurrentUser}
+          token={auth.token}
+          user={auth.user}
+        />
+      </Suspense>
     </AppShell>
   )
 }
@@ -154,7 +157,9 @@ function TasksRoute() {
 
   return (
     <AppShell onLogout={logout} user={auth.user}>
-      <TasksPage board={board} onStartFocus={startFocus} user={auth.user} />
+      <Suspense fallback={<div className="route-loading" aria-label="Carregando tarefas" />}>
+        <TasksPage board={board} onStartFocus={startFocus} user={auth.user} />
+      </Suspense>
     </AppShell>
   )
 }
@@ -165,11 +170,13 @@ function ObjectivesRoute() {
 
   return (
     <AppShell onLogout={logout} user={auth.user}>
-      <ObjectivesPage
-        onUnauthorized={auth.handleUnauthorized}
-        token={auth.token}
-        user={auth.user}
-      />
+      <Suspense fallback={<div className="route-loading" aria-label="Carregando objetivos" />}>
+        <ObjectivesPage
+          onUnauthorized={auth.handleUnauthorized}
+          token={auth.token}
+          user={auth.user}
+        />
+      </Suspense>
     </AppShell>
   )
 }
@@ -187,14 +194,16 @@ function FocusRoute() {
 
   return (
     <ExecutionLayout onReturnToTasks={returnToTasks}>
-      <FocusPage
-        key={auth.user.id}
-        userId={auth.user.id}
-        onExit={returnToTasks}
-        board={board}
-        dailyTasks={board.dailyTasks}
-        timezone={auth.user?.timezone}
-      />
+      <Suspense fallback={<div className="route-loading" aria-label="Carregando foco" />}>
+        <FocusPage
+          key={auth.user.id}
+          userId={auth.user.id}
+          onExit={returnToTasks}
+          board={board}
+          dailyTasks={board.dailyTasks}
+          timezone={auth.user?.timezone}
+        />
+      </Suspense>
     </ExecutionLayout>
   )
 }
@@ -214,7 +223,13 @@ function FinancesRoute() {
   const logout = useLogout()
   return (
     <AppShell onLogout={logout} user={auth.user}>
-      <FinancesPage token={auth.token} user={auth.user} onUnauthorized={auth.handleUnauthorized} />
+      <Suspense fallback={<div className="route-loading" aria-label="Carregando finanças" />}>
+        <FinancesPage
+          token={auth.token}
+          user={auth.user}
+          onUnauthorized={auth.handleUnauthorized}
+        />
+      </Suspense>
     </AppShell>
   )
 }

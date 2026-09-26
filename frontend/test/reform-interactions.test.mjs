@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { after, test } from "node:test"
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
+import { MemoryRouter } from "react-router-dom"
 import { JSDOM } from "jsdom"
 import { createServer } from "vite"
 
@@ -41,7 +42,9 @@ async function mount(Component, props) {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
-  await act(async () => root.render(React.createElement(Component, props)))
+  await act(async () =>
+    root.render(React.createElement(MemoryRouter, null, React.createElement(Component, props)))
+  )
   return {
     container,
     async close() {
@@ -150,7 +153,7 @@ test("detalhes longos expandem localmente; conclusão, menu e recorrência ficam
   })
   await act(async () => window.dispatchEvent(new window.Event("resize")))
   const details = [...view.container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Mostrar detalhes"
+    (button) => button.textContent === "Detalhes"
   )
   assert.ok(details)
   assert.equal(details.getAttribute("aria-expanded"), "false")
@@ -162,10 +165,10 @@ test("detalhes longos expandem localmente; conclusão, menu e recorrência ficam
   await click(document.querySelector("[role=menuitem]"))
   assert.equal(edit, 1)
   await click(details)
-  assert.equal(details.textContent, "Ocultar detalhes")
+  assert.equal(details.textContent, "Recolher")
   assert.equal(details.getAttribute("aria-expanded"), "true")
   await click(details)
-  assert.equal(details.textContent, "Mostrar detalhes")
+  assert.equal(details.textContent, "Detalhes")
   assert.equal(details.getAttribute("aria-expanded"), "false")
   await view.close()
   const short = await mount(TaskCard, {
@@ -236,7 +239,7 @@ test("objetivo permite pausar no menu e concluir pela ação principal", async (
     loading: false,
     tasksLoading: false,
     tasksError: "",
-    onCreateTask: () => created++,
+    onAdd: () => created++,
     onUpdateStatus: (value) => (status = value),
     onEdit: () => {},
     onDelete: () => {},
@@ -247,7 +250,7 @@ test("objetivo permite pausar no menu e concluir pela ação principal", async (
   assert.doesNotMatch(view.container.textContent, /Nenhuma tarefa vinculada/)
   await click(
     [...view.container.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Adicionar ao objetivo")
+      b.textContent.includes("Adicionar vínculo")
     )
   )
   assert.equal(created, 1)
@@ -260,9 +263,10 @@ test("objetivo permite pausar no menu e concluir pela ação principal", async (
     )
   )
   assert.equal(status, "pausado")
+  await click(view.container.querySelector("[aria-haspopup=menu]"))
   await click(
-    [...view.container.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("Concluir objetivo")
+    [...document.querySelectorAll("[role=menuitem]")].find(
+      (b) => b.textContent === "Concluir objetivo"
     )
   )
   assert.equal(status, "concluido")
@@ -311,14 +315,15 @@ test("tarefa concluída no objetivo oferece desvincular sem exclusão", async ()
     onDelete: () => {},
     onEdit: () => {},
   })
-  await click(
-    view.container.querySelector('[aria-label="Ações da tarefa: Faxina no lugar de trabalho!"]')
+  await click(view.container.querySelector(".objective-branch summary"))
+  assert.match(view.container.querySelector(".objective-inspector").textContent, /Desvincular/)
+  assert.doesNotMatch(
+    view.container.querySelector(".objective-inspector").textContent,
+    /Excluir tarefa/
   )
-  assert.match(document.querySelector("[role=menu]").textContent, /Desvincular do objetivo/)
-  assert.doesNotMatch(document.querySelector("[role=menu]").textContent, /Excluir tarefa/)
   await click(
-    [...document.querySelectorAll("[role=menuitem]")].find(
-      (b) => b.textContent === "Desvincular do objetivo"
+    [...view.container.querySelectorAll(".objective-inspector button")].find(
+      (b) => b.textContent === "Desvincular"
     )
   )
   assert.equal(unlinked, task)

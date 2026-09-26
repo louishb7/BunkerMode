@@ -1,6 +1,7 @@
 import { API_CONFIG_ERROR, API_URL } from "./config"
 
 const REQUEST_TIMEOUT_MS = 30000
+const pendingReads = new Map<string, Promise<ApiResult>>()
 
 export type ApiErrorData = {
   message?: string
@@ -56,9 +57,25 @@ export function getErrorMessage(result: ApiResult | null | undefined, fallback: 
   return typeof message === "string" ? message : fallback
 }
 
-export async function request<T = any>(
+export function request<T = any>(
   path: string,
   { token, method = "GET", body }: RequestOptions = {}
+): Promise<ApiResult<T>> {
+  if (method !== "GET") return performRequest<T>(path, { token, method, body })
+  const key = `${token ?? ""}:${path}`
+  const pending = pendingReads.get(key)
+  if (pending) return pending as Promise<ApiResult<T>>
+  const result = performRequest<T>(path, { token, method, body })
+  pendingReads.set(key, result)
+  void result.finally(() => {
+    if (pendingReads.get(key) === result) pendingReads.delete(key)
+  })
+  return result
+}
+
+async function performRequest<T>(
+  path: string,
+  { token, method = "GET", body }: RequestOptions
 ): Promise<ApiResult<T>> {
   if (API_CONFIG_ERROR || !API_URL) {
     return {

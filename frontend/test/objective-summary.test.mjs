@@ -128,32 +128,28 @@ test("sinais são fatos limitados a três; datas, ausência e última ocorrênci
   )
 })
 
-test("resumo tem fallback curto, detalhes locais e distingue erro, vazio real e carregamento", async () => {
+test("núcleo permanece dominante e relações distinguem erro, carregamento e vazio", async () => {
   for (const state of [
-    {
-      trackersError: "Falha na consulta",
-      trackersLoaded: false,
-      expected: /Acompanhamentos indisponíveis/,
-    },
-    { trackersLoading: true, trackersLoaded: false, expected: /Reorganizar hábitos/ },
-    { trackersLoaded: true, expected: /Uma direção pode começar sem vínculos/ },
+    { trackersError: "Falha na consulta", trackersLoaded: false, expected: /Falha na consulta/ },
+    { trackersLoading: true, trackersLoaded: false, expected: /Carregando relações/ },
+    { trackersLoaded: true, expected: /Nenhuma relação ainda/ },
   ]) {
     const view = await mount(Card, { ...cardProps, ...state })
     try {
       assert.match(view.container.textContent, state.expected)
-      assert.match(view.container.textContent, /Reorganizar hábitos/)
+      assert.match(
+        view.container.querySelector(".objective-nucleus").textContent,
+        /Cuidar da saúde|Reorganizar hábitos/
+      )
       if (state.trackersError || state.trackersLoading)
-        assert.doesNotMatch(view.container.textContent, /Uma direção pode começar sem vínculos/)
-      assert.equal(view.container.querySelector("details").open, false)
-      view.container.querySelector("details").open = true
-      assert.match(view.container.querySelector("details").textContent, /Concluir objetivo/)
+        assert.doesNotMatch(view.container.textContent, /Nenhuma relação ainda/)
     } finally {
       await view.close()
     }
   }
 })
 
-test("Home e Objetivos compartilham a leitura factual do mesmo vínculo", async () => {
+test("Home e Objetivos exibem o mesmo fato do acompanhamento", async () => {
   const original = { ...api }
   api.listObjetivos = async () => ({ ok: true, data: [objetivo] })
   api.listTrackers = async () => ({ ok: true, data: [tracker] })
@@ -161,17 +157,18 @@ test("Home e Objetivos compartilham a leitura factual do mesmo vínculo", async 
     ok: true,
     data: {
       tarefas: [],
-      direcoes: [{ ...objetivo, trackers: [tracker], tasks: [], reserves: [] }],
+      direcoes: [{ ...objetivo, trackers: [tracker], tasks: [] }],
       financeiro: null,
     },
   })
   const home = await mount(Home, { token: "shared", user, onUnauthorized: () => false })
   const page = await mount(ObjectivesPage, { token: "shared", user, onUnauthorized: () => false })
   try {
-    const select = (view) =>
-      view.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').textContent
-    assert.equal(select(home), select(page))
-    assert.match(select(home), /Não fumarÚltima ocorrência/)
+    assert.match(home.container.textContent, /Não fumar|Última ocorrência/)
+    assert.match(
+      page.container.querySelector(".objective-branch-list").textContent,
+      /Não fumar|Última ocorrência/
+    )
     assert.doesNotMatch(home.container.textContent, /Reorganizar hábitos/)
   } finally {
     await home.close()
@@ -195,8 +192,8 @@ test("erro real do hook chega à página e retry recupera sem anunciar vazio inc
     onUnauthorized: () => false,
   })
   try {
-    assert.match(view.container.textContent, /Acompanhamentos indisponíveis/)
-    assert.doesNotMatch(view.container.textContent, /Uma direção pode começar sem vínculos/)
+    assert.match(view.container.textContent, /Consulta indisponível/)
+    assert.doesNotMatch(view.container.textContent, /Nenhuma relação ainda/)
     fail = false
     await act(async () =>
       [...view.container.querySelectorAll("button")]
@@ -204,7 +201,7 @@ test("erro real do hook chega à página e retry recupera sem anunciar vazio inc
         .click()
     )
     assert.match(view.container.textContent, /Última ocorrência/)
-    assert.doesNotMatch(view.container.textContent, /Acompanhamentos indisponíveis/)
+    assert.doesNotMatch(view.container.textContent, /Consulta indisponível/)
   } finally {
     await view.close()
     Object.assign(api, original)
@@ -294,11 +291,10 @@ test("síntese enxerga a ocorrência de hoje mesmo quando a lista agrupa a séri
   )
 })
 
-test("sem sinais há orientação; erro não afirma vazio e prazo permanece com dois sinais", async () => {
+test("árvore de vínculos expressa pertencimento e inspector fechado", async () => {
   const empty = await mount(Card, { ...cardProps, objetivo: { ...objetivo, descricao: null } })
   try {
-    assert.match(empty.container.textContent, /Uma direção pode começar sem vínculos/)
-    assert.ok(empty.container.querySelector("summary"))
+    assert.match(empty.container.textContent, /Nenhuma relação ainda/)
   } finally {
     await empty.close()
   }
@@ -308,8 +304,8 @@ test("sem sinais há orientação; erro não afirma vazio e prazo permanece com 
     trackersError: "Falha na leitura",
   })
   try {
-    assert.doesNotMatch(failed.container.textContent, /Ainda sem sinais|Nenhum acompanhamento/)
-    assert.match(failed.container.textContent, /Acompanhamentos indisponíveis/)
+    assert.match(failed.container.textContent, /Falha na leitura/)
+    assert.doesNotMatch(failed.container.textContent, /Nenhuma relação ainda/)
   } finally {
     await failed.close()
   }
@@ -320,44 +316,75 @@ test("sem sinais há orientação; erro não afirma vazio e prazo permanece com 
     tasks: [{ id: 1, titulo: "Caminhar", status_code: "PENDENTE" }],
   })
   try {
-    assert.match(populated.container.querySelector("header").textContent, /Data-alvo: 30\/10\/2026/)
-    assert.equal(
-      populated.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').children.length,
-      2
+    assert.match(populated.container.textContent, /Data-alvo · 30\/10\/2026/)
+    assert.equal(populated.container.querySelectorAll(".objective-branch").length, 2)
+    assert.equal(populated.container.querySelector(".objective-branch details").open, false)
+    populated.container.querySelector(".objective-branch summary").click()
+    assert.equal(populated.container.querySelector(".objective-branch details").open, true)
+    assert.ok(
+      populated.container.querySelector('[aria-label="Relações do objetivo Cuidar da saúde"]')
     )
-    assert.equal(populated.container.querySelector("article > details").open, false)
-    populated.container.querySelector("summary").click()
-    assert.equal(populated.container.querySelector("article > details").open, true)
-    assert.ok(populated.container.querySelector('[aria-label="Vínculos de Cuidar da saúde"]'))
   } finally {
     await populated.close()
   }
 })
 
-test("descrição extensa expande sem esconder ou abrir a operação do objetivo", async () => {
-  const view = await mount(Card, { ...cardProps, trackers: [tracker] })
+test("descrição longa permanece legível no núcleo sem abrir inspector", async () => {
+  const long = "Reorganizar hábitos. ".repeat(20)
+  const view = await mount(Card, {
+    ...cardProps,
+    objetivo: { ...objetivo, descricao: long },
+    trackers: [tracker],
+  })
   try {
-    const description = view.container.querySelector("header p")
-    Object.defineProperties(description, {
-      scrollHeight: { configurable: true, value: 240 },
-      clientHeight: { configurable: true, value: 72 },
-    })
-    await act(async () => window.dispatchEvent(new window.Event("resize")))
-    const toggle = [...view.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Ler descrição completa"
-    )
-    assert.ok(toggle)
-    assert.equal(toggle.getAttribute("aria-controls"), description.id)
-    await act(async () => toggle.click())
-    assert.equal(toggle.getAttribute("aria-expanded"), "true")
-    assert.equal(toggle.textContent, "Recolher descrição")
-    assert.equal(view.container.querySelector("article > details").open, false)
     assert.match(
-      view.container.querySelector('[aria-label="Resumo de Cuidar da saúde"]').textContent,
+      view.container.querySelector(".objective-description").textContent,
+      /Reorganizar hábitos/
+    )
+    assert.equal(view.container.querySelector(".objective-branch details").open, false)
+    assert.match(
+      view.container.querySelector(".objective-branch-list").textContent,
       /Última ocorrência/
     )
-    await act(async () => toggle.click())
-    assert.equal(toggle.getAttribute("aria-expanded"), "false")
+  } finally {
+    await view.close()
+  }
+})
+
+test("composer mostra um tipo por vez, pesquisa existentes e permite criar", async () => {
+  const { default: Composer } = await load(
+    "features/objectives/components/ObjectiveLinkComposer.tsx"
+  )
+  const chosen = []
+  const view = await mount(Composer, {
+    objetivo,
+    tasksEnabled: true,
+    tasks: [
+      { id: 1, titulo: "Ler livro", objetivo_id: null },
+      { id: 2, titulo: "Outra tarefa", objetivo_id: null },
+    ],
+    trackers: [{ id: 3, titulo: "Não fumar", objetivo_id: null }],
+    type: "task",
+    search: "Ler",
+    onType: (value) => chosen.push(value),
+    onSearch: () => {},
+    onCreateTask: () => chosen.push("criar tarefa"),
+    onCreateTracker: () => chosen.push("criar acompanhamento"),
+    onLinkTask: (item) => chosen.push(item.titulo),
+    onLinkTracker: (item) => chosen.push(item.titulo),
+  })
+  try {
+    assert.equal(view.container.querySelectorAll(".composer-options li").length, 1)
+    assert.match(view.container.textContent, /Ler livro/)
+    assert.doesNotMatch(view.container.textContent, /Não fumar|Outra tarefa/)
+    await act(async () => view.container.querySelector(".composer-options button").click())
+    await act(async () => view.container.querySelector(".composer-create button").click())
+    await act(async () =>
+      [...view.container.querySelectorAll('[role="tab"]')]
+        .find((item) => item.textContent === "Acompanhamento")
+        .click()
+    )
+    assert.deepEqual(chosen, ["Ler livro", "criar tarefa", "tracker"])
   } finally {
     await view.close()
   }

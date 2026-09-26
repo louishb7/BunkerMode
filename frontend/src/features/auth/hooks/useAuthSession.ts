@@ -6,6 +6,7 @@ import { TOKEN_KEY, USER_KEY } from "../../../constants/session"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { clearOverview } from "../../../state/overviewCache"
+import { clearFinanceSnapshots } from "../../../state/financeCache"
 
 const persistentStore = window.localStorage
 const sessionStore = window.sessionStorage
@@ -78,6 +79,7 @@ export function useAuthSession() {
   const clearSession = useCallback(() => {
     sessionRequestId.current += 1
     clearOverview()
+    clearFinanceSnapshots()
     removeStoredSession()
     setToken(null)
     setUser(null)

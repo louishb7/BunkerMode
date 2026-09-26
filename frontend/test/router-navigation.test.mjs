@@ -115,6 +115,8 @@ async function navigate(path, user = null, preview = {}) {
       return Response.json({
         mes: "2026-09",
         saldo_centavos: 0,
+        resultado_centavos: 0,
+        serie_diaria: [],
         reservado_centavos: 0,
         livre_centavos: 0,
         receitas_centavos: 0,
@@ -163,6 +165,14 @@ async function navigate(path, user = null, preview = {}) {
       await flush()
     }
   })
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) await flush()
+  })
+  for (let attempt = 0; attempt < 20 && container.querySelector(".route-loading"); attempt++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    })
+  }
 
   const rendered = container.textContent ?? ""
   await act(async () => root.unmount())
@@ -258,7 +268,7 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
   assert.equal(result.rendered.match(/Não deve aparecer/g)?.length ?? 0, 0)
   assert.equal(
     result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")),
-    true
+    false
   )
   assert.equal(
     result.calls.some((call) => call.endsWith("/orientacao")),
@@ -324,7 +334,7 @@ test("Finanças respeita guard e habilitação independente", async () => {
   assert.equal((await navigate("/financas", users.both)).path, "/")
   const result = await navigate("/financas", { ...users.both, enabled_modules: ["finances"] })
   assert.equal(result.path, "/financas")
-  assert.match(result.rendered, /Livre após reservas|Novo lançamento/)
+  assert.match(result.rendered, /Resultado do mês|Movimento/)
   assert.equal(
     result.calls.some((path) => /objetivos|tarefas/.test(path)),
     false

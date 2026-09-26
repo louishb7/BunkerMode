@@ -25,10 +25,9 @@ export default function DaySelector({ onSelectDate, selectedDate, todayDate, wee
             type="button"
             onClick={() => onSelectDate(date)}
           >
-            <span className="text-xs text-text-secondary">{WEEK_LABELS[date.getDay()]}</span>
-            <span className="text-lg font-semibold leading-5">
-              {String(date.getDate()).padStart(2, "0")}
-            </span>
+            <span className="calendar-day-label">{WEEK_LABELS[date.getDay()]}</span>
+            <span className="calendar-day-number">{String(date.getDate()).padStart(2, "0")}</span>
+            <span className="calendar-today-dot" aria-hidden="true" />
           </button>
         )
       })}

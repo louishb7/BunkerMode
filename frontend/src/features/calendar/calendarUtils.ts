@@ -69,7 +69,12 @@ export function formatWeekLabel(weekDays) {
   if (!weekDays.length) {
     return ""
   }
-  return `${formatShortDate(weekDays[0])} a ${formatShortDate(weekDays[6])}`
+  const first = weekDays[0]
+  const last = weekDays[6]
+  const month = (date) => date.toLocaleDateString("pt-BR", { month: "long" })
+  if (first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear())
+    return `${first.getDate()}–${last.getDate()} ${month(last)}`
+  return `${first.getDate()} ${month(first)} – ${last.getDate()} ${month(last)}`
 }
 
 export function formatSelectedDate(date) {

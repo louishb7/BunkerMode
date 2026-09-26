@@ -10,13 +10,7 @@ function setup() {
     objetivos: { findMany: jest.fn().mockResolvedValue([]) },
   };
   const finances = {
-    totals: jest
-      .fn()
-      .mockResolvedValue({
-        saldo_centavos: 100,
-        reservado_centavos: 0,
-        livre_centavos: 100,
-      }),
+    registeredBalance: jest.fn().mockResolvedValue(100),
   };
   const service = new OrientationService(
     prisma as unknown as PrismaService,
@@ -44,7 +38,7 @@ describe("Projeção de orientação", () => {
     });
     expect(prisma.missoes.findMany).not.toHaveBeenCalled();
     expect(prisma.objetivos.findMany).not.toHaveBeenCalled();
-    expect(finances.totals).not.toHaveBeenCalled();
+    expect(finances.registeredBalance).not.toHaveBeenCalled();
     await service.read(user(["objectives"]));
     expect(prisma.objetivos.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -90,13 +84,9 @@ describe("Projeção de orientação", () => {
     expect(result.falhas.tarefas).toBeTruthy();
     expect(result.financeiro).toBeNull();
     expect(JSON.stringify(result)).not.toContain("internal private error");
-    finances.totals.mockResolvedValue({
-      saldo_centavos: 100,
-      reservado_centavos: 200,
-      livre_centavos: -100,
-    });
+    finances.registeredBalance.mockResolvedValue(-100);
     expect((await service.read(user(["finances"]))).financeiro).toEqual({
-      livre_centavos: -100,
+      saldo_centavos: -100,
     });
   });
 });

@@ -207,11 +207,11 @@
     max-width: 860px;
     margin: 0 auto;
     display: grid;
-    gap: 44px;
+    gap: 32px;
   }
   .home-heading {
     border-bottom: 1px solid var(--color-border);
-    padding: 12px 0 30px;
+    padding: 8px 0 22px;
   }
   .home-heading h1 {
     margin: 0;
@@ -283,7 +283,7 @@
     grid-template-columns: 30px minmax(0, 1fr) 36px;
     gap: 16px;
     border-bottom: 1px solid var(--color-border);
-    padding: 26px 0;
+    padding: 18px 0;
   }
   .direction-number {
     font-size: 12px;
@@ -445,43 +445,177 @@
   .calendar-strip {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 0;
-    border-top: 1px solid var(--color-border);
-    border-bottom: 1px solid var(--color-border);
+    padding: 2px 16px 16px;
   }
   .calendar-day {
     position: relative;
     display: grid;
-    min-height: 76px;
+    min-height: 78px;
     min-width: 0;
     align-content: center;
     justify-items: center;
-    gap: 5px;
+    gap: 4px;
     border: 0;
-    border-bottom: 3px solid transparent;
+    border-radius: 10px;
     background: transparent;
     color: var(--color-text-secondary);
   }
   .calendar-day:hover {
-    background: var(--color-peripheral);
+    background: var(--color-surface-subtle);
   }
-  .calendar-day[aria-pressed="true"] {
-    background: var(--color-peripheral);
-    border-bottom-color: var(--color-accent);
-    color: var(--color-text-primary);
+  .calendar-day-label {
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
-  .calendar-day[aria-current="date"]::after {
-    content: "";
-    position: absolute;
-    bottom: 5px;
-    width: 4px;
-    height: 4px;
+  .calendar-day-number {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    font-size: 17px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .calendar-day[aria-pressed="true"] .calendar-day-number {
+    color: var(--color-on-action);
+    background: var(--color-action);
+    border-radius: 11px;
+  }
+  .calendar-today-dot {
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
+    background: transparent;
+  }
+  .calendar-day[aria-current="date"] .calendar-today-dot {
     background: var(--color-accent);
   }
+  .execution-surface {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-top: 3px solid var(--color-accent);
+    border-radius: 15px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-surface);
+  }
+  .week-rail {
+    position: relative;
+    padding-top: 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-subtle);
+  }
+  .week-rail-heading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px 8px;
+  }
+  .week-arrow {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-text-secondary);
+  }
+  .week-arrow:hover,
+  .week-today:hover {
+    background: var(--color-peripheral);
+    color: var(--color-text-primary);
+  }
+  .week-period p {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-width: 170px;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .week-period svg {
+    color: var(--color-accent);
+  }
+  .week-today {
+    display: block;
+    margin: -8px auto 12px;
+    min-height: 28px;
+    padding: 2px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+  }
+  .task-group-heading {
+    margin: 0;
+    padding: 16px 24px 7px;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .task-row {
+    padding: 2px 16px;
+    transition: background 0.15s ease;
+  }
+  .task-row:hover,
+  .task-row:focus-within {
+    background: var(--color-surface-subtle);
+  }
+  .task-row h3 {
+    line-height: 1.35;
+  }
+  .task-meta {
+    gap: 4px 12px;
+    margin-top: 5px;
+  }
+  .task-details {
+    min-height: 26px;
+    border: 0;
+    border-radius: 5px;
+    padding: 2px 5px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+  }
+  .task-details:hover {
+    background: var(--color-peripheral);
+    color: var(--color-text-primary);
+  }
   @media (max-width: 639px) {
+    .execution-surface {
+      margin-inline: -8px;
+      border-radius: 10px;
+    }
+    .calendar-strip {
+      padding-inline: 4px;
+    }
+    .calendar-day-number {
+      width: 32px;
+      height: 32px;
+      font-size: 15px;
+    }
+    .week-rail-heading {
+      gap: 0;
+      padding-inline: 3px;
+    }
+    .week-period p {
+      min-width: 0;
+      font-size: 12px;
+    }
+    .task-row {
+      padding-inline: 6px;
+    }
     .home-orientation {
-      gap: 30px;
+      gap: 26px;
     }
     .home-now {
       padding-left: 12px;
@@ -547,5 +681,598 @@
   .objective-composer button > span {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+}
+
+@layer components {
+  .objective-layout {
+    display: grid;
+    grid-template-columns: minmax(180px, 235px) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .objective-rail {
+    min-width: 0;
+    padding: 4px 0;
+  }
+  .objective-rail-title {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 18px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .objective-rail-title span {
+    color: var(--color-text-muted);
+  }
+  .objective-rail-items {
+    display: grid;
+    gap: 2px;
+  }
+  .objective-rail-group {
+    margin: 15px 0 6px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  .objective-rail-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 9px;
+    border: 0;
+    border-left: 2px solid transparent;
+    border-radius: 0 7px 7px 0;
+    background: transparent;
+    color: var(--color-text-secondary);
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .objective-rail-item:hover {
+    background: var(--color-surface-subtle);
+    color: var(--color-text-primary);
+  }
+  .objective-rail-item[aria-current="true"] {
+    border-left-color: var(--color-accent);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font-weight: 650;
+  }
+  .objective-rail-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    margin-top: 6px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+  }
+  .objective-rail-item[aria-current="true"] .objective-rail-dot {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+  .relationship-workspace {
+    min-width: 0;
+    padding: 0 0 36px;
+    background: var(--color-surface-subtle);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .objective-nucleus {
+    padding: clamp(24px, 4vw, 42px);
+    background: light-dark(#292929, #303030);
+    color: #f7f7f7;
+  }
+  .objective-nucleus-ativo {
+    box-shadow: inset 0 4px var(--color-accent);
+  }
+  .objective-nucleus-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .objective-nucleus-top button {
+    color: #f7f7f7;
+  }
+  .objective-nucleus h2 {
+    max-width: 24ch;
+    margin: 24px 0 0;
+    font-size: clamp(25px, 3vw, 38px);
+    line-height: 1.12;
+    letter-spacing: -0.045em;
+    overflow-wrap: anywhere;
+  }
+  .objective-description {
+    max-width: 58ch;
+    margin: 16px 0 0;
+    color: #d6d6d6;
+    font-size: 15px;
+    line-height: 1.6;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .objective-date {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 18px 0 0;
+    color: #bdbdbd;
+    font-size: 11px;
+  }
+  .objective-connection {
+    width: 2px;
+    height: 29px;
+    margin: auto;
+    background: var(--color-accent);
+  }
+  .objective-branches {
+    padding: 0 clamp(16px, 3vw, 32px);
+  }
+  .objective-branches-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid var(--color-border);
+    padding: 13px 0 16px;
+  }
+  .objective-branches-heading h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .objective-branches-heading h3 span {
+    margin-left: 5px;
+    color: var(--color-text-muted);
+    font-weight: 400;
+  }
+  .objective-branch-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .objective-branch {
+    position: relative;
+    min-width: 0;
+    border-top: 2px solid var(--color-border-strong);
+    background: var(--color-surface);
+  }
+  .objective-branch::before {
+    content: "";
+    position: absolute;
+    width: 2px;
+    height: 15px;
+    top: -17px;
+    left: 20px;
+    background: var(--color-border-strong);
+  }
+  .objective-branch details {
+    min-width: 0;
+  }
+  .objective-branch summary {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: 88px;
+    padding: 17px 18px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .objective-branch summary::-webkit-details-marker {
+    display: none;
+  }
+  .objective-branch summary:hover {
+    background: var(--color-peripheral);
+  }
+  .objective-branch summary > svg {
+    margin-top: 15px;
+    color: var(--color-accent);
+  }
+  .objective-branch-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+  }
+  .objective-branch-copy small {
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  .objective-branch-copy strong {
+    font-size: 14px;
+    line-height: 1.3;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .objective-branch-copy em {
+    font-size: 11px;
+    font-style: normal;
+    color: var(--color-text-secondary);
+  }
+  .objective-inspector {
+    border-top: 1px solid var(--color-border);
+    padding: 10px 18px 16px 48px;
+  }
+  .objective-inspector > p {
+    margin: 0 0 12px;
+    white-space: pre-line;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .objective-inspector-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .objective-occurrences {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .objective-occurrences li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    border-top: 1px solid var(--color-border);
+    font-size: 11px;
+  }
+  .objective-empty {
+    margin: 0;
+    padding: 20px;
+    border-left: 2px solid var(--color-border-strong);
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+  .objective-composer {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+  .composer-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .composer-tabs button {
+    min-height: 44px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+  }
+  .composer-tabs button[aria-selected="true"] {
+    border-bottom-color: var(--color-accent);
+    color: var(--color-text-primary);
+    font-weight: 650;
+  }
+  .composer-content {
+    display: grid;
+    gap: 10px;
+  }
+  .composer-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 7px;
+    color: var(--color-text-muted);
+  }
+  .composer-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: 13px;
+  }
+  .composer-options {
+    max-height: 250px;
+    overflow: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .composer-options button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 42px;
+    border: 0;
+    border-bottom: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text-primary);
+    text-align: left;
+    font-size: 13px;
+  }
+  .composer-options button:hover {
+    background: var(--color-surface-subtle);
+  }
+  .composer-create {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 8px;
+  }
+  @media (max-width: 850px) {
+    .objective-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 18px;
+    }
+    .objective-rail-title {
+      margin-bottom: 4px;
+    }
+    .objective-rail-items {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 2px 7px;
+    }
+    .objective-rail-group {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (max-width: 560px) {
+    .objective-rail-items {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .objective-rail-item {
+      min-height: 36px;
+      padding-block: 7px;
+    }
+    .objective-branch-list {
+      grid-template-columns: minmax(0, 1fr);
+      padding-left: 20px;
+      border-left: 2px solid var(--color-border-strong);
+    }
+    .objective-branch::before {
+      width: 20px;
+      height: 2px;
+      top: 22px;
+      left: -20px;
+    }
+    .objective-nucleus {
+      padding: 25px 22px;
+    }
+    .objective-nucleus h2 {
+      margin-top: 16px;
+    }
+    .objective-branches-heading {
+      flex-wrap: wrap;
+    }
+  }
+}
+
+@layer components {
+  .finance-page {
+    display: grid;
+    gap: 27px;
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .finance-month {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    position: relative;
+    min-height: 44px;
+  }
+  .finance-month > button:not(.finance-current) {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-text-secondary);
+  }
+  .finance-month > button:hover:not(:disabled) {
+    background: var(--color-peripheral);
+  }
+  .finance-month > button:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .finance-month strong {
+    min-width: 150px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .finance-current {
+    position: absolute;
+    right: 0;
+    min-height: 36px;
+    border: 0;
+    border-radius: 6px;
+    padding: 0 8px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+  }
+  .finance-state {
+    padding: 27px clamp(20px, 4vw, 38px);
+    border-radius: 15px;
+    background: light-dark(#292929, #303030);
+    color: #f7f7f7;
+  }
+  .finance-state .eyebrow {
+    color: #c6c6c6;
+  }
+  .finance-result {
+    margin: 4px 0 25px;
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.05em;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .finance-state .text-danger {
+    color: #ffaaa4 !important;
+  }
+  .finance-flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px 50px;
+    margin: 0;
+    border-top: 1px solid #ffffff30;
+    padding-top: 18px;
+  }
+  .finance-flow div {
+    min-width: 120px;
+  }
+  .finance-flow dt {
+    color: #c6c6c6;
+    font-size: 11px;
+  }
+  .finance-flow dd {
+    margin: 4px 0 0;
+    font-size: 19px;
+    font-weight: 550;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .finance-chart {
+    padding: 18px 22px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+  }
+  .finance-chart-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
+  .finance-chart-heading h2,
+  .finance-movements h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .finance-chart-heading span,
+  .finance-chart-ends {
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+  .finance-chart svg {
+    display: block;
+    width: 100%;
+    height: 130px;
+    margin-top: 12px;
+  }
+  .finance-chart-ends {
+    display: flex;
+    justify-content: space-between;
+  }
+  .finance-movements {
+    min-width: 0;
+  }
+  .finance-movements h2 {
+    margin-bottom: 12px;
+  }
+  .finance-ledger {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .finance-ledger .ledger-row {
+    align-items: center;
+  }
+  .finance-ledger .ledger-row > svg {
+    color: var(--color-text-muted);
+  }
+  .finance-ledger .ledger-row > div {
+    display: grid;
+    gap: 3px;
+  }
+  .finance-ledger .ledger-row strong {
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .finance-ledger .ledger-row div span {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+  }
+  .finance-form {
+    display: grid;
+    gap: 18px;
+  }
+  .finance-type {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding: 4px;
+    border-radius: 9px;
+    background: var(--color-peripheral);
+  }
+  .finance-type button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+  }
+  .finance-type button[aria-checked="true"] {
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    box-shadow: var(--shadow-surface);
+  }
+  .finance-more {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+  .finance-more summary {
+    min-height: 36px;
+    cursor: pointer;
+  }
+  .finance-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  @media (max-width: 560px) {
+    .finance-month {
+      justify-content: flex-start;
+    }
+    .finance-current {
+      right: 0;
+    }
+    .finance-flow {
+      gap: 18px;
+    }
+    .finance-flow div {
+      min-width: 90px;
+    }
+    .finance-ledger .ledger-row {
+      grid-template-columns: 18px minmax(0, 1fr) 44px;
+    }
+    .finance-ledger .ledger-row .ledger-amount {
+      grid-column: 2;
+      grid-row: 2;
+    }
   }
 }

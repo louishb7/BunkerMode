@@ -30,8 +30,8 @@ export class OrientationService {
     }
     const today = this.calendar.currentDateFor(new Date(), user.timezone);
     const day = new Date(`${today}T00:00:00Z`);
-    const tasks = enabled.has("tasks")
-      ? await readPart(
+    const tasksPromise = enabled.has("tasks")
+      ? readPart(
           "tarefas",
           () =>
             this.prisma.missoes.findMany({
@@ -51,8 +51,8 @@ export class OrientationService {
           [],
         )
       : [];
-    const goals = enabled.has("objectives")
-      ? await readPart(
+    const goalsPromise = enabled.has("objectives")
+      ? readPart(
           "direcoes",
           () =>
             this.prisma.objetivos.findMany({
@@ -89,23 +89,19 @@ export class OrientationService {
                       },
                     }
                   : {}),
-                ...(enabled.has("finances")
-                  ? {
-                      reservas: {
-                        where: { usuario_id: user.usuario_id },
-                        take: 2,
-                        orderBy: { id: "asc" as const },
-                      },
-                    }
-                  : {}),
               },
             }),
           [],
         )
       : [];
-    const financial = enabled.has("finances")
-      ? await readPart("recursos", () => this.finances.totals(user), null)
+    const financialPromise = enabled.has("finances")
+      ? readPart("recursos", () => this.finances.registeredBalance(user), null)
       : null;
+    const [tasks, goals, financial] = await Promise.all([
+      tasksPromise,
+      goalsPromise,
+      financialPromise,
+    ]);
     return {
       data: today,
       falhas,
@@ -119,12 +115,11 @@ export class OrientationService {
         tasks: enabled.has("tasks")
           ? goal.missoes.map((task) => toTaskResponse(task, user))
           : [],
-        reserves: enabled.has("finances") ? goal.reservas : [],
       })),
-      // Não há presença permanente de Finanças na Home. Só um déficit muda a decisão imediata.
+      // Um saldo negativo é o único sinal financeiro independente na Home.
       financeiro:
-        financial && financial.livre_centavos < 0
-          ? { livre_centavos: financial.livre_centavos }
+        financial !== null && financial < 0
+          ? { saldo_centavos: financial }
           : null,
     };
   }

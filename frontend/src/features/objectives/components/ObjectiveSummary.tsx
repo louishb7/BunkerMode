@@ -1,12 +1,11 @@
 import React from "react"
-import { CalendarDays, ListChecks, ListTodo, Wallet } from "lucide-react"
+import { CalendarDays, ListChecks, ListTodo } from "lucide-react"
 import { summarizeObjective } from "../objectiveSummary"
 import LoadingLines from "../../../components/ui/LoadingLines"
 export default function ObjectiveSummary({
   objetivo,
   trackers = [],
   tasks = [],
-  reserves = [],
   timezone = undefined,
   trackersLoading = false,
   trackersLoaded = true,
@@ -21,12 +20,18 @@ export default function ObjectiveSummary({
     objetivo,
     trackers,
     tasks: tasksEnabled ? tasks : [],
-    reserves,
     timezone,
   })
   const signals =
     variant === "home"
-      ? [allSignals.find((signal) => signal.kind === "reserve") || allSignals[0]].filter(Boolean)
+      ? [
+          allSignals.find((signal) => signal.kind === "task") ||
+            allSignals.find(
+              (signal) =>
+                signal.kind === "tracker" && !signal.detail.startsWith("Nenhuma ocorrência")
+            ) ||
+            allSignals.find((signal) => signal.kind === "date"),
+        ].filter(Boolean)
       : allSignals
   const unavailable = (trackersError && !trackersLoaded) || (tasksError && !tasks.length)
   return (
@@ -38,7 +43,6 @@ export default function ObjectiveSummary({
               tracker: ListChecks,
               task: ListTodo,
               date: CalendarDays,
-              reserve: Wallet,
             }[signal.kind]
             return (
               <li key={i}>

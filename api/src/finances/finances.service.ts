@@ -62,6 +62,28 @@ export class FinancesService {
     return this.calendar.currentDateFor(new Date(), user.timezone);
   }
 
+  async registeredBalance(
+    user: UserRecord,
+    tx: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    const groups = await tx.lancamentos_financeiros.groupBy({
+      by: ["tipo"],
+      where: { usuario_id: user.usuario_id },
+      _sum: { valor_centavos: true },
+    });
+    return safeTotal(
+      groups.reduce(
+        (sum, group) =>
+          sum +
+          (group.tipo === "receita" || group.tipo === "ajuste_entrada"
+            ? 1
+            : -1) *
+            (group._sum.valor_centavos ?? 0),
+        0,
+      ),
+    );
+  }
+
   async totals(
     user: UserRecord,
     tx?: Prisma.TransactionClient,
@@ -113,42 +135,69 @@ export class FinancesService {
     const start = new Date(`${mes}-01T00:00:00Z`);
     const end = new Date(start);
     end.setUTCMonth(end.getUTCMonth() + 1);
-    // Uma fotografia consistente para saldo, reservas e movimentos.
+    // Resumo e série diária compartilham uma fotografia consistente do mês.
     return this.prisma.$transaction(
       async (tx) => {
-        const [totals, lancamentos, reservas] = await Promise.all([
-          this.totals(user, tx),
+        const [saldo_centavos, daily, lancamentos] = await Promise.all([
+          this.registeredBalance(user, tx),
+          tx.lancamentos_financeiros.groupBy({
+            by: ["data", "tipo"],
+            where: {
+              usuario_id: user.usuario_id,
+              data: { gte: start, lt: end },
+            },
+            _sum: { valor_centavos: true },
+          }),
           tx.lancamentos_financeiros.findMany({
             where: {
               usuario_id: user.usuario_id,
               data: { gte: start, lt: end },
             },
             orderBy: [{ data: "desc" }, { id: "desc" }],
-          }),
-          tx.reservas_financeiras.findMany({
-            where: { usuario_id: user.usuario_id },
-            orderBy: { id: "asc" },
+            take: 20,
           }),
         ]);
+        const incomes = new Map<string, number>();
+        const expenses = new Map<string, number>();
+        for (const item of daily) {
+          const day = item.data.toISOString().slice(0, 10);
+          const amount = item._sum.valor_centavos ?? 0;
+          if (item.tipo === "receita")
+            incomes.set(day, (incomes.get(day) ?? 0) + amount);
+          if (item.tipo === "despesa")
+            expenses.set(day, (expenses.get(day) ?? 0) + amount);
+        }
+        const receitas_centavos = safeTotal(
+          [...incomes.values()].reduce((sum, value) => sum + value, 0),
+        );
+        const despesas_centavos = safeTotal(
+          [...expenses.values()].reduce((sum, value) => sum + value, 0),
+        );
+        let running = 0;
+        const serie_diaria = [];
+        for (
+          let current = new Date(start);
+          current < end;
+          current.setUTCDate(current.getUTCDate() + 1)
+        ) {
+          const day = current.toISOString().slice(0, 10);
+          running = safeTotal(
+            running + (incomes.get(day) ?? 0) - (expenses.get(day) ?? 0),
+          );
+          serie_diaria.push({ data: day, resultado_centavos: running });
+        }
         return {
           mes,
           moeda: "BRL",
-          ...totals,
-          receitas_centavos: safeTotal(
-            lancamentos
-              .filter((x) => x.tipo === "receita")
-              .reduce((s, x) => s + x.valor_centavos, 0),
-          ),
-          despesas_centavos: safeTotal(
-            lancamentos
-              .filter((x) => x.tipo === "despesa")
-              .reduce((s, x) => s + x.valor_centavos, 0),
-          ),
+          saldo_centavos,
+          resultado_centavos: safeTotal(receitas_centavos - despesas_centavos),
+          receitas_centavos,
+          despesas_centavos,
+          serie_diaria,
           lancamentos: lancamentos.map((x) => ({
             ...x,
             data: x.data.toISOString().slice(0, 10),
           })),
-          reservas,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
@@ -171,10 +220,13 @@ export class FinancesService {
     const tipo = requiredText(p.tipo, "Tipo de lançamento inválido.");
     if (!TYPES.includes(tipo))
       throw new BadRequestException("Tipo de lançamento inválido.");
-    const categoria = requiredText(p.categoria, "Categoria inválida.");
+    const categoria =
+      p.categoria == null
+        ? "Outros"
+        : requiredText(p.categoria, "Categoria inválida.");
     if (!CATEGORIES.includes(categoria))
       throw new BadRequestException("Categoria inválida.");
-    const data = parseIsoDate(p.data, "Data inválida.");
+    const data = parseIsoDate(p.data ?? this.today(user), "Data inválida.");
     if (!data || data.toISOString().slice(0, 10) > this.today(user))
       throw new BadRequestException(
         "Registre apenas movimentações já realizadas.",

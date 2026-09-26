@@ -1,10 +1,7 @@
-import { useFinances } from "../../finances/hooks/useFinances"
-import FinanceForm from "../../finances/components/FinanceForm"
-import { operationalDateFor } from "../../calendar/calendarUtils"
-import { formatDateForApi } from "../../../utils/date"
 import ObjectiveOperationalPanel from "../components/ObjectiveOperationalPanel"
+import ObjectiveLinkComposer from "../components/ObjectiveLinkComposer"
 import { Plus } from "lucide-react"
-import React, { useEffect, useState } from "react"
+import React, { useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import Button from "../../../components/ui/Button"
@@ -27,11 +24,9 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const tasksEnabled = getEnabledModules(user).some((module) => module.key === "tasks")
   const objectiveTasks = useObjectiveTasks({ token, onUnauthorized, enabled: tasksEnabled })
   const trackers = useTrackers({ token, onUnauthorized })
-  const financesEnabled = getEnabledModules(user).some((module) => module.key === "finances")
-  const finances = useFinances({ token, onUnauthorized, enabled: financesEnabled })
   const [addingTo, setAddingTo] = useState(null)
-  const [reserveForm, setReserveForm] = useState(null)
-  const today = formatDateForApi(operationalDateFor(user?.timezone)).split("-").reverse().join("-")
+  const [linkType, setLinkType] = useState("task")
+  const [linkSearch, setLinkSearch] = useState("")
   const [editingObjetivo, setEditingObjetivo] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [taskObjetivo, setTaskObjetivo] = useState(null)
@@ -40,11 +35,6 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const [deleteTrackerTarget, setDeleteTrackerTarget] = useState(null)
   const [unlinkTarget, setUnlinkTarget] = useState(null)
   const busy = objectives.loading || objectives.mutating
-
-  useEffect(() => {
-    const id = window.location.hash.slice(1)
-    if (/^objetivo-\d+$/.test(id)) document.getElementById(id)?.scrollIntoView?.({ block: "start" })
-  }, [objectives.objetivos])
 
   function openCreateObjective() {
     setEditingObjetivo(null)
@@ -101,14 +91,10 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           </Button>
         }
         title="Objetivos"
-        description="Direções que dão sentido às suas escolhas."
       />
 
       <StatusNotice status={objectives.status} />
       <StatusNotice status={trackers.status} />
-      {financesEnabled && finances.error && !reserveForm && (
-        <StatusNotice status={{ type: "error", message: finances.error }} />
-      )}
 
       {formOpen && (
         <Dialog
@@ -126,10 +112,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       )}
 
       <ObjetivoList
-        onAdd={setAddingTo}
-        reserves={financesEnabled ? (finances.data?.reservas ?? []) : []}
-        onEditReserve={(reserve) => setReserveForm({ item: reserve, objetivo: null })}
-        onUnlinkReserve={(reserve) => finances.saveReserve({ objetivo_id: null }, reserve.id)}
+        onAdd={(goal) => {
+          setLinkType(tasksEnabled && goal.status === "ativo" ? "task" : "tracker")
+          setLinkSearch("")
+          setAddingTo(goal)
+        }}
         onUnlinkTracker={(tracker) => trackers.updateTracker(tracker, { objetivo_id: null })}
         onCompleteTask={(task) => objectiveTasks.operateTask(task)}
         tasksEnabled={tasksEnabled}
@@ -137,13 +124,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         objectivesLoading={objectives.loading}
         objectivesError={objectives.status.type === "error" ? objectives.status.message : ""}
         tasksByObjetivo={objectiveTasks.tasksByObjetivo}
-        summaryTasksByObjetivo={objectiveTasks.summaryTasksByObjetivo}
         tasksLoading={objectiveTasks.loading}
         tasksError={objectiveTasks.error}
         onRetryTasks={objectiveTasks.refresh}
         objetivos={objectives.objetivos}
         onCreate={openCreateObjective}
-        onCreateTask={setTaskObjetivo}
         onDelete={setDeleteTarget}
         onEdit={(objetivo) => {
           setEditingObjetivo(objetivo)
@@ -159,7 +144,6 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         trackersLoaded={trackers.loaded}
         onRetryTrackers={trackers.refresh}
         trackerBusyId={trackers.busyId}
-        onCreateTracker={(objetivo) => setTrackerForm({ objetivo, tracker: null })}
         onEditTracker={(tracker) =>
           setTrackerForm({
             objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id),
@@ -173,121 +157,33 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       />
 
       {addingTo && (
-        <Dialog title={`Adicionar a ${addingTo.titulo}`} onClose={() => setAddingTo(null)}>
-          <div className="objective-composer grid min-w-0 gap-3">
-            <p className="m-0 text-sm text-text-secondary">
-              Escolha o que vai sustentar esta direção.
-            </p>
-            {tasksEnabled && addingTo.status === "ativo" && (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setTaskObjetivo(addingTo)
-                  setAddingTo(null)
-                }}
-              >
-                Criar tarefa
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setTrackerForm({ objetivo: addingTo, tracker: null })
-                setAddingTo(null)
-              }}
-            >
-              Criar acompanhamento
-            </Button>
-            {financesEnabled && (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setReserveForm({ objetivo: addingTo, item: null })
-                  setAddingTo(null)
-                }}
-              >
-                Criar reserva financeira
-              </Button>
-            )}
-            {trackers.trackers
-              .filter((item) => item.objetivo_id === null)
-              .map((item) => (
-                <Button
-                  key={`tracker-${item.id}`}
-                  variant="ghost"
-                  onClick={async () => {
-                    if (await trackers.updateTracker(item, { objetivo_id: addingTo.id }))
-                      setAddingTo(null)
-                  }}
-                >
-                  Vincular acompanhamento: {item.titulo}
-                </Button>
-              ))}
-            {financesEnabled &&
-              finances.data?.reservas
-                .filter((item) => item.objetivo_id === null)
-                .map((item) => (
-                  <Button
-                    key={`reserve-${item.id}`}
-                    variant="ghost"
-                    onClick={async () => {
-                      if (await finances.saveReserve({ objetivo_id: addingTo.id }, item.id))
-                        setAddingTo(null)
-                    }}
-                  >
-                    Vincular reserva: {item.titulo}
-                  </Button>
-                ))}
-            {tasksEnabled &&
-              addingTo.status === "ativo" &&
-              objectiveTasks.tasks
-                .filter(
-                  (item, index, items) =>
-                    item.objetivo_id === null &&
-                    (!item.recurrence ||
-                      items.findIndex(
-                        (other) => other.recurrence?.series_id === item.recurrence.series_id
-                      ) === index)
-                )
-                .map((item) => (
-                  <Button
-                    key={`task-${item.id}`}
-                    variant="ghost"
-                    onClick={async () => {
-                      if (await objectiveTasks.operateTask(item, { objetivo_id: addingTo.id }))
-                        setAddingTo(null)
-                    }}
-                  >
-                    Vincular tarefa: {item.titulo}
-                  </Button>
-                ))}
-            <StatusNotice status={trackers.status} />
-            {(finances.error || objectiveTasks.error) && (
-              <p role="alert" className="text-sm text-danger">
-                {finances.error || objectiveTasks.error}
-              </p>
-            )}
-          </div>
-        </Dialog>
-      )}
-      {reserveForm && financesEnabled && (
-        <Dialog
-          title={reserveForm.item ? "Editar reserva" : "Nova reserva"}
-          onClose={() => setReserveForm(null)}
-          closeOnBackdrop={false}
-        >
-          <FinanceForm
-            kind="reserve"
-            item={reserveForm.item}
-            objectives={objectives.objetivos}
-            initialObjectiveId={reserveForm.objetivo?.id}
-            today={today}
-            busy={finances.busy}
-            error={finances.error}
-            onCancel={() => setReserveForm(null)}
-            onSave={async (payload, id) => {
-              if (await finances.saveReserve(payload, id)) setReserveForm(null)
+        <Dialog title="Adicionar vínculo" onClose={() => setAddingTo(null)}>
+          <ObjectiveLinkComposer
+            objetivo={addingTo}
+            tasksEnabled={tasksEnabled}
+            tasks={objectiveTasks.tasks}
+            trackers={trackers.trackers}
+            type={linkType}
+            search={linkSearch}
+            onType={setLinkType}
+            onSearch={setLinkSearch}
+            onCreateTask={() => {
+              setTaskObjetivo(addingTo)
+              setAddingTo(null)
             }}
+            onCreateTracker={() => {
+              setTrackerForm({ objetivo: addingTo, tracker: null })
+              setAddingTo(null)
+            }}
+            onLinkTask={async (item) => {
+              if (await objectiveTasks.operateTask(item, { objetivo_id: addingTo.id }))
+                setAddingTo(null)
+            }}
+            onLinkTracker={async (item) => {
+              if (await trackers.updateTracker(item, { objetivo_id: addingTo.id }))
+                setAddingTo(null)
+            }}
+            error={objectiveTasks.error || trackers.error}
           />
         </Dialog>
       )}
@@ -394,7 +290,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         <ConfirmDialog
           cancelLabel="Cancelar"
           confirmLabel="Remover"
-          message={`"${deleteTarget.titulo}" será removido. Tarefas, acompanhamentos e reservas serão preservados sem este vínculo. Séries com término neste objetivo serão desativadas.`}
+          message={`"${deleteTarget.titulo}" será removido. Tarefas e acompanhamentos serão preservados sem este vínculo. Séries com término neste objetivo serão desativadas.`}
           title="Remover objetivo"
           error={objectives.status.type === "error" ? objectives.status.message : ""}
           variant="danger"
@@ -404,7 +300,6 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
             if (removed) {
               objectiveTasks.detachObjective(deleteTarget.id)
               trackers.removeForObjective()
-              if (financesEnabled) void finances.refresh()
               removeObjectiveFromOverview(token, deleteTarget.id)
               setDeleteTarget(null)
             }

@@ -2,15 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "../../../services/bunkermodeApi"
 import { getErrorMessage } from "../../../api/httpClient"
 import type { FinanceOverview } from "../../../types/financeContract"
+import { getFinanceSnapshot, setFinanceSnapshot } from "../../../state/financeCache"
 
 export function useFinances({ token, onUnauthorized, enabled = true, month = undefined }) {
-  const [snapshot, setSnapshot] = useState<{ key: string; data: FinanceOverview } | null>(null)
+  const key = `${token}:${month ?? "current"}`
+  const [snapshot, setSnapshot] = useState<{ key: string; data: FinanceOverview } | null>(() => {
+    const data = getFinanceSnapshot(key)
+    return data ? { key, data } : null
+  })
   const [loading, setLoading] = useState(enabled)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const version = useRef(0)
   const mutation = useRef(false)
-  const key = `${token}:${month ?? "current"}`
   const refresh = useCallback(async () => {
     if (!enabled || !token) return false
     const current = ++version.current
@@ -23,6 +27,7 @@ export function useFinances({ token, onUnauthorized, enabled = true, month = und
       setError(getErrorMessage(result, "Não foi possível carregar as finanças."))
       return false
     }
+    setFinanceSnapshot(key, result.data)
     setSnapshot({ key, data: result.data })
     setError("")
     return true
@@ -64,7 +69,7 @@ export function useFinances({ token, onUnauthorized, enabled = true, month = und
     return true
   }
   return {
-    data: enabled && snapshot?.key === key ? snapshot.data : null,
+    data: enabled ? (snapshot?.key === key ? snapshot.data : getFinanceSnapshot(key)) : null,
     loading,
     busy,
     error,

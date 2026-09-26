@@ -22,7 +22,7 @@ const load = (p) => vite.ssrLoadModule(`/src/${p}`)
 const [
   { useFinances },
   { api },
-  { parseMoney, money, reserveSignal },
+  { parseMoney, money },
   { summarizeObjective },
   { default: Page },
   { default: Home },
@@ -39,12 +39,11 @@ const empty = () => ({
   mes: "2026-09",
   moeda: "BRL",
   saldo_centavos: 0,
-  reservado_centavos: 0,
-  livre_centavos: 0,
+  resultado_centavos: 0,
   receitas_centavos: 0,
   despesas_centavos: 0,
   lancamentos: [],
-  reservas: [],
+  serie_diaria: [],
 })
 async function mount(Component, props) {
   const container = document.createElement("div")
@@ -76,22 +75,14 @@ test("dinheiro converte decimal em centavos exatos e rejeita representações am
   for (const input of ["1.234", "1,234", "1e3", "-1", "NaN", "21474836,48", ""])
     assert.equal(parseMoney(input), null)
   assert.match(money(420001), /4.200,01/)
-  assert.match(
-    reserveSignal({ valor_centavos: 420000, alvo_centavos: 1000000 }),
-    /4.200,00 reservados de R\$\s10.000,00/
-  )
 })
-test("direção admite três vínculos factuais sem percentual nem conclusão automática", () => {
+test("direção mostra vínculos factuais de tarefas e acompanhamentos sem conclusão automática", () => {
   const result = summarizeObjective({
     objetivo: { id: 1, status: "ativo" },
     trackers: [{ titulo: "Fumar", ocorrencias: [] }],
     tasks: [{ titulo: "Ler", status: "PENDENTE" }],
-    reserves: [{ titulo: "Reserva", valor_centavos: 420000, alvo_centavos: 1000000 }],
   })
-  assert.deepEqual(
-    result.map((x) => x.kind),
-    ["tracker", "task", "reserve"]
-  )
+  assert.deepEqual(result.map((x) => x.kind), ["tracker", "task"])
   assert.doesNotMatch(JSON.stringify(result), /%|sucesso|melhor|concluído/)
 })
 test("Finanças desativado não consulta API; mudança de token ignora dados antigos e 401 antigos", async () => {
@@ -240,29 +231,32 @@ test("página financeira funciona sem Objetivos e tem formulários operáveis", 
     onUnauthorized: () => false,
   })
   try {
-    assert.match(view.container.textContent, /Livre após reservas|Nenhuma movimentação/)
+    assert.match(view.container.textContent, /Resultado do mês|Nenhum movimento/)
+    assert.doesNotMatch(view.container.textContent, /Reserva|Livre após reservas/)
     await act(async () =>
       [...view.container.querySelectorAll("button")]
-        .find((b) => b.textContent === "Nova reserva")
+        .find((b) => b.textContent.trim() === "Movimento")
         .click()
     )
     assert.ok(document.querySelector("input[inputmode=decimal]"))
-    assert.doesNotMatch(document.querySelector("[role=dialog]").textContent, /Objetivo opcional/)
+    assert.match(document.querySelector("[role=dialog]").textContent, /Entrada|Saída/)
+    assert.doesNotMatch(
+      document.querySelector("[role=dialog]").textContent,
+      /Objetivo opcional|Ajuste de saldo/
+    )
   } finally {
     await view.close()
     Object.assign(api, original)
   }
 })
-test("falha na materialização não dispara leitura de tarefas e preserva direções na Home", async () => {
+test("Home consulta somente orientação e preserva direções", async () => {
   const original = { ...api }
-  let included
-  api.materializeTaskRecurrences = async () => ({
-    ok: false,
-    status: 503,
-    data: { message: "Não foi possível preparar tarefas" },
-  })
-  api.getOrientation = async (_t, tasks) => {
-    included = tasks
+  let reads = 0
+  api.materializeTaskRecurrences = () => {
+    throw Error("Home não materializa")
+  }
+  api.getOrientation = async () => {
+    reads++
     return {
       ok: true,
       data: {
@@ -280,10 +274,9 @@ test("falha na materialização não dispara leitura de tarefas e preserva dire�
     onUnauthorized: () => false,
   })
   try {
-    assert.equal(included, false)
+    assert.equal(reads, 1)
     assert.match(view.container.textContent, /Direção independente/)
-    assert.match(view.container.textContent, /Não foi possível preparar/)
-    assert.doesNotMatch(view.container.textContent, /O dia está aberto/)
+    assert.doesNotMatch(view.container.textContent, /Atualizando/)
   } finally {
     await view.close()
     Object.assign(api, original)
@@ -298,13 +291,24 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
     ok: true,
     data: {
       ...empty(),
-      reservas: deleted ? [] : [{ id: 7, titulo: "Estudos", objetivo_id: null, valor_centavos: 0 }],
+      lancamentos: deleted
+        ? []
+        : [
+            {
+              id: 7,
+              titulo: "Estudos",
+              tipo: "despesa",
+              data: "2026-09-01",
+              categoria: "Outros",
+              valor_centavos: 100,
+            },
+          ],
     },
   })
-  api.deleteReserve = async () => {
+  api.deleteFinanceEntry = async () => {
     attempts++
     if (attempts === 1)
-      return { ok: false, status: 503, data: { message: "Não foi possível excluir a reserva." } }
+      return { ok: false, status: 503, data: { message: "Não foi possível excluir o movimento." } }
     deleted = true
     return { ok: true, status: 204, data: null }
   }
@@ -315,11 +319,11 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
   })
   try {
     await act(async () =>
-      view.container.querySelector('[aria-label="Ações da reserva: Estudos"]').click()
+      view.container.querySelector('[aria-label="Ações do movimento: Estudos"]').click()
     )
     await act(async () =>
       [...document.querySelectorAll('[role="menuitem"]')]
-        .find((b) => b.textContent === "Excluir reserva")
+        .find((b) => b.textContent === "Excluir movimento")
         .click()
     )
     const confirm = () =>
@@ -329,7 +333,7 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
     await act(async () => confirm().click())
     assert.match(
       document.querySelector('[role="dialog"] [role="alert"]')?.textContent ?? "",
-      /Não foi possível excluir a reserva/
+      /Não foi possível excluir o movimento/
     )
     assert.match(view.container.textContent, /Estudos/)
     await act(async () => confirm().click())

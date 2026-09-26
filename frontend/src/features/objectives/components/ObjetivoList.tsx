@@ -1,28 +1,30 @@
-import React from "react"
-
+import React, { useEffect, useState } from "react"
 import LoadingLines from "../../../components/ui/LoadingLines"
 import EmptyState from "../../../components/ui/EmptyState"
 import ObjetivoCard from "./ObjetivoCard"
 
+const labels = {
+  ativo: "Em andamento",
+  pausado: "Pausados",
+  concluido: "Encerrados",
+  abandonado: "Encerrados",
+}
+const statusOrder = { ativo: 0, pausado: 1, concluido: 2, abandonado: 3 }
+
 export default function ObjetivoList({
-  onAdd = undefined,
-  reserves = [],
-  onEditReserve = undefined,
-  onUnlinkReserve = undefined,
-  onUnlinkTracker = undefined,
-  onCompleteTask = undefined,
+  onAdd,
+  onUnlinkTracker,
+  onCompleteTask,
   objectivesLoading = false,
   objectivesError = "",
   tasksEnabled,
   loading,
   tasksByObjetivo,
-  summaryTasksByObjetivo = tasksByObjetivo,
   tasksLoading,
   tasksError,
   onRetryTasks,
   objetivos,
   onCreate,
-  onCreateTask,
   onDelete,
   onEdit,
   onMoveToTop,
@@ -35,17 +37,22 @@ export default function ObjetivoList({
   trackersLoaded,
   onRetryTrackers,
   trackerBusyId,
-  onCreateTracker,
   onEditTracker,
   onDeleteTracker,
   onRecordOccurrence,
   onDeleteOccurrence,
   timezone,
 }) {
-  if (objetivos.length === 0 && objectivesLoading)
-    return <LoadingLines label="Carregando objetivos" />
-  if (objetivos.length === 0 && objectivesError) return null
-  if (objetivos.length === 0) {
+  const fromHash = () => Number(window.location.hash.match(/^#objetivo-(\d+)$/)?.[1]) || null
+  const [selectedId, setSelectedId] = useState(fromHash)
+  useEffect(() => {
+    const update = () => setSelectedId(fromHash())
+    window.addEventListener("hashchange", update)
+    return () => window.removeEventListener("hashchange", update)
+  }, [])
+  if (!objetivos.length && objectivesLoading) return <LoadingLines label="Carregando objetivos" />
+  if (!objetivos.length && objectivesError) return null
+  if (!objetivos.length)
     return (
       <EmptyState
         actionLabel="Criar objetivo"
@@ -54,63 +61,73 @@ export default function ObjetivoList({
         title="Nenhum objetivo ainda"
       />
     )
+  const ordered = [...objetivos].sort(
+    (a, b) =>
+      statusOrder[a.status] - statusOrder[b.status] || a.order_index - b.order_index || a.id - b.id
+  )
+  const selected = ordered.find((item) => item.id === selectedId) || ordered[0]
+  const activeIndex = ordered
+    .filter((item) => item.status === "ativo")
+    .findIndex((item) => item.id === selected.id)
+  const select = (id) => {
+    setSelectedId(id)
+    window.history.replaceState(null, "", `#objetivo-${id}`)
   }
-
   return (
-    <div className="grid gap-5">
-      {[
-        { label: "Em andamento", states: ["ativo"] },
-        { label: "Pausados", states: ["pausado"] },
-        { label: "Encerrados", states: ["concluido", "abandonado"] },
-      ].map((group) => {
-        const items = objetivos.filter((objetivo) => group.states.includes(objetivo.status))
-        if (!items.length) return null
-        return (
-          <section key={group.label} aria-label={group.label} className="grid gap-4">
-            <p className="m-0 text-sm font-medium text-text-secondary">
-              {group.label} <span className="ml-1 text-text-muted">{items.length}</span>
-            </p>
-            {items.map((objetivo, index) => (
-              <ObjetivoCard
-                onAdd={onAdd ? () => onAdd(objetivo) : undefined}
-                reserves={reserves.filter((r) => r.objetivo_id === objetivo.id)}
-                onEditReserve={onEditReserve}
-                onUnlinkReserve={onUnlinkReserve}
-                onUnlinkTracker={onUnlinkTracker}
-                onCompleteTask={onCompleteTask}
-                tasksEnabled={tasksEnabled}
-                key={objetivo.id}
-                loading={loading}
-                tasks={tasksByObjetivo[String(objetivo.id)] || []}
-                summaryTasks={summaryTasksByObjetivo[String(objetivo.id)] || []}
-                tasksLoading={tasksLoading}
-                tasksError={tasksError}
-                onRetryTasks={onRetryTasks}
-                objetivo={objetivo}
-                onCreateTask={() => onCreateTask(objetivo)}
-                onDelete={() => onDelete(objetivo)}
-                onEdit={() => onEdit(objetivo)}
-                onMoveToTop={index > 0 ? () => onMoveToTop(objetivo.id) : null}
-                onUpdateStatus={(status) => onUpdateStatus(objetivo.id, status)}
-                onUnlinkTask={onUnlinkTask}
-                unlinkingId={unlinkingId}
-                trackers={trackersByObjective[String(objetivo.id)] || []}
-                trackersLoading={trackersLoading}
-                trackersError={trackersError}
-                trackersLoaded={trackersLoaded}
-                onRetryTrackers={onRetryTrackers}
-                trackerBusyId={trackerBusyId}
-                onCreateTracker={() => onCreateTracker(objetivo)}
-                onEditTracker={onEditTracker}
-                onDeleteTracker={onDeleteTracker}
-                onRecordOccurrence={onRecordOccurrence}
-                onDeleteOccurrence={onDeleteOccurrence}
-                timezone={timezone}
-              />
-            ))}
-          </section>
-        )
-      })}
+    <div className="objective-layout">
+      <nav className="objective-rail" aria-label="Selecionar objetivo">
+        <p className="objective-rail-title">
+          Suas direções <span>{ordered.length}</span>
+        </p>
+        <div className="objective-rail-items">
+          {ordered.map((item, index) => (
+            <React.Fragment key={item.id}>
+              {(index === 0 || labels[item.status] !== labels[ordered[index - 1].status]) && (
+                <p className="objective-rail-group">{labels[item.status]}</p>
+              )}
+              <button
+                type="button"
+                className="objective-rail-item"
+                aria-current={selected.id === item.id ? "true" : undefined}
+                onClick={() => select(item.id)}
+              >
+                <span className="objective-rail-dot" aria-hidden="true" />
+                <span>{item.titulo}</span>
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      </nav>
+      <ObjetivoCard
+        key={selected.id}
+        objetivo={selected}
+        tasksEnabled={tasksEnabled}
+        tasks={tasksByObjetivo[String(selected.id)] || []}
+        tasksLoading={tasksLoading}
+        tasksError={tasksError}
+        onRetryTasks={onRetryTasks}
+        trackers={trackersByObjective[String(selected.id)] || []}
+        trackersLoading={trackersLoading}
+        trackersError={trackersError}
+        trackersLoaded={trackersLoaded}
+        onRetryTrackers={onRetryTrackers}
+        loading={loading}
+        onAdd={() => onAdd(selected)}
+        onDelete={() => onDelete(selected)}
+        onEdit={() => onEdit(selected)}
+        onMoveToTop={activeIndex > 0 ? () => onMoveToTop(selected.id) : null}
+        onUpdateStatus={(status) => onUpdateStatus(selected.id, status)}
+        onUnlinkTask={onUnlinkTask}
+        unlinkingId={unlinkingId}
+        onUnlinkTracker={onUnlinkTracker}
+        onCompleteTask={onCompleteTask}
+        trackerBusyId={trackerBusyId}
+        onEditTracker={onEditTracker}
+        onDeleteTracker={onDeleteTracker}
+        onRecordOccurrence={onRecordOccurrence}
+        onDeleteOccurrence={onDeleteOccurrence}
+        timezone={timezone}
+      />
     </div>
   )
 }

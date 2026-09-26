@@ -116,14 +116,14 @@ test("ações no rodapé da execução do dia abrem Foco e criação mantém hoj
     await click(container.querySelector('[aria-label="Próxima semana"]'))
     assert.equal(container.querySelector('[aria-current="date"]'), null)
     await createFor(addDays(date, 7))
-    await click(button("Hoje"))
+    await click(button("Voltar para hoje"))
     assert.equal(
       container.querySelector('[aria-current="date"]').getAttribute("aria-pressed"),
       "true"
     )
     await click(container.querySelector('[aria-label="Semana anterior"]'))
     assert.equal(container.querySelector('[aria-current="date"]'), null)
-    await click(button("Hoje"))
+    await click(button("Voltar para hoje"))
     assert.equal(payloads.length, 3)
   } finally {
     await act(async () => root.unmount())
@@ -172,6 +172,13 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
             )
           )
         )
+        await act(async () => {
+          await new Promise((resolve) => setImmediate(resolve))
+        })
+        for (let attempt = 0; attempt < 20 && container.querySelector(".route-loading"); attempt++)
+          await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 25))
+          })
         if (route === "/") {
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
@@ -189,6 +196,13 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
             new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
           )
         )
+        await act(async () => {
+          await new Promise((resolve) => setImmediate(resolve))
+        })
+        for (let attempt = 0; attempt < 20 && container.querySelector(".route-loading"); attempt++)
+          await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 25))
+          })
         assert.match(container.textContent, /No que você vai focar agora/)
         assert.equal(window.localStorage.getItem("bunkermode_focus:1"), null)
       } finally {

@@ -77,6 +77,8 @@ async function requestFocusBoard(
   }
 }
 
+const pendingMaterializations = new Map<string, ReturnType<typeof request>>()
+
 export const api = {
   getOrientation(token, includeTasks = true) {
     return request(`/orientacao${includeTasks ? "" : "?incluir_tarefas=false"}`, { token })
@@ -135,7 +137,14 @@ export const api = {
     return requestFocusBoard("/tarefas/foco", { token })
   },
   materializeTaskRecurrences(token) {
-    return request("/tarefas/recorrencias/materializar", { token, method: "POST" })
+    const pending = pendingMaterializations.get(token)
+    if (pending) return pending
+    const result = request("/tarefas/recorrencias/materializar", { token, method: "POST" })
+    pendingMaterializations.set(token, result)
+    void result.finally(() => {
+      if (pendingMaterializations.get(token) === result) pendingMaterializations.delete(token)
+    })
+    return result
   },
   createTask(token, payload) {
     return requestTask("/tarefas", { token, method: "POST", body: payload })

@@ -1,10 +1,9 @@
 import React from "react"
-import { Check, Circle, ListChecks, Wallet } from "lucide-react"
+import { Check, Circle, ListChecks } from "lucide-react"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Button from "../../../components/ui/Button"
 import LoadingLines from "../../../components/ui/LoadingLines"
 import { trackerOccurrenceLabel } from "../objectiveSummary"
-import { reserveSignal } from "../../finances/money"
 
 export default function ObjectiveOperationalPanel({
   tasksEnabled,
@@ -25,9 +24,6 @@ export default function ObjectiveOperationalPanel({
   onUnlinkTracker = undefined,
   onRecordOccurrence,
   onDeleteOccurrence,
-  reserves = [],
-  onEditReserve = undefined,
-  onUnlinkReserve = undefined,
   timezone,
 }) {
   return (
@@ -146,26 +142,6 @@ export default function ObjectiveOperationalPanel({
               />
             </li>
           ))}
-        {reserves.map((reserve) => (
-          <li className="objective-link" key={`reserve-${reserve.id}`}>
-            <Wallet size={18} className="mt-1 text-accent" />
-            <div className="min-w-0">
-              <span className="eyebrow">Reserva financeira</span>
-              <h4>{reserve.titulo}</h4>
-              <p>{reserveSignal(reserve)}</p>
-              <a className="text-link" href={`/financas#reserva-${reserve.id}`}>
-                Abrir em Finanças
-              </a>
-            </div>
-            <ActionsMenu
-              label={`Ações da reserva: ${reserve.titulo}`}
-              items={[
-                { label: "Editar reserva", onSelect: () => onEditReserve(reserve) },
-                { label: "Desvincular do objetivo", onSelect: () => onUnlinkReserve(reserve) },
-              ]}
-            />
-          </li>
-        ))}
       </ul>
     </div>
   )

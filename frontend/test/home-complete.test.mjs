@@ -96,14 +96,14 @@ test("Home espera confirmação e releitura; não replica concluídas nem descri
     })
   const view = await mount()
   try {
-    assert.deepEqual(calls, ["prepare", "read"])
+    assert.deepEqual(calls, ["read"])
     assert.doesNotMatch(view.container.textContent, /Não repetir na Home|Finanças/)
     await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
     assert.match(view.container.textContent, /Ler/)
     assert.equal(view.container.querySelector(".line-through"), null)
     await act(async () => finish())
     assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
-    assert.deepEqual(calls, ["prepare", "read", "prepare", "read"])
+    assert.deepEqual(calls, ["read", "read"])
   } finally {
     await view.close()
     Object.assign(api, original)

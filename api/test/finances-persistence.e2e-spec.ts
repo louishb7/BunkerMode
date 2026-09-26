@@ -121,11 +121,11 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     let overview = await service.overview(owner, "2026-02");
     expect(overview).toMatchObject({
       saldo_centavos: 101000,
-      reservado_centavos: 42000,
-      livre_centavos: 59000,
+      resultado_centavos: 1000,
       receitas_centavos: 1010,
       despesas_centavos: 10,
     });
+    expect(overview.serie_diaria.at(-1)?.resultado_centavos).toBe(1000);
     expect(overview.lancamentos.map((x) => x.id)).toEqual([
       expense.id,
       income.id,
@@ -151,11 +151,40 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     overview = await service.overview(owner, "2026-01");
     expect(overview).toMatchObject({
       saldo_centavos: 100020,
-      reservado_centavos: 0,
+      resultado_centavos: 0,
       receitas_centavos: 0,
       despesas_centavos: 0,
     });
     expect(overview.lancamentos.map((x) => x.id)).toEqual([initial.body.id]);
+  });
+  it("aceita movimento simples e limita a lista sem truncar resumo ou série diária", async () => {
+    const created = await request(app.getHttpServer())
+      .post(`${base}/financas/lancamentos`)
+      .set(auth())
+      .send({ titulo: "Entrada rápida", tipo: "receita", valor_centavos: 123 })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      categoria: "Outros",
+      valor_centavos: 123,
+    });
+    const month = created.body.data.slice(0, 7);
+    await prisma.lancamentos_financeiros.createMany({
+      data: Array.from({ length: 25 }, (_, index) => ({
+        usuario_id: owner.usuario_id,
+        titulo: `Saída ${index}`,
+        tipo: "despesa",
+        categoria: "Outros",
+        valor_centavos: 100,
+        data: new Date(`${month}-01T00:00:00Z`),
+      })),
+    });
+    const overview = await service.overview(owner, month);
+    expect(overview.lancamentos).toHaveLength(20);
+    expect(overview.receitas_centavos).toBe(123);
+    expect(overview.despesas_centavos).toBe(2500);
+    expect(overview.resultado_centavos).toBe(-2377);
+    expect(overview.serie_diaria.at(-1)?.resultado_centavos).toBe(-2377);
+    expect(overview).not.toHaveProperty("reservas");
   });
   it("nega enumeração, edição, exclusão e relações entre usuários", async () => {
     const row = await service.createEntry(owner, entry);
@@ -274,7 +303,17 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .get(`${base}/orientacao`)
       .set(auth())
       .expect(200);
-    expect(home.body.financeiro).toEqual({ livre_centavos: -30 });
+    expect(home.body.financeiro).toBeNull();
+    await service.createEntry(owner, {
+      ...entry,
+      tipo: "despesa",
+      valor_centavos: 100,
+    });
+    const negative = await request(app.getHttpServer())
+      .get(`${base}/orientacao`)
+      .set(auth())
+      .expect(200);
+    expect(negative.body.financeiro).toEqual({ saldo_centavos: -50 });
   });
   it("desvincula e exclui objetivo preservando reservas, acompanhamentos e ocorrências", async () => {
     const goal = await prisma.objetivos.create({
@@ -298,7 +337,11 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       objetivo_id: null,
       ocorrencias: [expect.any(Object)],
     });
-    expect((await service.overview(owner)).reservas[0]).toMatchObject({
+    expect(
+      await prisma.reservas_financeiras.findFirst({
+        where: { usuario_id: owner.usuario_id },
+      }),
+    ).toMatchObject({
       objetivo_id: null,
       valor_centavos: 42000,
     });
@@ -312,7 +355,11 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       objetivo_id: null,
       ocorrencias: [expect.any(Object)],
     });
-    expect((await service.overview(owner)).reservas[0]).toMatchObject({
+    expect(
+      await prisma.reservas_financeiras.findFirst({
+        where: { usuario_id: owner.usuario_id },
+      }),
+    ).toMatchObject({
       objetivo_id: null,
       valor_centavos: 42000,
     });
@@ -333,7 +380,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
         .set(auth())
         .expect(200)
     ).body;
-    expect(home.direcoes[0].reserves[0].valor_centavos).toBe(42000);
+    expect(home.direcoes[0].reserves).toBeUndefined();
     expect(home.financeiro).toBeNull();
     await request(app.getHttpServer())
       .patch(`${base}/usuarios/me/modulos`)
@@ -346,20 +393,17 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
         .set(auth())
         .expect(200)
     ).body;
-    expect(home.direcoes[0].reserves).toEqual([]);
+    expect(home.direcoes[0].reserves).toBeUndefined();
     expect(home.tarefas).toEqual([]);
     expect(home.financeiro).toBeNull();
     expect(JSON.stringify(home)).not.toContain("42000");
     expect(JSON.stringify(home)).not.toContain("Reserva privada");
     // Preferência não substitui autenticação/ownership: acesso próprio direto permanece.
     expect(
-      (
-        await request(app.getHttpServer())
-          .get(`${base}/financas`)
-          .set(auth())
-          .expect(200)
-      ).body.reservas,
-    ).toHaveLength(1);
+      await prisma.reservas_financeiras.count({
+        where: { usuario_id: owner.usuario_id },
+      }),
+    ).toBe(1);
     await request(app.getHttpServer())
       .patch(`${base}/objetivos/${goal.id}/status`)
       .set(auth())

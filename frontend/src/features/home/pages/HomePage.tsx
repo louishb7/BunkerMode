@@ -14,6 +14,7 @@ export const selectHomeTasks = (tasks = []) =>
   tasks.filter((task) => task.status !== "CONCLUIDA").slice(0, 3)
 export const selectHomeObjectives = (goals = []) =>
   goals.filter((goal) => goal.status === "ativo").slice(0, 3)
+let cachedOrientation = null
 
 export default function HomePage({ token, user, onUnauthorized }) {
   const modules = getEnabledModules(user)
@@ -22,50 +23,44 @@ export default function HomePage({ token, user, onUnauthorized }) {
   const financesEnabled = modules.some((m) => m.key === "finances")
   const preferenceKey = modules.map((m) => m.key).join(",")
   const key = `${token}:${preferenceKey}`
-  const [snapshot, setSnapshot] = useState(null)
+  const [snapshot, setSnapshot] = useState(() => cachedOrientation)
   const data = snapshot?.key === key ? snapshot.data : null
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(null)
-  const [tasksError, setTasksError] = useState("")
   const version = useRef(0)
   const [focus, setFocus] = useState(() =>
     tasksEnabled ? readFocusSession(window.localStorage, user.id) : null
   )
   const refresh = useCallback(async () => {
     const current = ++version.current
-    const prepared = tasksEnabled
-      ? await api.materializeTaskRecurrences(token)
-      : { ok: true as const, status: 200, data: null }
-    if (current !== version.current || onUnauthorized?.(prepared)) return
-    setTasksError(
-      prepared.ok ? "" : getErrorMessage(prepared, "Não foi possível preparar as tarefas de hoje.")
-    )
-    const result = await api.getOrientation(token, prepared.ok)
+    const result = await api.getOrientation(token)
     if (current !== version.current || onUnauthorized?.(result)) return
     if (!result.ok) {
       setError(getErrorMessage(result, "Não foi possível carregar seu Bunker."))
       return
     }
-    setSnapshot((previous) => ({
+    const next = {
       key,
       data: {
         ...result.data,
         tarefas:
-          (!prepared.ok || result.data.falhas?.tarefas) && previous?.key === key
-            ? previous.data.tarefas
+          result.data.falhas?.tarefas && cachedOrientation?.key === key
+            ? cachedOrientation.data.tarefas
             : result.data.tarefas,
         financeiro:
-          result.data.falhas?.recursos && previous?.key === key
-            ? previous.data.financeiro
+          result.data.falhas?.recursos && cachedOrientation?.key === key
+            ? cachedOrientation.data.financeiro
             : result.data.financeiro,
         direcoes:
-          result.data.falhas?.direcoes && previous?.key === key
-            ? previous.data.direcoes
+          result.data.falhas?.direcoes && cachedOrientation?.key === key
+            ? cachedOrientation.data.direcoes
             : result.data.direcoes,
       },
-    }))
+    }
+    cachedOrientation = next
+    setSnapshot(next)
     setError("")
-  }, [key, tasksEnabled, token, onUnauthorized])
+  }, [key, token, onUnauthorized])
   useEffect(() => {
     version.current += 1
     setError("")
@@ -99,9 +94,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
   return (
     <section className="home-orientation">
       <header className="home-heading">
-        <p className="eyebrow">Orientação</p>
         <h1>Seu Bunker</h1>
-        <p>O que importa agora.</p>
       </header>
       {error && (
         <div role="alert" className="text-sm text-danger">
@@ -131,9 +124,9 @@ export default function HomePage({ token, user, onUnauthorized }) {
                   {focus ? "Retomar foco" : "Entrar em Foco"}
                 </Link>
               </header>
-              {(tasksError || data.falhas?.tarefas) && (
+              {data.falhas?.tarefas && (
                 <p role="status" className="text-sm text-danger">
-                  {tasksError || "Não foi possível consultar as tarefas."}{" "}
+                  Não foi possível consultar as tarefas.{" "}
                   <Button variant="ghost" onClick={refresh}>
                     Tentar novamente
                   </Button>
@@ -168,7 +161,6 @@ export default function HomePage({ token, user, onUnauthorized }) {
                   ))}
                 </ol>
               ) : (
-                !tasksError &&
                 !data.falhas?.tarefas && (
                   <p className="empty-copy">
                     O dia está aberto. Escolha uma atividade para o próximo bloco de foco.
@@ -218,7 +210,6 @@ export default function HomePage({ token, user, onUnauthorized }) {
                                 )
                               : []
                           }
-                          reserves={financesEnabled ? goal.reserves : []}
                           timezone={user?.timezone}
                         />
                       </div>
@@ -253,8 +244,8 @@ export default function HomePage({ token, user, onUnauthorized }) {
           {financesEnabled && data.financeiro && (
             <section className="home-attention" aria-label="Estado que pede atenção">
               <p className="eyebrow">Recursos</p>
-              <h2>Reservas sem cobertura no saldo registrado</h2>
-              <p>Faltam {money(-data.financeiro.livre_centavos)} para cobrir o valor separado.</p>
+              <h2>Saldo registrado negativo</h2>
+              <p>O saldo está em {money(data.financeiro.saldo_centavos)}.</p>
               <Link className="text-link" to="/financas">
                 Revisar recursos <ArrowUpRight size={15} />
               </Link>

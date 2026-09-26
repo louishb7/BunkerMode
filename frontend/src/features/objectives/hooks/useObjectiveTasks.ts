@@ -21,13 +21,6 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
     const currentRequest = ++requestId.current
     setLoading(!getOverview(token).all)
     setError("")
-    const materialized = await api.materializeTaskRecurrences(token)
-    if (currentRequest !== requestId.current || onUnauthorized?.(materialized)) return false
-    if (!materialized.ok) {
-      setLoading(false)
-      setError(getErrorMessage(materialized, "Não foi possível preparar as tarefas."))
-      return false
-    }
     const result = await api.listTasks(token)
     if (currentRequest !== requestId.current) return false
     if (onUnauthorized?.(result)) {

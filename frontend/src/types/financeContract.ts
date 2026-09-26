@@ -17,10 +17,9 @@ export type FinanceOverview = {
   mes: string
   moeda: "BRL"
   saldo_centavos: number
-  reservado_centavos: number
-  livre_centavos: number
+  resultado_centavos: number
   receitas_centavos: number
   despesas_centavos: number
+  serie_diaria: { data: string; resultado_centavos: number }[]
   lancamentos: FinanceEntry[]
-  reservas: Reserve[]
 }

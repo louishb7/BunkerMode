@@ -268,7 +268,7 @@ test("resposta stale não aciona o tratamento global de sessão", async () => {
   assert.equal(unauthorizedCalls, 0)
 })
 
-test("integração prepara recorrências e preserva 401 global", async () => {
+test("integração lê vínculos sem escrever e preserva 401 global", async () => {
   for (const status of [200, 503, 401]) {
     const calls = []
     let unauthorized = 0
@@ -295,7 +295,7 @@ test("integração prepara recorrências e preserva 401 global", async () => {
       }
     )
     assert.equal(await render().refresh(), status === 200)
-    assert.deepEqual(calls, ["POST", "GET"])
+    assert.deepEqual(calls, ["GET"])
     assert.equal(unauthorized, status === 401 ? 1 : 0)
     assert.equal(render().error, status === 503 ? "Leitura indisponível" : "")
   }

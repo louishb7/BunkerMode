@@ -81,7 +81,7 @@ test("acompanhamento registra eventos reais, permite remoção e não chama tare
     taskCalls++
     throw new Error("Acompanhamento não cria tarefa")
   }
-  const view = await mount(useTrackers, { token, onUnauthorized: () => false })
+  const view = await mount(useTrackers, { token, ownerId: 1, onUnauthorized: () => false })
   try {
     await act(async () => {
       assert.equal(await view.current.createTracker({ objetivo_id: 4, titulo: "Não fumar" }), true)
@@ -146,7 +146,7 @@ test("desvincular série atualiza cache de todas as ocorrências sem remover tar
     recurrence: seriesId ? { series_id: seriesId, termination_policy: "ate_objetivo" } : null,
   })
   let tasks = [task(1, 30, "CONCLUIDA"), task(2, 30), task(3, 31)]
-  cache.updateOverview(token, { all: tasks, daily: tasks })
+  cache.updateOverview(1, { all: tasks, daily: tasks })
   const original = {
     listTasks: api.listTasks,
     unlinkTaskFromObjective: api.unlinkTaskFromObjective,
@@ -166,7 +166,7 @@ test("desvincular série atualiza cache de todas as ocorrências sem remover tar
     )
     return { ok: true, data: { tarefa_id: 1, series_id: 30, objetivo_id: null } }
   }
-  const view = await mount(useObjectiveTasks, { token, enabled: true, onUnauthorized: () => false })
+  const view = await mount(useObjectiveTasks, { token, ownerId: 1, enabled: true, onUnauthorized: () => false })
   try {
     await act(async () => {
       assert.equal(await view.current.unlinkTask(tasks[0]), true)
@@ -174,11 +174,11 @@ test("desvincular série atualiza cache de todas as ocorrências sem remover tar
     assert.equal(view.current.tasksByObjetivo[4].length, 1)
     assert.equal(view.current.tasksByObjetivo[4][0].recurrence.series_id, 31)
     assert.deepEqual(
-      cache.getOverview(token).all.map((item) => item.objetivo_id),
+      cache.getOverview(1).all.map((item) => item.objetivo_id),
       [null, null, 4]
     )
-    assert.equal(cache.getOverview(token).all[0].status, "CONCLUIDA")
-    assert.equal(cache.getOverview(token).all[0].recurrence.termination_policy, "sem_termino")
+    assert.equal(cache.getOverview(1).all[0].status, "CONCLUIDA")
+    assert.equal(cache.getOverview(1).all[0].recurrence.termination_policy, "sem_termino")
   } finally {
     Object.assign(api, original)
     await view.close()
@@ -192,13 +192,13 @@ test("desvínculo pontual preserva status e só altera a tarefa selecionada", ()
     { id: 1, objetivo_id: 4, status: "CONCLUIDA", recurrence: null },
     { id: 2, objetivo_id: 4, status: "PENDENTE", recurrence: null },
   ]
-  cache.updateOverview(token, { all: tasks, daily: tasks })
-  cache.unlinkCachedObjectiveTask(token, tasks[0])
+  cache.updateOverview(1, { all: tasks, daily: tasks })
+  cache.unlinkCachedObjectiveTask(1, tasks[0])
   assert.deepEqual(
-    cache.getOverview(token).all.map((item) => item.objetivo_id),
+    cache.getOverview(1).all.map((item) => item.objetivo_id),
     [null, 4]
   )
-  assert.equal(cache.getOverview(token).all[0].status, "CONCLUIDA")
+  assert.equal(cache.getOverview(1).all[0].status, "CONCLUIDA")
   cache.clearOverview()
 })
 
@@ -208,7 +208,7 @@ test("remover objetivo limpa vínculos e acompanhamentos do cache sem apagar tar
     { id: 1, objetivo_id: 4, status: "CONCLUIDA" },
     { id: 2, objetivo_id: 5, status: "PENDENTE" },
   ]
-  cache.updateOverview(token, {
+  cache.updateOverview(1, {
     all: tasks,
     daily: tasks,
     trackers: [
@@ -216,14 +216,14 @@ test("remover objetivo limpa vínculos e acompanhamentos do cache sem apagar tar
       { id: 11, objetivo_id: 5 },
     ],
   })
-  cache.removeObjectiveFromOverview(token, 4)
+  cache.removeObjectiveFromOverview(1, 4)
   assert.deepEqual(
-    cache.getOverview(token).all.map((item) => item.objetivo_id),
+    cache.getOverview(1).all.map((item) => item.objetivo_id),
     [null, 5]
   )
-  assert.equal(cache.getOverview(token).all[0].status, "CONCLUIDA")
+  assert.equal(cache.getOverview(1).all[0].status, "CONCLUIDA")
   assert.deepEqual(
-    cache.getOverview(token).trackers.map((item) => item.objetivo_id),
+    cache.getOverview(1).trackers.map((item) => item.objetivo_id),
     [null, 5]
   )
   cache.clearOverview()
@@ -264,7 +264,7 @@ test("falha ao remover ocorrência preserva o evento sem alteração otimista", 
     created_at: "2026-09-23T12:00:00Z",
   }
   const tracker = { id: 10, objetivo_id: 4, titulo: "Não fumar", ocorrencias: [occurrence] }
-  cache.updateOverview(token, { trackers: [tracker] })
+  cache.updateOverview(1, { trackers: [tracker] })
   const original = {
     listTrackers: api.listTrackers,
     deleteTrackerOccurrence: api.deleteTrackerOccurrence,
@@ -275,7 +275,7 @@ test("falha ao remover ocorrência preserva o evento sem alteração otimista", 
     new Promise((resolve) => {
       finish = resolve
     })
-  const view = await mount(useTrackers, { token, onUnauthorized: () => false })
+  const view = await mount(useTrackers, { token, ownerId: 1, onUnauthorized: () => false })
   try {
     let pending
     await act(async () => {
@@ -285,7 +285,7 @@ test("falha ao remover ocorrência preserva o evento sem alteração otimista", 
     await act(async () => finish({ ok: false, status: 503, data: { message: "Falha" } }))
     assert.equal(await pending, false)
     assert.equal(view.current.byObjective[4][0].ocorrencias[0].id, 9)
-    assert.equal(cache.getOverview(token).trackers[0].ocorrencias[0].id, 9)
+    assert.equal(cache.getOverview(1).trackers[0].ocorrencias[0].id, 9)
   } finally {
     Object.assign(api, original)
     await view.close()

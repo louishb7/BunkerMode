@@ -4,6 +4,8 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { getOverview, updateOverview } from "../../../state/overviewCache"
+import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
+import { isObjectiveList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
 
 function sortObjetivosByOrder(objetivos = []) {
   return [...objetivos].sort((left, right) => {
@@ -12,8 +14,9 @@ function sortObjetivosByOrder(objetivos = []) {
   })
 }
 
-export function useObjectives({ onUnauthorized, token, enabled = true }) {
-  const [objetivos, setObjetivos] = useState(() => getOverview(token).objectives ?? [])
+export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }) {
+  const [objetivos, setObjetivos] = useState(() => getOverview(ownerId).objectives ?? [])
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
   const [status, setStatus] = useState(emptyStatus)
@@ -48,27 +51,53 @@ export function useObjectives({ onUnauthorized, token, enabled = true }) {
         return false
       }
 
-      const sorted = sortObjetivosByOrder(
-        Array.isArray(objetivosResult.data) ? objetivosResult.data : []
-      )
+      if (!isObjectiveList(objetivosResult.data)) {
+        setStatus({ type: "error", message: "Resposta de objetivos inválida." })
+        return false
+      }
+      const sorted = sortObjetivosByOrder(objetivosResult.data)
       setObjetivos(sorted)
-      updateOverview(token, { objectives: sorted })
+      updateOverview(ownerId, { objectives: sorted })
+      const saved = await saveSnapshot(ownerId, "objectives", sorted)
+      setLastUpdated(saved?.updatedAt ?? new Date().toISOString())
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token, enabled]
+    [onUnauthorized, token, enabled, ownerId]
   )
 
   useEffect(() => {
+    setLastUpdated(null)
     setMutating(false)
-    if (enabled) void loadObjectives()
+    let cancelled = false
+    if (enabled)
+      void (async () => {
+        const entry = await readSnapshot(ownerId, "objectives", isObjectiveList)
+        if (cancelled) return
+        if (entry && getOverview(ownerId).objectives === null) {
+          updateOverview(ownerId, { objectives: entry.data })
+          setObjetivos(entry.data)
+        }
+        setLastUpdated((current) => current ?? entry?.updatedAt ?? null)
+        if (getApiAvailability() !== "unavailable") void loadObjectives()
+      })()
     else setObjetivos([])
     return () => {
+      cancelled = true
       loadRequestId.current += 1
       lifecycleId.current += 1
       mutationRequestId.current += 1
     }
-  }, [loadObjectives, enabled])
+  }, [loadObjectives, enabled, ownerId])
+
+  useEffect(() => {
+    let previous = getApiAvailability()
+    return subscribeApiAvailability(() => {
+      const next = getApiAvailability()
+      if (enabled && previous === "unavailable" && next === "available") void loadObjectives()
+      previous = next
+    })
+  }, [enabled, loadObjectives])
 
   async function mutate(action, successMessage, fallbackMessage) {
     if (mutating) {
@@ -96,19 +125,20 @@ export function useObjectives({ onUnauthorized, token, enabled = true }) {
     }
 
     if (result.data && typeof result.data === "object" && "id" in result.data) {
-      const current = getOverview(token).objectives
+      const current = getOverview(ownerId).objectives
       if (current)
-        updateOverview(token, {
+        updateOverview(ownerId, {
           objectives: current.map((item) => (item.id === result.data.id ? result.data : item)),
         })
     } else {
-      updateOverview(token, { objectives: null })
+      updateOverview(ownerId, { objectives: null })
     }
     await loadObjectives(successMessage)
     return true
   }
 
   return {
+    lastUpdated,
     loading,
     mutating,
     objetivos,

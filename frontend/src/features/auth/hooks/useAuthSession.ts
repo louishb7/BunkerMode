@@ -1,12 +1,21 @@
 import { validateAuth } from "../authValidation"
 import { useCallback, useEffect, useRef, useState } from "react"
-
 import { getErrorMessage } from "../../../api/httpClient"
+
 import { TOKEN_KEY, USER_KEY } from "../../../constants/session"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { clearOverview } from "../../../state/overviewCache"
 import { clearFinanceSnapshots } from "../../../state/financeCache"
+import { clearOrientationCache } from "../../../state/orientationCache"
+import { allowUserData, clearUserData } from "../../../offline/snapshots"
+import {
+  getApiAvailability,
+  subscribeApiAvailability,
+  subscribeApiRetry,
+  subscribeApiSuccess,
+} from "../../../offline/apiAvailability"
+import { focusStorageKey, durationStorageKey } from "../../tasks/focusSession"
 
 const persistentStore = window.localStorage
 const sessionStore = window.sessionStorage
@@ -43,7 +52,18 @@ function readStoredUser() {
   }
 
   try {
-    return JSON.parse(rawUser)
+    const parsed = JSON.parse(rawUser)
+    if (
+      !Number.isSafeInteger(parsed?.id) ||
+      parsed.id <= 0 ||
+      typeof parsed.usuario !== "string" ||
+      (parsed.enabled_modules !== undefined && !Array.isArray(parsed.enabled_modules))
+    ) {
+      removeStoredSession()
+      return null
+    }
+    allowUserData(parsed.id)
+    return parsed
   } catch {
     removeStoredSession()
     return null
@@ -51,20 +71,29 @@ function readStoredUser() {
 }
 
 export function useAuthSession() {
-  const [token, setToken] = useState(() => persistentStore.getItem(TOKEN_KEY))
+  const [token, setToken] = useState(() => {
+    if (!readStoredUser()) {
+      removeStoredSession()
+      return null
+    }
+    return persistentStore.getItem(TOKEN_KEY)
+  })
   const [user, setUser] = useState(readStoredUser)
   const [sessionValidated, setSessionValidated] = useState(
     () => !persistentStore.getItem(TOKEN_KEY)
   )
+  const [sessionMode, setSessionMode] = useState<"online" | "local" | "none">("none")
   const [booting, setBooting] = useState(() => Boolean(persistentStore.getItem(TOKEN_KEY)))
   const [authStatus, setAuthStatus] = useState(emptyStatus)
   const [authLoading, setAuthLoading] = useState(false)
   const sessionRequestId = useRef(0)
+  const revalidating = useRef(false)
   const skipRestoreToken = useRef(null)
 
   const authenticated = Boolean(token && user && sessionValidated)
 
   const persistUser = useCallback((nextUser) => {
+    allowUserData(nextUser.id)
     persistentStore.setItem(USER_KEY, JSON.stringify(nextUser))
     setUser(nextUser)
   }, [])
@@ -78,16 +107,25 @@ export function useAuthSession() {
 
   const clearSession = useCallback(() => {
     sessionRequestId.current += 1
+    const ownerId = user?.id ?? readStoredUser()?.id
+    const cleanup = ownerId ? clearUserData(ownerId) : Promise.resolve()
+    if (ownerId) {
+      persistentStore.removeItem(focusStorageKey(ownerId))
+      persistentStore.removeItem(durationStorageKey(ownerId))
+    }
     clearOverview()
     clearFinanceSnapshots()
+    clearOrientationCache()
     removeStoredSession()
     setToken(null)
     setUser(null)
     setSessionValidated(true)
+    setSessionMode("none")
     setAuthStatus(emptyStatus)
     setAuthLoading(false)
     setBooting(false)
-  }, [])
+    return cleanup
+  }, [user?.id])
 
   const handleUnauthorized = useCallback(
     (result) => {
@@ -103,7 +141,9 @@ export function useAuthSession() {
 
   const restoreSession = useCallback(
     async (storedToken, requestId) => {
+      revalidating.current = true
       const result = await api.getCurrentUser(storedToken)
+      revalidating.current = false
       if (requestId !== sessionRequestId.current) {
         return false
       }
@@ -115,16 +155,23 @@ export function useAuthSession() {
       }
 
       if (!result.ok) {
-        setSessionValidated(false)
-        setAuthStatus({
-          type: "error",
-          message: getErrorMessage(result, "Não foi possível validar a sessão. Tente novamente."),
-        })
+        setSessionValidated(true)
+        setSessionMode("local")
+        setAuthStatus(emptyStatus)
         return false
+      }
+
+      const previousOwner = readStoredUser()?.id
+      if (previousOwner && previousOwner !== result.data.id) {
+        void clearUserData(previousOwner)
+        clearOverview()
+        clearFinanceSnapshots()
+        clearOrientationCache()
       }
 
       persistUser(result.data)
       setSessionValidated(true)
+      setSessionMode("online")
       setAuthStatus(emptyStatus)
       return true
     },
@@ -142,6 +189,7 @@ export function useAuthSession() {
       skipRestoreToken.current = null
       setBooting(false)
       setSessionValidated(true)
+      setSessionMode("online")
       return
     }
 
@@ -157,6 +205,30 @@ export function useAuthSession() {
       }
     }
   }, [restoreSession, token])
+
+  useEffect(() => {
+    if (!token || !user || !sessionValidated || sessionMode !== "local") return
+    const retry = () => {
+      if (getApiAvailability() === "unavailable" || revalidating.current) return
+      const requestId = ++sessionRequestId.current
+      void restoreSession(token, requestId)
+    }
+    const onAvailability = () => {
+      if (getApiAvailability() === "available") retry()
+    }
+    const stopAvailability = subscribeApiAvailability(onAvailability)
+    const stopRetry = subscribeApiRetry(() => {
+      if (revalidating.current) return
+      const requestId = ++sessionRequestId.current
+      void restoreSession(token, requestId)
+    })
+    const stopSuccess = subscribeApiSuccess(retry)
+    return () => {
+      stopAvailability()
+      stopRetry()
+      stopSuccess()
+    }
+  }, [token, user, sessionValidated, sessionMode, restoreSession])
 
   async function login(payload) {
     const validation = validateAuth(payload, false)
@@ -193,6 +265,7 @@ export function useAuthSession() {
     setToken(result.data.access_token)
     persistUser(result.data.usuario)
     setSessionValidated(true)
+    setSessionMode("online")
     setBooting(false)
   }
 
@@ -234,6 +307,7 @@ export function useAuthSession() {
     login,
     register,
     token,
+    sessionMode,
     updateCurrentUser,
     user,
   }

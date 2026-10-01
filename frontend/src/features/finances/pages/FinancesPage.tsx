@@ -6,6 +6,7 @@ import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Dialog from "../../../components/ui/Dialog"
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import LoadingLines from "../../../components/ui/LoadingLines"
+import OfflineNotice from "../../../components/system/OfflineNotice"
 import { operationalDateFor } from "../../calendar/calendarUtils"
 import { useFinances } from "../hooks/useFinances"
 import { money } from "../money"
@@ -88,7 +89,7 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
   const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`
   const currentMonth = today.slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
-  const finance = useFinances({ token, onUnauthorized, month })
+  const finance = useFinances({ token, ownerId: user.id, onUnauthorized, month })
   const [form, setForm] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const data = finance.data
@@ -105,6 +106,7 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           </Button>
         }
       />
+      <OfflineNotice updatedAt={finance.lastUpdated} />
       {finance.error && !form && !deleting && (
         <div role="alert" className="text-sm text-danger">
           {finance.error}{" "}

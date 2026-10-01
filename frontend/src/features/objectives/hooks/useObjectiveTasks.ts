@@ -5,11 +5,13 @@ import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
 import { detachObjectiveTaskList, getOverview, updateOverview } from "../../../state/overviewCache"
+import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
+import { isTaskList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
-export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
-  const [tasks, setTasks] = useState<Task[]>(() => getOverview(token).all ?? [])
-  const [loading, setLoading] = useState(() => !getOverview(token).all)
+export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = true }) {
+  const [tasks, setTasks] = useState<Task[]>(() => getOverview(ownerId).all ?? [])
+  const [loading, setLoading] = useState(() => !getOverview(ownerId).all)
   const [error, setError] = useState("")
   const [formLoading, setFormLoading] = useState(false)
   const [formStatus, setFormStatus] = useState(emptyStatus)
@@ -19,7 +21,7 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
   const refresh = useCallback(async () => {
     if (!token || !enabled) return false
     const currentRequest = ++requestId.current
-    setLoading(!getOverview(token).all)
+    setLoading(!getOverview(ownerId).all)
     setError("")
     const result = await api.listTasks(token)
     if (currentRequest !== requestId.current) return false
@@ -33,9 +35,10 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
       return false
     }
     setTasks(result.data)
-    updateOverview(token, { all: result.data })
+    updateOverview(ownerId, { all: result.data })
+    await saveSnapshot(ownerId, "tasks:all", result.data)
     return true
-  }, [token, onUnauthorized, enabled])
+  }, [token, ownerId, onUnauthorized, enabled])
 
   useEffect(() => {
     setFormLoading(false)
@@ -45,11 +48,32 @@ export function useObjectiveTasks({ token, onUnauthorized, enabled = true }) {
       setError("")
       return
     }
-    refresh()
+    let cancelled = false
+    void (async () => {
+      const entry = await readSnapshot(ownerId, "tasks:all", isTaskList)
+      if (cancelled) return
+      if (entry && getOverview(ownerId).all === null) {
+        updateOverview(ownerId, { all: entry.data as Task[] })
+        setTasks(entry.data as Task[])
+        setLoading(false)
+      }
+      if (getApiAvailability() !== "unavailable") void refresh()
+      else setLoading(false)
+    })()
     return () => {
+      cancelled = true
       requestId.current += 1
     }
-  }, [refresh, enabled])
+  }, [refresh, enabled, ownerId])
+
+  useEffect(() => {
+    let previous = getApiAvailability()
+    return subscribeApiAvailability(() => {
+      const next = getApiAvailability()
+      if (enabled && previous === "unavailable" && next === "available") void refresh()
+      previous = next
+    })
+  }, [enabled, refresh])
 
   const tasksByObjetivo = useMemo(() => groupObjectiveTasks(tasks), [tasks])
 

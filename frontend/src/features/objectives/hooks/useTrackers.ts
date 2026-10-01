@@ -5,10 +5,13 @@ import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { getOverview, updateOverview } from "../../../state/overviewCache"
 import type { Tracker, TrackerOccurrence } from "../../../types/trackerContract"
+import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
+import { isTrackerList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
 
-export function useTrackers({ token, onUnauthorized, enabled = true }) {
-  const initial = getOverview(token).trackers
+export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) {
+  const initial = getOverview(ownerId).trackers
   const [trackers, setTrackers] = useState<Tracker[]>(initial ?? [])
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(initial !== null)
   const [loading, setLoading] = useState(initial === null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -30,25 +33,56 @@ export function useTrackers({ token, onUnauthorized, enabled = true }) {
       setError(getErrorMessage(result, "Não foi possível carregar acompanhamentos."))
       return false
     }
-    const items = Array.isArray(result.data) ? result.data : []
+    if (!isTrackerList(result.data)) {
+      setError("Resposta de acompanhamentos inválida.")
+      return false
+    }
+    const items = result.data as Tracker[]
     setTrackers(items)
-    updateOverview(token, { trackers: items })
+    updateOverview(ownerId, { trackers: items })
+    const saved = await saveSnapshot(ownerId, "trackers", items)
+    setLastUpdated(saved?.updatedAt ?? new Date().toISOString())
     setLoaded(true)
     setStatus(emptyStatus)
     return true
-  }, [token, onUnauthorized, enabled])
+  }, [token, ownerId, onUnauthorized, enabled])
 
   useEffect(() => {
-    const cached = enabled ? getOverview(token).trackers : null
+    setLastUpdated(null)
+    const cached = enabled ? getOverview(ownerId).trackers : null
     setTrackers(cached ?? [])
     setLoaded(cached !== null)
     setLoading(enabled && cached === null)
     setError("")
-    if (enabled) void refresh()
+    let cancelled = false
+    if (enabled)
+      void (async () => {
+        const entry = await readSnapshot(ownerId, "trackers", isTrackerList)
+        if (cancelled) return
+        if (entry && getOverview(ownerId).trackers === null) {
+          updateOverview(ownerId, { trackers: entry.data as Tracker[] })
+          setTrackers(entry.data as Tracker[])
+          setLoaded(true)
+          setLoading(false)
+        }
+        setLastUpdated((current) => current ?? entry?.updatedAt ?? null)
+        if (getApiAvailability() !== "unavailable") void refresh()
+        else setLoading(false)
+      })()
     return () => {
+      cancelled = true
       requestId.current += 1
     }
-  }, [refresh, token, enabled])
+  }, [refresh, token, enabled, ownerId])
+
+  useEffect(() => {
+    let previous = getApiAvailability()
+    return subscribeApiAvailability(() => {
+      const next = getApiAvailability()
+      if (enabled && previous === "unavailable" && next === "available") void refresh()
+      previous = next
+    })
+  }, [enabled, refresh])
 
   const byObjective = useMemo(() => {
     const grouped: Record<string, Tracker[]> = {}
@@ -99,6 +133,7 @@ export function useTrackers({ token, onUnauthorized, enabled = true }) {
   }
 
   return {
+    lastUpdated,
     trackers,
     byObjective,
     loaded,

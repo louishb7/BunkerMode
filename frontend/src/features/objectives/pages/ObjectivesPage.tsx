@@ -8,6 +8,7 @@ import Button from "../../../components/ui/Button"
 import Dialog from "../../../components/ui/Dialog"
 import PageHeader from "../../../components/ui/PageHeader"
 import StatusNotice from "../../../components/ui/StatusNotice"
+import OfflineNotice from "../../../components/system/OfflineNotice"
 import { emptyStatus } from "../../../constants/uiState"
 import { getEnabledModules } from "../../../modules/moduleCatalog"
 import TaskForm from "../../tasks/components/TaskForm"
@@ -20,10 +21,15 @@ import TrackerForm from "../components/TrackerForm"
 import { removeObjectiveFromOverview } from "../../../state/overviewCache"
 
 export default function ObjectivesPage({ onUnauthorized, token, user }) {
-  const objectives = useObjectives({ onUnauthorized, token })
+  const objectives = useObjectives({ onUnauthorized, token, ownerId: user.id })
   const tasksEnabled = getEnabledModules(user).some((module) => module.key === "tasks")
-  const objectiveTasks = useObjectiveTasks({ token, onUnauthorized, enabled: tasksEnabled })
-  const trackers = useTrackers({ token, onUnauthorized })
+  const objectiveTasks = useObjectiveTasks({
+    token,
+    ownerId: user.id,
+    onUnauthorized,
+    enabled: tasksEnabled,
+  })
+  const trackers = useTrackers({ token, ownerId: user.id, onUnauthorized })
   const [addingTo, setAddingTo] = useState(null)
   const [linkType, setLinkType] = useState("task")
   const [linkSearch, setLinkSearch] = useState("")
@@ -92,6 +98,8 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         }
         title="Objetivos"
       />
+
+      <OfflineNotice updatedAt={objectives.lastUpdated ?? trackers.lastUpdated} />
 
       <StatusNotice status={objectives.status} />
       <StatusNotice status={trackers.status} />
@@ -300,7 +308,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
             if (removed) {
               objectiveTasks.detachObjective(deleteTarget.id)
               trackers.removeForObjective()
-              removeObjectiveFromOverview(token, deleteTarget.id)
+              removeObjectiveFromOverview(user.id, deleteTarget.id)
               setDeleteTarget(null)
             }
           }}

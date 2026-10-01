@@ -122,7 +122,7 @@ export const api = {
     return request<AuthSession>("/auth/login", { method: "POST", body: payload })
   },
   getCurrentUser(token) {
-    return request<User>("/usuarios/me", { token })
+    return request<User>("/usuarios/me", { token, timeoutMs: 6000 })
   },
   updateEnabledModules(token, payload) {
     return request<User>("/usuarios/me/modulos", { token, method: "PATCH", body: payload })

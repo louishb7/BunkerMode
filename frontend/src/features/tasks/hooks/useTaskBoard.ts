@@ -7,10 +7,35 @@ import { getOverview, updateCachedTask, updateOverview } from "../../../state/ov
 import { operationalDateFor } from "../../calendar/calendarUtils"
 import { formatDateForApi } from "../../../utils/date"
 import { getActionTasks } from "../taskSelectors"
+import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
+import { readSnapshot, saveSnapshot, isTaskList } from "../../../offline/snapshots"
+import type { Task } from "../../../types/taskContract"
 
-export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, timezone }) {
-  const [tasks, setTasks] = useState(() => boardMode === "focus" ? (getOverview(token).daily ?? []) : (getOverview(token).all ?? []))
-  const [hasBoardSnapshot, setHasBoardSnapshot] = useState(() => boardMode === "focus" ? getOverview(token).daily !== null : getOverview(token).all !== null)
+const allKey = "tasks:all"
+const dailyKey = "tasks:daily:last"
+type DailySnapshot = { date: string; tasks: Task[] }
+const isDailySnapshot = (data: unknown): data is DailySnapshot =>
+  !!data &&
+  typeof data === "object" &&
+  typeof (data as DailySnapshot).date === "string" &&
+  isTaskList((data as DailySnapshot).tasks)
+
+export function useTaskBoard({
+  authenticated,
+  boardMode,
+  onUnauthorized,
+  token,
+  timezone,
+  ownerId,
+}) {
+  const [tasks, setTasks] = useState(() =>
+    boardMode === "focus" ? (getOverview(ownerId).daily ?? []) : (getOverview(ownerId).all ?? [])
+  )
+  const [hasBoardSnapshot, setHasBoardSnapshot] = useState(() =>
+    boardMode === "focus" ? getOverview(ownerId).daily !== null : getOverview(ownerId).all !== null
+  )
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+  const [snapshotDate, setSnapshotDate] = useState<string | null>(null)
   const [taskLoading, setTaskLoading] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
   const [pinLoadingId, setPinLoadingId] = useState(null)
@@ -26,7 +51,7 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
 
   const loadTasksBoard = useCallback(
     async (successMessage = "") => {
-      if (!token) {
+      if (!token || getApiAvailability() === "unavailable") {
         return
       }
 
@@ -75,16 +100,18 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
 
       setTasks(tasksResult.data)
       setHasBoardSnapshot(true)
-      updateOverview(token, { all: tasksResult.data, daily: null, dailyDate: null })
+      updateOverview(ownerId, { all: tasksResult.data, daily: null, dailyDate: null })
+      const saved = await saveSnapshot(ownerId, allKey, tasksResult.data)
+      setLastUpdated(saved?.updatedAt ?? new Date().toISOString())
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token]
+    [onUnauthorized, token, ownerId]
   )
 
   const loadFocusBoard = useCallback(
     async (successMessage = "") => {
-      if (!token) {
+      if (!token || getApiAvailability() === "unavailable") {
         return
       }
 
@@ -134,14 +161,20 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
 
       setTasks(result.data.daily_tasks)
       setHasBoardSnapshot(true)
-      updateOverview(token, { daily: result.data.daily_tasks, dailyDate: formatDateForApi(operationalDateFor(timezone)) })
+      const date = formatDateForApi(operationalDateFor(timezone))
+      updateOverview(ownerId, { daily: result.data.daily_tasks, dailyDate: date })
+      const saved = await saveSnapshot(ownerId, dailyKey, { date, tasks: result.data.daily_tasks })
+      setLastUpdated(saved?.updatedAt ?? new Date().toISOString())
+      setSnapshotDate(date)
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token, timezone]
+    [onUnauthorized, token, timezone, ownerId]
   )
 
   useEffect(() => {
+    setLastUpdated(null)
+    setSnapshotDate(null)
     setFormLoading(false)
     setPinLoadingId(null)
     setCompleteLoadingId(null)
@@ -155,21 +188,60 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
       return
     }
 
-    const cachedTasks = boardMode === "focus" ? getOverview(token).daily : getOverview(token).all
-    setTasks(cachedTasks ?? [])
-    setHasBoardSnapshot(cachedTasks !== null)
-
-    if (boardMode === "focus") {
-      loadFocusBoard()
-    } else {
-      loadTasksBoard()
+    let cancelled = false
+    void (async () => {
+      if (boardMode === "focus") {
+        const entry = await readSnapshot(ownerId, dailyKey, isDailySnapshot)
+        if (cancelled) return
+        const cached = getOverview(ownerId).daily
+        if (entry && cached === null) {
+          updateOverview(ownerId, { daily: entry.data.tasks, dailyDate: entry.data.date })
+          setTasks(entry.data.tasks)
+          setHasBoardSnapshot(true)
+        } else {
+          setTasks(cached ?? [])
+          setHasBoardSnapshot(cached !== null)
+        }
+        setLastUpdated((current) => current ?? entry?.updatedAt ?? null)
+        setSnapshotDate(getOverview(ownerId).dailyDate ?? entry?.data.date ?? null)
+      } else {
+        const entry = await readSnapshot(ownerId, allKey, isTaskList)
+        if (cancelled) return
+        const cached = getOverview(ownerId).all
+        if (entry && cached === null) {
+          updateOverview(ownerId, { all: entry.data as Task[] })
+          setTasks(entry.data as Task[])
+          setHasBoardSnapshot(true)
+        } else {
+          setTasks(cached ?? [])
+          setHasBoardSnapshot(cached !== null)
+        }
+        setLastUpdated((current) => current ?? entry?.updatedAt ?? null)
+      }
+    })()
+    if (getApiAvailability() !== "unavailable") {
+      if (boardMode === "focus") void loadFocusBoard()
+      else void loadTasksBoard()
     }
 
     return () => {
+      cancelled = true
       loadRequestRef.current += 1
       lifecycleRef.current += 1
     }
-  }, [authenticated, boardMode, loadFocusBoard, loadTasksBoard, token])
+  }, [authenticated, boardMode, loadFocusBoard, loadTasksBoard, token, ownerId])
+
+  useEffect(() => {
+    let previous = getApiAvailability()
+    return subscribeApiAvailability(() => {
+      const next = getApiAvailability()
+      if (authenticated && previous === "unavailable" && next === "available") {
+        if (boardMode === "focus") void loadFocusBoard()
+        else void loadTasksBoard()
+      }
+      previous = next
+    })
+  }, [authenticated, boardMode, loadFocusBoard, loadTasksBoard])
 
   async function reloadCurrentBoard(successMessage = "") {
     return boardMode === "focus" ? loadFocusBoard(successMessage) : loadTasksBoard(successMessage)
@@ -336,8 +408,8 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
       return false
     }
 
-    updateCachedTask(token, result.data)
-    setTasks((current) => current.map((item) => item.id === task.id ? result.data : item))
+    updateCachedTask(ownerId, result.data)
+    setTasks((current) => current.map((item) => (item.id === task.id ? result.data : item)))
     return refreshAfterPersistedMutation("Tarefa concluída.")
   }
 
@@ -373,6 +445,8 @@ export function useTaskBoard({ authenticated, boardMode, onUnauthorized, token, 
   }
 
   return {
+    lastUpdated,
+    snapshotDate,
     hasBoardSnapshot,
     actionTasks,
     completeLoadingId,

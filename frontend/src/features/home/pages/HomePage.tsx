@@ -9,12 +9,56 @@ import Button from "../../../components/ui/Button"
 import ObjectiveSummary from "../../objectives/components/ObjectiveSummary"
 import { money } from "../../finances/money"
 import { readFocusSession } from "../../tasks/focusSession"
+import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
+import { readSnapshot, saveSnapshot } from "../../../offline/snapshots"
+import OfflineNotice from "../../../components/system/OfflineNotice"
+import { getOrientationCache, setOrientationCache } from "../../../state/orientationCache"
 
 export const selectHomeTasks = (tasks = []) =>
   tasks.filter((task) => task.status !== "CONCLUIDA").slice(0, 3)
 export const selectHomeObjectives = (goals = []) =>
   goals.filter((goal) => goal.status === "ativo").slice(0, 3)
-let cachedOrientation = null
+type OrientationSnapshot = {
+  tarefas: any[]
+  direcoes: any[]
+  financeiro: any
+  falhas?: Record<string, unknown>
+}
+const validOrientation = (data: unknown, financesEnabled = true): data is OrientationSnapshot => {
+  const item = data as { tarefas: unknown[]; direcoes: unknown[]; financeiro?: unknown }
+  const record = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === "object"
+  return (
+    !!item &&
+    typeof item === "object" &&
+    Array.isArray(item.tarefas) &&
+    item.tarefas.every(
+      (task) => record(task) && Number.isSafeInteger(task.id) && typeof task.titulo === "string"
+    ) &&
+    Array.isArray(item.direcoes) &&
+    item.direcoes.every(
+      (goal) =>
+        record(goal) &&
+        Number.isSafeInteger(goal.id) &&
+        typeof goal.titulo === "string" &&
+        Array.isArray(goal.tasks) &&
+        goal.tasks.every(
+          (task: unknown) =>
+            record(task) && Number.isSafeInteger(task.id) && typeof task.titulo === "string"
+        ) &&
+        Array.isArray(goal.trackers) &&
+        goal.trackers.every(
+          (tracker: unknown) =>
+            record(tracker) &&
+            typeof tracker.titulo === "string" &&
+            Array.isArray(tracker.ocorrencias)
+        )
+    ) &&
+    (!financesEnabled ||
+      item.financeiro == null ||
+      (record(item.financeiro) && Number.isSafeInteger(item.financeiro.saldo_centavos)))
+  )
+}
 
 export default function HomePage({ token, user, onUnauthorized }) {
   const modules = getEnabledModules(user)
@@ -22,8 +66,10 @@ export default function HomePage({ token, user, onUnauthorized }) {
   const objectivesEnabled = modules.some((m) => m.key === "objectives")
   const financesEnabled = modules.some((m) => m.key === "finances")
   const preferenceKey = modules.map((m) => m.key).join(",")
-  const key = `${token}:${preferenceKey}`
-  const [snapshot, setSnapshot] = useState(() => cachedOrientation)
+  const key = `${user.id}:${preferenceKey}`
+  const durableKey = `orientation:${preferenceKey}`
+  const [snapshot, setSnapshot] = useState(() => getOrientationCache())
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const data = snapshot?.key === key ? snapshot.data : null
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(null)
@@ -39,44 +85,85 @@ export default function HomePage({ token, user, onUnauthorized }) {
       setError(getErrorMessage(result, "Não foi possível carregar seu Bunker."))
       return
     }
+    if (!validOrientation(result.data, financesEnabled)) {
+      setError("Resposta da orientação inválida.")
+      return
+    }
     const next = {
       key,
       data: {
         ...result.data,
-        tarefas:
-          result.data.falhas?.tarefas && cachedOrientation?.key === key
-            ? cachedOrientation.data.tarefas
+        tarefas: !tasksEnabled
+          ? []
+          : result.data.falhas?.tarefas && getOrientationCache()?.key === key
+            ? getOrientationCache().data.tarefas
             : result.data.tarefas,
-        financeiro:
-          result.data.falhas?.recursos && cachedOrientation?.key === key
-            ? cachedOrientation.data.financeiro
+        financeiro: !financesEnabled
+          ? null
+          : result.data.falhas?.recursos && getOrientationCache()?.key === key
+            ? getOrientationCache().data.financeiro
             : result.data.financeiro,
-        direcoes:
-          result.data.falhas?.direcoes && cachedOrientation?.key === key
-            ? cachedOrientation.data.direcoes
+        direcoes: !objectivesEnabled
+          ? []
+          : result.data.falhas?.direcoes && getOrientationCache()?.key === key
+            ? getOrientationCache().data.direcoes
             : result.data.direcoes,
       },
     }
-    cachedOrientation = next
+    setOrientationCache(next)
     setSnapshot(next)
+    const saved = await saveSnapshot(user.id, durableKey, next.data)
+    setLastUpdated(saved?.updatedAt ?? new Date().toISOString())
     setError("")
-  }, [key, token, onUnauthorized])
+  }, [
+    key,
+    durableKey,
+    token,
+    user.id,
+    onUnauthorized,
+    tasksEnabled,
+    objectivesEnabled,
+    financesEnabled,
+  ])
   useEffect(() => {
+    setLastUpdated(null)
     version.current += 1
     setError("")
     setBusy(null)
-    void refresh()
+    let cancelled = false
+    void (async () => {
+      const entry = await readSnapshot(user.id, durableKey, (data): data is OrientationSnapshot =>
+        validOrientation(data, financesEnabled)
+      )
+      if (cancelled) return
+      if (entry && getOrientationCache()?.key !== key) {
+        const next = { key, data: entry.data }
+        setOrientationCache(next)
+        setSnapshot(next)
+      }
+      setLastUpdated((current) => current ?? entry?.updatedAt ?? null)
+      if (getApiAvailability() !== "unavailable") void refresh()
+    })()
     const updateFocus = () =>
       setFocus(tasksEnabled ? readFocusSession(window.localStorage, user.id) : null)
     updateFocus()
     const timer = setInterval(updateFocus, 30000)
     window.addEventListener("storage", updateFocus)
     return () => {
+      cancelled = true
       version.current++
       clearInterval(timer)
       window.removeEventListener("storage", updateFocus)
     }
-  }, [refresh, tasksEnabled, user.id])
+  }, [refresh, tasksEnabled, financesEnabled, user.id, durableKey, key])
+  useEffect(() => {
+    let previous = getApiAvailability()
+    return subscribeApiAvailability(() => {
+      const next = getApiAvailability()
+      if (previous === "unavailable" && next === "available") void refresh()
+      previous = next
+    })
+  }, [refresh])
   async function complete(task) {
     if (busy !== null) return
     setBusy(task.id)
@@ -96,6 +183,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
       <header className="home-heading">
         <h1>Seu Bunker</h1>
       </header>
+      <OfflineNotice updatedAt={lastUpdated} />
       {error && (
         <div role="alert" className="text-sm text-danger">
           {error}{" "}

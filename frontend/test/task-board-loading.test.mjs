@@ -8,8 +8,8 @@ import ts from "typescript"
 function boardHarness(api, onUnauthorized = () => false) {
   const values = []
   let index = 0
-  let effect
-  let cleanup
+  let effects = []
+  let cleanups = []
   const react = {
     useState(initial) {
       const slot = index++
@@ -23,7 +23,7 @@ function boardHarness(api, onUnauthorized = () => false) {
     },
     useCallback: (callback) => callback,
     useMemo: (callback) => callback(),
-    useEffect(callback) { effect = callback },
+    useEffect(callback) { effects.push(callback) },
   }
   const source = readFileSync(new URL("../src/features/tasks/hooks/useTaskBoard.ts", import.meta.url), "utf8")
   const exports = {}
@@ -46,21 +46,24 @@ function boardHarness(api, onUnauthorized = () => false) {
       }
       if (path.endsWith("calendarUtils")) return { operationalDateFor: () => new Date(2026, 8, 9) }
       if (path.endsWith("/date")) return { formatDateForApi: () => "09-09-2026" }
+      if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {} }
+      if (path.endsWith("offline/snapshots")) return { readSnapshot: async () => null, saveSnapshot: async () => null }
       throw new Error(path)
     },
   })
   const render = (boardMode = "tasks") => {
     index = 0
-    return exports.useTaskBoard({ authenticated: true, boardMode, token: "token", onUnauthorized })
+    effects = []
+    return exports.useTaskBoard({ authenticated: true, boardMode, token: "token", ownerId: 1, onUnauthorized })
   }
   return {
     render,
     load(mode) {
-      cleanup?.()
+      cleanups.forEach((cleanup) => cleanup?.())
       render(mode)
-      cleanup = effect()
+      cleanups = effects.map((effect) => effect?.())
     },
-    unmount() { cleanup?.() },
+    unmount() { cleanups.forEach((cleanup) => cleanup?.()) },
   }
 }
 

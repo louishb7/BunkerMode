@@ -4,6 +4,7 @@ import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import Dialog from "../../../components/ui/Dialog"
 import PageHeader from "../../../components/ui/PageHeader"
 import StatusNotice from "../../../components/ui/StatusNotice"
+import OfflineNotice from "../../../components/system/OfflineNotice"
 import { emptyStatus } from "../../../constants/uiState"
 import { formatDateForApi } from "../../../utils/date"
 import TaskForm from "../components/TaskForm"
@@ -72,6 +73,7 @@ export default function TasksPage({ board, onStartFocus, user }) {
     <>
       <section className="mx-auto grid max-w-[920px] gap-5">
         <PageHeader title="Tarefas" />
+        <OfflineNotice updatedAt={board.lastUpdated} />
 
         <div className="empty:hidden">
           <StatusNotice status={board.status} />

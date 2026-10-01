@@ -211,7 +211,7 @@ test("erro real do hook chega à página e retry recupera sem anunciar vazio inc
 
 test("refresh preserva snapshot em loading e erro; 401 de leitura segue tratamento global", async () => {
   const token = "summary-stale"
-  cache.updateOverview(token, { trackers: [tracker] })
+  cache.updateOverview(user.id, { trackers: [tracker] })
   const original = api.listTrackers
   let finish,
     current,
@@ -221,7 +221,7 @@ test("refresh preserva snapshot em loading e erro; 401 de leitura segue tratamen
       finish = resolve
     })
   function Probe() {
-    current = useTrackers({ token, onUnauthorized })
+    current = useTrackers({ token, ownerId: user.id, onUnauthorized })
     return React.createElement(Card, {
       ...cardProps,
       trackers: current.byObjective[4] || [],

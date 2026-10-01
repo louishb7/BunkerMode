@@ -9,8 +9,8 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
   api = { materializeTaskRecurrences: async () => ({ ok: true, status: 204 }), ...api }
   const values = []
   let index = 0
-  let effect
-  let cleanup
+  let effects = []
+  let cleanups = []
   const react = {
     useState(initial) {
       const slot = index++
@@ -30,7 +30,7 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
     useCallback: (callback) => callback,
     useMemo: (callback) => callback(),
     useEffect(callback) {
-      effect = callback
+      effects.push(callback)
     },
   }
   const source = readFileSync(new URL(file, import.meta.url), "utf8")
@@ -50,17 +50,25 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
         }
       if (path.endsWith("overviewCache"))
         return { getOverview: () => ({ all: null, objectives: null }), updateOverview: () => {} }
+      if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {} }
+      if (path.endsWith("offline/snapshots")) return {
+        readSnapshot: async () => null,
+        saveSnapshot: async () => null,
+        isObjectiveList: Array.isArray,
+        isTaskList: Array.isArray,
+      }
       throw new Error(path)
     },
   })
   const render = (props = {}) => {
     index = 0
-    return exports[name]({ token: "test-token", onUnauthorized, ...props })
+    effects = []
+    return exports[name]({ token: "test-token", ownerId: 1, onUnauthorized, ...props })
   }
   render.activate = (props = {}) => {
-    cleanup?.()
+    cleanups.forEach((cleanup) => cleanup?.())
     render(props)
-    cleanup = effect()
+    cleanups = effects.map((effect) => effect?.())
   }
   return render
 }

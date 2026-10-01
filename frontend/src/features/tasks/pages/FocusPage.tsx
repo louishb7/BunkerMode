@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react"
 import Button from "../../../components/ui/Button"
 import StatusNotice from "../../../components/ui/StatusNotice"
+import OfflineNotice from "../../../components/system/OfflineNotice"
 import FocusPreparation from "../components/FocusPreparation"
 import { remainingMinutes } from "../focusSession"
 import { useFocusSession } from "../hooks/useFocusSession"
@@ -61,6 +62,10 @@ export default function FocusPage({ board, dailyTasks, timezone, userId, onExit 
           {phase === "active" && <span className="sr-only"> — bloco ativo</span>}
         </h1>
       </header>
+      <OfflineNotice updatedAt={board.lastUpdated} />
+      {board.snapshotDate && (
+        <p className="m-0 text-xs text-text-secondary">Tarefas do dia: {board.snapshotDate}</p>
+      )}
       {focus.storageUnavailable && (
         <p role="status" className="text-sm text-text-secondary">
           Este navegador não conseguiu guardar o bloco. Mantenha esta página aberta para continuar.

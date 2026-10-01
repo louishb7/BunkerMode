@@ -102,7 +102,7 @@ test("Finanças desativado não consulta API; mudança de token ignora dados ant
     return r.status === 401
   }
   function Probe(props) {
-    current = useFinances({ ...props, onUnauthorized })
+    current = useFinances({ ownerId: 1, ...props, onUnauthorized })
     return null
   }
   const view = await mount(Probe, { token: "a", enabled: false })
@@ -110,13 +110,13 @@ test("Finanças desativado não consulta API; mudança de token ignora dados ant
     assert.equal(calls, 0)
     await view.render({ token: "a", enabled: true })
     const old = finish
-    await view.render({ token: "b", enabled: true })
+    await view.render({ token: "b", ownerId: 2, enabled: true })
     await act(async () => old({ ok: false, status: 401 }))
     assert.equal(unauthorized, 0)
     assert.equal(current.data, null)
     await act(async () => finish({ ok: true, data: empty() }))
     assert.equal(current.data.saldo_centavos, 0)
-    await view.render({ token: "b", enabled: false })
+    await view.render({ token: "b", ownerId: 2, enabled: false })
     assert.equal(current.data, null)
   } finally {
     await view.close()
@@ -155,7 +155,7 @@ test("mutação espera releitura e não aplica resultado otimista; CRUD chama co
     return { ok: true }
   }
   function Probe() {
-    current = useFinances({ token: "crud", onUnauthorized })
+    current = useFinances({ token: "crud", ownerId: 1, onUnauthorized })
     return null
   }
   const onUnauthorized = () => false
@@ -203,7 +203,7 @@ test("erro após persistência não convida a duplicar lançamento; snapshot per
     return r.status === 401
   }
   function Probe() {
-    current = useFinances({ token: "failure", onUnauthorized })
+    current = useFinances({ token: "failure", ownerId: 1, onUnauthorized })
     return null
   }
   const view = await mount(Probe, {})
@@ -221,7 +221,7 @@ test("erro após persistência não convida a duplicar lançamento; snapshot per
 })
 test("página financeira funciona sem Objetivos e tem formulários operáveis", async () => {
   const original = { ...api }
-  api.getFinances = async () => ({ ok: true, data: empty() })
+  api.getFinances = async (_token, month) => ({ ok: true, data: { ...empty(), mes: month } })
   api.listObjetivos = () => {
     throw Error("Módulo desativado")
   }
@@ -287,10 +287,11 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
   const original = { ...api }
   let deleted = false
   let attempts = 0
-  api.getFinances = async () => ({
+  api.getFinances = async (_token, month) => ({
     ok: true,
     data: {
       ...empty(),
+      mes: month,
       lancamentos: deleted
         ? []
         : [

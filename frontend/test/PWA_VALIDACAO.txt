@@ -1,0 +1,10 @@
+# Validação da PWA após deploy
+
+O `npm run test:pwa` constrói o frontend de produção e usa Brave headless com uma API local simulada. Instalação nativa, modo standalone real e headers do Vercel exigem validação no deploy HTTPS.
+
+1. Confira no deploy que `/sw.js` responde com JavaScript e `Cache-Control: public, max-age=0, must-revalidate`; `/manifest.webmanifest` responde com `application/manifest+json`; `/icons/icon-192.png`, `/icons/icon-512.png`, `/icons/maskable-512.png` e `/icons/apple-touch-icon.png` respondem com PNG. Nenhum desses caminhos deve devolver `index.html`. Confira `/reset-password` com `Referrer-Policy: no-referrer` e `Cache-Control: no-store`.
+2. No Chrome Android, abra o site autenticado. Toque em **Instalar**, aceite o prompt nativo e abra o ícone da tela inicial. Confirme janela standalone e ausência do convite. Desinstale, abra pelo navegador, feche o convite com **X**, navegue entre Tarefas e Objetivos sem reaparecimento; recarregue a página e confira nova elegibilidade.
+3. No Safari do iPhone, toque em **Instalar** e confira a instrução curta. Use **Compartilhar → Adicionar à Tela de Início → Abrir como App da Web** (se disponível) **→ Adicionar**. Abra o ícone e confira que o convite sumiu e que o conteúdo respeita a área segura superior.
+4. Em cada dispositivo, visite Home, Tarefas, Foco, Objetivos e Finanças online. Ative modo avião, feche e reabra a PWA e recarregue uma rota profunda. Confira sessão local, data da última atualização, snapshots sem mistura de contas, Foco persistido e mensagem explícita ao tentar salvar uma alteração.
+5. Para atualização, mantenha uma versão aberta com um formulário preenchido ou Foco ativo, publique outra versão e volte ao app. **Depois** deve preservar o formulário/Foco e deixar o worker em espera; **Atualizar** deve ativar a versão nova e recarregar somente após o toque.
+6. Com um token de reset válido, abra `/reset-password#token=...` e confira que o fragmento desaparece da URL. Em DevTools, confirme que o token não aparece em Cache Storage nem em IndexedDB. Redefinir a senha continua exigindo conexão.

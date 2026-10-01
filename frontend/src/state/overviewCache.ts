@@ -8,7 +8,7 @@ type Snapshot = {
   objectives: any[] | null
   trackers: Tracker[] | null
 }
-const snapshots = new Map<string, Snapshot>()
+const snapshots = new Map<number, Snapshot>()
 const listeners = new Set<() => void>()
 const empty: Snapshot = {
   daily: null,
@@ -18,21 +18,21 @@ const empty: Snapshot = {
   trackers: null,
 }
 
-export function getOverview(token: string): Snapshot {
-  return snapshots.get(token) ?? empty
+export function getOverview(ownerId: number): Snapshot {
+  return snapshots.get(ownerId) ?? empty
 }
 
-export function updateOverview(token: string, patch: Partial<Snapshot>) {
-  if (!token) return
-  snapshots.set(token, { ...getOverview(token), ...patch })
+export function updateOverview(ownerId: number, patch: Partial<Snapshot>) {
+  if (!ownerId) return
+  snapshots.set(ownerId, { ...getOverview(ownerId), ...patch })
   listeners.forEach((listener) => listener())
 }
 
-export function updateCachedTask(token: string, task: Task) {
-  const current = getOverview(token)
+export function updateCachedTask(ownerId: number, task: Task) {
+  const current = getOverview(ownerId)
   const replace = (tasks: Task[] | null) =>
     tasks?.map((item) => (item.id === task.id ? task : item)) ?? null
-  updateOverview(token, { daily: replace(current.daily), all: replace(current.all) })
+  updateOverview(ownerId, { daily: replace(current.daily), all: replace(current.all) })
 }
 
 export function unlinkTaskList(items: Task[], task: Task): Task[] {
@@ -50,9 +50,9 @@ export function unlinkTaskList(items: Task[], task: Task): Task[] {
   })
 }
 
-export function unlinkCachedObjectiveTask(token: string, task: Task) {
-  const current = getOverview(token)
-  updateOverview(token, {
+export function unlinkCachedObjectiveTask(ownerId: number, task: Task) {
+  const current = getOverview(ownerId)
+  updateOverview(ownerId, {
     all: current.all ? unlinkTaskList(current.all, task) : null,
     daily: current.daily ? unlinkTaskList(current.daily, task) : null,
   })
@@ -64,9 +64,9 @@ export function detachObjectiveTaskList(items: Task[], objectiveId: number): Tas
   )
 }
 
-export function removeObjectiveFromOverview(token: string, objectiveId: number) {
-  const current = getOverview(token)
-  updateOverview(token, {
+export function removeObjectiveFromOverview(ownerId: number, objectiveId: number) {
+  const current = getOverview(ownerId)
+  updateOverview(ownerId, {
     all: current.all ? detachObjectiveTaskList(current.all, objectiveId) : null,
     daily: current.daily ? detachObjectiveTaskList(current.daily, objectiveId) : null,
     trackers:

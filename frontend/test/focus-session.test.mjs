@@ -316,6 +316,7 @@ test("conclusão explícita integra API, cache e releitura; 401 chega ao handler
           authenticated: true,
           boardMode: "focus",
           token: "focus-test",
+          ownerId: 1,
           onUnauthorized,
         })
         return React.createElement(FocusPage, { userId: 1, board, dailyTasks: board.dailyTasks })
@@ -339,7 +340,7 @@ test("conclusão explícita integra API, cache e releitura; 401 chega ao handler
           ? ["complete:focus-test:7", "materialize", "read"]
           : ["complete:focus-test:7"]
       )
-      if (status === 200) assert.equal(getOverview("focus-test").daily[0].status_code, "CONCLUIDA")
+      if (status === 200) assert.equal(getOverview(1).daily[0].status_code, "CONCLUIDA")
       assert.match(container.textContent, /Contexto/)
       await act(async () => root.unmount())
       root = null

@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react"
 import { Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom"
 
 import BootScreen from "../components/system/BootScreen"
+import PwaBanners from "../components/system/PwaBanners"
 import AppShell from "../components/layout/AppShell"
 import ExecutionLayout from "../components/layout/ExecutionLayout"
 import { emptyStatus } from "../constants/uiState"
@@ -22,57 +23,67 @@ const TasksPage = lazy(() => import("../features/tasks/pages/TasksPage"))
 export default function App() {
   const auth = useAuth()
 
-  if (auth.booting) {
-    return <BootScreen />
-  }
+  if (auth.booting)
+    return (
+      <>
+        <PwaBanners />
+        <BootScreen />
+      </>
+    )
 
   return (
-    <Routes>
-      <Route path={APP_ROUTES.AUTH} element={<AuthRoute />} />
-      <Route path="/reset-password" element={<ResetPasswordScreen onReset={auth.clearSession} />} />
-      <Route
-        element={
-          <ProtectedRoute>
-            <Outlet />
-          </ProtectedRoute>
-        }
-      >
-        <Route path={APP_ROUTES.ROOT} element={<HomeRoute />} />
+    <>
+      <PwaBanners />
+      <Routes>
+        <Route path={APP_ROUTES.AUTH} element={<AuthRoute />} />
         <Route
-          path={APP_ROUTES.FINANCES}
-          element={
-            <EnabledModuleRoute moduleKey="finances">
-              <FinancesRoute />
-            </EnabledModuleRoute>
-          }
-        />
-        <Route path={APP_ROUTES.SETTINGS} element={<SettingsRoute />} />
-        <Route
-          path={APP_ROUTES.OBJECTIVES}
-          element={
-            <EnabledModuleRoute moduleKey="objectives">
-              <ObjectivesRoute />
-            </EnabledModuleRoute>
-          }
+          path="/reset-password"
+          element={<ResetPasswordScreen onReset={auth.clearSession} />}
         />
         <Route
           element={
-            <EnabledModuleRoute moduleKey="tasks">
-              <TaskBoardProvider>
-                <Outlet />
-              </TaskBoardProvider>
-            </EnabledModuleRoute>
+            <ProtectedRoute>
+              <Outlet />
+            </ProtectedRoute>
           }
         >
-          <Route path={APP_ROUTES.TASKS_FOCUS} element={<FocusRoute />} />
-          <Route path={APP_ROUTES.TASKS} element={<TasksRoute />} />
+          <Route path={APP_ROUTES.ROOT} element={<HomeRoute />} />
+          <Route
+            path={APP_ROUTES.FINANCES}
+            element={
+              <EnabledModuleRoute moduleKey="finances">
+                <FinancesRoute />
+              </EnabledModuleRoute>
+            }
+          />
+          <Route path={APP_ROUTES.SETTINGS} element={<SettingsRoute />} />
+          <Route
+            path={APP_ROUTES.OBJECTIVES}
+            element={
+              <EnabledModuleRoute moduleKey="objectives">
+                <ObjectivesRoute />
+              </EnabledModuleRoute>
+            }
+          />
+          <Route
+            element={
+              <EnabledModuleRoute moduleKey="tasks">
+                <TaskBoardProvider>
+                  <Outlet />
+                </TaskBoardProvider>
+              </EnabledModuleRoute>
+            }
+          >
+            <Route path={APP_ROUTES.TASKS_FOCUS} element={<FocusRoute />} />
+            <Route path={APP_ROUTES.TASKS} element={<TasksRoute />} />
+          </Route>
         </Route>
-      </Route>
-      <Route
-        path="*"
-        element={<Navigate to={auth.authenticated ? APP_ROUTES.ROOT : APP_ROUTES.AUTH} replace />}
-      />
-    </Routes>
+        <Route
+          path="*"
+          element={<Navigate to={auth.authenticated ? APP_ROUTES.ROOT : APP_ROUTES.AUTH} replace />}
+        />
+      </Routes>
+    </>
   )
 }
 
@@ -212,8 +223,8 @@ function useLogout() {
   const navigate = useNavigate()
   const auth = useAuth()
 
-  return () => {
-    auth.clearSession()
+  return async () => {
+    await auth.clearSession()
     navigate(APP_ROUTES.AUTH, { replace: true })
   }
 }

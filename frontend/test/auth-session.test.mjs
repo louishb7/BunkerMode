@@ -32,9 +32,11 @@ function storage(initial = {}) {
 
 function authHarness(api, stored = {}) {
   const values = []
+  const clearedOwners = []
+  let retryListener
   let index = 0
-  let effect
-  let cleanup
+  let effects = []
+  let cleanups = []
   const localStorage = storage(stored)
   const sessionStorage = storage()
   const react = {
@@ -55,7 +57,7 @@ function authHarness(api, stored = {}) {
     },
     useCallback: (callback) => callback,
     useEffect(callback) {
-      effect = callback
+      effects.push(callback)
     },
   }
   const exports = {}
@@ -74,6 +76,10 @@ function authHarness(api, stored = {}) {
         if (path.endsWith("bunkermodeApi")) return { api }
         if (path.endsWith("overviewCache")) return { clearOverview: () => {} }
         if (path.endsWith("financeCache")) return { clearFinanceSnapshots: () => {} }
+        if (path.endsWith("orientationCache")) return { clearOrientationCache: () => {} }
+        if (path.endsWith("offline/snapshots")) return { allowUserData: () => {}, clearUserData: async (id) => { clearedOwners.push(id) } }
+        if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {}, subscribeApiRetry: (listener) => { retryListener = listener; return () => { retryListener = undefined } }, subscribeApiSuccess: () => () => {} }
+        if (path.endsWith("focusSession")) return { focusStorageKey: (id) => `focus:${id}`, durationStorageKey: (id) => `duration:${id}` }
         if (path.endsWith("/session")) {
           return { TOKEN_KEY: "bunkermode_token", USER_KEY: "bunkermode_usuario" }
         }
@@ -88,18 +94,25 @@ function authHarness(api, stored = {}) {
 
   const render = () => {
     index = 0
+    effects = []
     return exports.useAuthSession()
   }
   return {
+    clearedOwners,
     localStorage,
     render,
-    restore() {
-      cleanup?.()
+    reconnect() {
       render()
-      cleanup = effect?.()
+      effects[1]?.()
+      retryListener?.()
+    },
+    restore() {
+      cleanups.forEach((cleanup) => cleanup?.())
+      render()
+      cleanups = effects.map((effect) => effect?.())
     },
     unmount() {
-      cleanup?.()
+      cleanups.forEach((cleanup) => cleanup?.())
     },
   }
 }
@@ -165,19 +178,50 @@ test("401 no restore limpa credenciais pelo fluxo global", async () => {
 for (const result of [
   { ok: false, status: 500, data: { message: "Falha interna" } },
   { ok: false, status: 0, data: { message: "Sem conexão" } },
+  { ok: false, status: 0, data: { message: "A API demorou demais para responder." } },
 ]) {
-  test(`erro ${result.status} no restore preserva credenciais sem autenticar o cache`, async () => {
+  test(`erro ${result.status}: ${result.data.message} preserva credenciais em sessão local`, async () => {
     const harness = authHarness({ getCurrentUser: async () => result }, storedSession())
     harness.restore()
     await new Promise((resolve) => setImmediate(resolve))
 
     assert.equal(harness.localStorage.getItem("bunkermode_token"), "token-antigo")
     assert.equal(JSON.parse(harness.localStorage.getItem("bunkermode_usuario")).usuario, "cache")
-    assert.equal(harness.render().authenticated, false)
+    assert.equal(harness.render().authenticated, true)
+    assert.equal(harness.render().sessionMode, "local")
     assert.equal(harness.render().booting, false)
-    assert.ok(harness.render().authStatus.message)
+    assert.equal(harness.render().authStatus.message, "")
   })
 }
+
+test("reconexão valida usuário atualizado depois de sessão local", async () => {
+  let calls = 0
+  const harness = authHarness({ getCurrentUser: async () => ++calls === 1
+    ? { ok: false, status: 0, data: { message: "Sem conexão" } }
+    : { ok: true, status: 200, data: updatedUser } }, storedSession())
+  harness.restore()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(harness.render().sessionMode, "local")
+  harness.reconnect()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(harness.render().sessionMode, "online")
+  assert.equal(harness.render().user.usuario, "servidor")
+  assert.equal(calls, 2)
+})
+
+test("401 após reconexão encerra sessão local e limpa snapshots do usuário", async () => {
+  let calls = 0
+  const harness = authHarness({ getCurrentUser: async () => ++calls === 1
+    ? { ok: false, status: 0, data: { message: "Sem conexão" } }
+    : { ok: false, status: 401, data: {} } }, storedSession())
+  harness.restore()
+  await new Promise((resolve) => setImmediate(resolve))
+  harness.reconnect()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(harness.render().authenticated, false)
+  assert.equal(harness.localStorage.getItem("bunkermode_token"), null)
+  assert.deepEqual(harness.clearedOwners, [1])
+})
 
 test("logout durante restore impede resposta antiga de ressuscitar a sessão", async () => {
   const pending = deferred()

@@ -250,7 +250,8 @@ export default function TaskForm({
       instrucao: form.instrucao.trim(),
     }
 
-    if (!isEditing) payload.objetivo_id = lockObjetivo && initialObjetivoId ? Number(initialObjetivoId) : null
+    if (!isEditing)
+      payload.objetivo_id = lockObjetivo && initialObjetivoId ? Number(initialObjetivoId) : null
 
     if (!isSeriesOccurrence) {
       payload.prazo = form.prazo ? form.prazo.trim() : null
@@ -261,7 +262,11 @@ export default function TaskForm({
     if (!isEditing) {
       Object.assign(payload, {
         recurrence_weekdays: isRecurring ? recurrenceWeekdays : [],
-        duration_type: isRecurring ? (form.termination_policy === "ate_objetivo" ? "sem_termino" : form.termination_policy) : "pontual",
+        duration_type: isRecurring
+          ? form.termination_policy === "ate_objetivo"
+            ? "sem_termino"
+            : form.termination_policy
+          : "pontual",
         recurrence_end_date:
           isRecurring && form.termination_policy === "ate_data" ? form.recurrence_end_date : null,
       })
@@ -289,12 +294,12 @@ export default function TaskForm({
       </label>
 
       {lockObjetivo && !isEditing && (
-          <div className="border-l-2 border-border-strong bg-surface-subtle px-3 py-2">
-            <p className="m-0 text-sm font-medium text-text-primary">Objetivo vinculado</p>
-            <p className="mt-1 mb-0 text-sm text-text-secondary">
-              {initialObjetivoTitulo || "Objetivo selecionado"}
-            </p>
-          </div>
+        <div className="border-l-2 border-border-strong bg-surface-subtle px-3 py-2">
+          <p className="m-0 text-sm font-medium text-text-primary">Objetivo vinculado</p>
+          <p className="mt-1 mb-0 text-sm text-text-secondary">
+            {initialObjetivoTitulo || "Objetivo selecionado"}
+          </p>
+        </div>
       )}
 
       {isSeriesOccurrence && (
@@ -324,8 +329,17 @@ export default function TaskForm({
         <summary className="cursor-pointer font-medium">Detalhes opcionais</summary>
         <label className={`${labelClass} mt-3`}>
           Instrução
-          <textarea className={`${fieldClass} min-h-24 resize-y`} maxLength={TASK_INSTRUCTION_MAX_LENGTH} name="instrucao" onChange={updateField} rows={3} value={form.instrucao} />
-          <span className="text-right text-xs text-text-secondary">{form.instrucao.length}/{TASK_INSTRUCTION_MAX_LENGTH}</span>
+          <textarea
+            className={`${fieldClass} min-h-24 resize-y`}
+            maxLength={TASK_INSTRUCTION_MAX_LENGTH}
+            name="instrucao"
+            onChange={updateField}
+            rows={3}
+            value={form.instrucao}
+          />
+          <span className="text-right text-xs text-text-secondary">
+            {form.instrucao.length}/{TASK_INSTRUCTION_MAX_LENGTH}
+          </span>
         </label>
       </details>
 
@@ -348,7 +362,8 @@ export default function TaskForm({
 
         {isRecurring && !isEditing && (
           <div className="grid gap-4">
-              {form.repeat_type === "personalizado" && <fieldset className="m-0 border-0 p-0">
+            {form.repeat_type === "personalizado" && (
+              <fieldset className="m-0 border-0 p-0">
                 <legend className="mb-2 text-sm font-medium text-text-primary">
                   Dias da semana
                 </legend>
@@ -368,34 +383,35 @@ export default function TaskForm({
                     </label>
                   ))}
                 </div>
-              </fieldset>}
+              </fieldset>
+            )}
 
+            <label className={labelClass}>
+              Término
+              <select
+                className={fieldClass}
+                name="termination_policy"
+                onChange={updateField}
+                value={form.termination_policy}
+              >
+                <option value="sem_termino">Sem data final</option>
+                <option value="ate_data">Até uma data</option>
+              </select>
+            </label>
+
+            {form.termination_policy === "ate_data" && (
               <label className={labelClass}>
-                Término
-                <select
+                Data final
+                <input
                   className={fieldClass}
-                  name="termination_policy"
-                  onChange={updateField}
-                  value={form.termination_policy}
-                >
-                  <option value="sem_termino">Sem data final</option>
-                  <option value="ate_data">Até uma data</option>
-                </select>
+                  name="recurrence_end_date"
+                  onChange={handleRecurrenceEndDateChange}
+                  required
+                  type="date"
+                  value={toDateInputValue(form.recurrence_end_date)}
+                />
               </label>
-
-              {form.termination_policy === "ate_data" && (
-                <label className={labelClass}>
-                  Data final
-                  <input
-                    className={fieldClass}
-                    name="recurrence_end_date"
-                    onChange={handleRecurrenceEndDateChange}
-                    required
-                    type="date"
-                    value={toDateInputValue(form.recurrence_end_date)}
-                  />
-                </label>
-              )}
+            )}
           </div>
         )}
       </div>

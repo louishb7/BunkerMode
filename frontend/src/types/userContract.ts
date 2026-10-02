@@ -13,6 +13,7 @@ export type User = {
 
 export type AuthSession = {
   access_token: string
+  refresh_token: string
   token_type: "bearer"
   usuario: User
 }

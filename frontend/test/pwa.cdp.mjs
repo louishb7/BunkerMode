@@ -65,6 +65,7 @@ async function main() {
   const browser = "/usr/bin/brave-browser"
   let domainMutations = 0
   let loginAttempts = 0
+  let refreshCount = 0
   const api = createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*")
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
@@ -74,7 +75,20 @@ async function main() {
     if (pathname.endsWith("/auth/login") && request.method === "POST") {
       loginAttempts++
       response.setHeader("Content-Type", "application/json")
-      response.end(JSON.stringify({ access_token: "two", usuario: user(2) }))
+      response.end(JSON.stringify({ access_token: "two", refresh_token: "refresh-two", usuario: user(2) }))
+      return
+    }
+    if (pathname.endsWith("/auth/refresh") && request.method === "POST") {
+      refreshCount++
+      const chunks = []
+      request.on("data", (chunk) => chunks.push(chunk))
+      request.on("end", () => {
+        const credential = JSON.parse(Buffer.concat(chunks).toString()).refresh_token
+        if (!credential?.startsWith("refresh-")) { response.writeHead(401).end(JSON.stringify({ message: "Sessão revogada" })); return }
+        response.setHeader("Content-Type", "application/json")
+        const owner = credential.includes("two") ? "two" : "one"
+        response.end(JSON.stringify({ access_token: owner, refresh_token: `refresh-${owner}-${refreshCount}` }))
+      })
       return
     }
     const token = request.headers.authorization?.replace("Bearer ", "")
@@ -82,7 +96,9 @@ async function main() {
     const id = token === "two" ? 2 : 1
     if (!["GET", "OPTIONS"].includes(request.method) && !pathname.endsWith("/tarefas/recorrencias/materializar")) domainMutations++
     response.setHeader("Content-Type", "application/json")
-    if (pathname.endsWith("/usuarios/me")) response.end(JSON.stringify(user(id)))
+    if (pathname.endsWith("/auth/session")) response.end(JSON.stringify({ refresh_token: `refresh-${token}` }))
+    else if (pathname.endsWith("/auth/logout")) response.end(JSON.stringify({ message: "ok" }))
+    else if (pathname.endsWith("/usuarios/me")) response.end(JSON.stringify(user(id)))
     else if (pathname.endsWith("/orientacao")) response.end(JSON.stringify({ tarefas: [task(id, id)], direcoes: [], financeiro: null, falhas: {} }))
     else if (pathname.endsWith("/tarefas/recorrencias/materializar")) response.writeHead(204).end()
     else if (pathname.endsWith("/tarefas/foco")) response.end(JSON.stringify({ tasks: [task(id, id)], daily_tasks: [task(id, id)] }))
@@ -243,14 +259,32 @@ async function main() {
     console.log("PWA: mutation de servidor bloqueada sem requisição offline OK")
 
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
+    const refreshesBeforeReconnect = refreshCount
     await navigate("/tarefas")
     await visible("API indisponível")
     await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
     await evaluate("window.dispatchEvent(new Event('online'))")
-    await until(() => evaluate("location.pathname === '/auth'"), "401 na reconexão")
-    assert.equal(await evaluate("localStorage.getItem('bunkermode_token')"), null)
-    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length)})})()"), 0)
-    console.log("PWA: 401 na reconexão limpa credenciais e snapshots OK")
+    await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh na reconexão")
+    assert.equal(await evaluate("location.pathname"), "/tarefas")
+    assert.equal(refreshCount - refreshesBeforeReconnect, 1)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length>0)})})()"), true)
+    console.log("PWA: access expirado renova na reconexão sem sair da rota OK")
+
+    await evaluate("localStorage.setItem('bunkermode_token','expired')")
+    const refreshesBeforeReopen = refreshCount
+    const credentialBeforeReopen = await evaluate("localStorage.getItem('bunkermode_refresh_token')")
+    await navigate("/tarefas")
+    await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh ao reabrir")
+    assert.equal(await evaluate("location.pathname"), "/tarefas")
+    assert.equal(refreshCount - refreshesBeforeReopen, 1)
+    assert.notEqual(await evaluate("localStorage.getItem('bunkermode_refresh_token')"), credentialBeforeReopen)
+    console.log("PWA: reabertura com access expirado restaura rota e sessão OK")
+
+    await evaluate("localStorage.setItem('bunkermode_refresh_token','revoked'); localStorage.setItem('bunkermode_token','expired')")
+    await navigate("/tarefas")
+    await until(() => evaluate("location.pathname === '/auth'"), "refresh revogado")
+    assert.equal(await evaluate("localStorage.getItem('bunkermode_refresh_token')"), null)
+    console.log("PWA: refresh revogado encerra sessão OK")
 
     await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
     await navigate("/auth")

@@ -8,11 +8,12 @@ import { AuthService } from "./auth.service"
 import { TokenService } from "./token.service"
 import { EmailService, ResendEmailService } from "./email.service"
 import { PasswordResetService } from "./password-reset.service"
+import { PersistentSessionService } from "./persistent-session.service"
 
 @Module({
   imports: [PrismaModule],
   controllers: [AuthController],
-  providers: [AuthGuard, AuthRateLimitService, AuthService, TokenService, PasswordResetService,
+  providers: [AuthGuard, AuthRateLimitService, AuthService, TokenService, PasswordResetService, PersistentSessionService,
     { provide: EmailService, useClass: ResendEmailService }],
   exports: [AuthGuard, AuthService],
 })

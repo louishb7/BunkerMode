@@ -74,6 +74,55 @@ class InMemoryPrisma {
   private goalId = 1;
   private recurrenceSeriesId = 1;
   readonly users: UserRow[] = [];
+  readonly sessions: Array<{
+    id: number;
+    userId: number;
+    tokenHash: string;
+    authVersion: number;
+    lastUsedAt: Date | null;
+    revokedAt: Date | null;
+  }> = [];
+  readonly persistentSession = {
+    create: async ({
+      data,
+    }: {
+      data: { userId: number; tokenHash: string; authVersion: number };
+    }) => {
+      const row = {
+        id: this.sessions.length + 1,
+        ...data,
+        lastUsedAt: null,
+        revokedAt: null,
+      };
+      this.sessions.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: { where: { tokenHash: string } }) =>
+      this.sessions.find((row) => row.tokenHash === where.tokenHash) ?? null,
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: {
+        id?: number;
+        userId?: number;
+        tokenHash?: string;
+        revokedAt?: null;
+      };
+      data: { tokenHash?: string; lastUsedAt?: Date; revokedAt?: Date };
+    }) => {
+      const rows = this.sessions.filter(
+        (row) =>
+          (where.id === undefined || row.id === where.id) &&
+          (where.userId === undefined || row.userId === where.userId) &&
+          (where.tokenHash === undefined ||
+            row.tokenHash === where.tokenHash) &&
+          (where.revokedAt === undefined || row.revokedAt === null),
+      );
+      rows.forEach((row) => Object.assign(row, data));
+      return { count: rows.length };
+    },
+  };
   readonly tasks: TaskRow[] = [];
   readonly goals: GoalRow[] = [];
   readonly recurrenceSeries: RecurrenceSeriesRow[] = [];
@@ -542,6 +591,74 @@ describe("HTTP application", () => {
     await request(app.getHttpServer()).get("/api/v2/acompanhamentos").expect(401);
     await request(app.getHttpServer()).post("/api/v2/acompanhamentos/1/ocorrencias").expect(401);
     await request(app.getHttpServer()).post("/api/v2/tarefas/1/desvincular-objetivo").expect(401);
+  });
+
+  it("renews an expired access token without ending its revocable session", async () => {
+    const server = app.getHttpServer();
+    const prisma = app.get(PrismaService) as unknown as InMemoryPrisma;
+    await prisma.usuarios.create({
+      data: {
+        usuario: "persistente",
+        email: "persistente@bunker.local",
+        senha_hash: hashPassword("senha1234"),
+      },
+    });
+    const login = await request(server)
+      .post("/api/v2/auth/login")
+      .send({ email: "persistente", senha: "senha1234" })
+      .expect(200);
+    const credential = login.body.refresh_token as string;
+    expect(credential).toMatch(/^[a-f0-9]{64}$/);
+    expect(prisma.sessions.at(-1)?.tokenHash).not.toBe(credential);
+
+    const future = Date.now() + 5 * 24 * 60 * 60 * 1000;
+    const clock = jest.spyOn(Date, "now").mockReturnValue(future);
+    try {
+      await request(server)
+        .get("/api/v2/usuarios/me")
+        .set("Authorization", `Bearer ${login.body.access_token}`)
+        .expect(401);
+      const refreshed = await request(server)
+        .post("/api/v2/auth/refresh")
+        .send({ refresh_token: credential })
+        .expect(200);
+      expect(refreshed.body.refresh_token).not.toBe(credential);
+      await request(server)
+        .post("/api/v2/auth/refresh")
+        .send({ refresh_token: credential })
+        .expect(401);
+      await request(server)
+        .get("/api/v2/usuarios/me")
+        .set("Authorization", `Bearer ${refreshed.body.access_token}`)
+        .expect(200);
+      await request(server)
+        .post("/api/v2/auth/logout")
+        .send({ refresh_token: refreshed.body.refresh_token })
+        .expect(200);
+      await request(server)
+        .post("/api/v2/auth/refresh")
+        .send({ refresh_token: refreshed.body.refresh_token })
+        .expect(401);
+      const upgrade = await request(server)
+        .post("/api/v2/auth/session")
+        .set("Authorization", `Bearer ${refreshed.body.access_token}`)
+        .expect(201);
+      const races = await Promise.all([1, 2].map(() => request(server)
+        .post("/api/v2/auth/refresh")
+        .send({ refresh_token: upgrade.body.refresh_token })));
+      expect(races.map((response) => response.status).sort()).toEqual([200, 401]);
+      const rotated = races.find((response) => response.status === 200)!.body.refresh_token;
+      const owner = prisma.users.find((item) => item.usuario === "persistente")!;
+      owner.ativo = false;
+      await request(server).post("/api/v2/auth/refresh")
+        .send({ refresh_token: rotated }).expect(401);
+      owner.ativo = true;
+      owner.auth_version++;
+      await request(server).post("/api/v2/auth/refresh")
+        .send({ refresh_token: rotated }).expect(401);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("reopens completed tasks through an authenticated audited command", async () => {

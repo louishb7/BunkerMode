@@ -224,7 +224,7 @@ function useLogout() {
   const auth = useAuth()
 
   return async () => {
-    await auth.clearSession()
+    await auth.clearSession(true)
     navigate(APP_ROUTES.AUTH, { replace: true })
   }
 }

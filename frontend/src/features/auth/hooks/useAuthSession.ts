@@ -1,8 +1,13 @@
 import { validateAuth } from "../authValidation"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getErrorMessage } from "../../../api/httpClient"
+import {
+  ensurePersistentSession,
+  getErrorMessage,
+  hasRefreshSession,
+  revokePersistentSession,
+} from "../../../api/httpClient"
 
-import { TOKEN_KEY, USER_KEY } from "../../../constants/session"
+import { REFRESH_KEY, TOKEN_KEY, USER_KEY } from "../../../constants/session"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { clearOverview } from "../../../state/overviewCache"
@@ -23,6 +28,7 @@ const sessionStore = window.sessionStorage
 function removeStoredSession() {
   persistentStore.removeItem(TOKEN_KEY)
   persistentStore.removeItem(USER_KEY)
+  persistentStore.removeItem(REFRESH_KEY)
   sessionStore.removeItem(TOKEN_KEY)
   sessionStore.removeItem(USER_KEY)
 }
@@ -76,14 +82,16 @@ export function useAuthSession() {
       removeStoredSession()
       return null
     }
-    return persistentStore.getItem(TOKEN_KEY)
+    return persistentStore.getItem(TOKEN_KEY) || (hasRefreshSession() ? "pending" : null)
   })
   const [user, setUser] = useState(readStoredUser)
   const [sessionValidated, setSessionValidated] = useState(
-    () => !persistentStore.getItem(TOKEN_KEY)
+    () => !persistentStore.getItem(TOKEN_KEY) && !hasRefreshSession()
   )
   const [sessionMode, setSessionMode] = useState<"online" | "local" | "none">("none")
-  const [booting, setBooting] = useState(() => Boolean(persistentStore.getItem(TOKEN_KEY)))
+  const [booting, setBooting] = useState(() =>
+    Boolean(persistentStore.getItem(TOKEN_KEY) || hasRefreshSession())
+  )
   const [authStatus, setAuthStatus] = useState(emptyStatus)
   const [authLoading, setAuthLoading] = useState(false)
   const sessionRequestId = useRef(0)
@@ -105,27 +113,31 @@ export function useAuthSession() {
     [persistUser]
   )
 
-  const clearSession = useCallback(() => {
-    sessionRequestId.current += 1
-    const ownerId = user?.id ?? readStoredUser()?.id
-    const cleanup = ownerId ? clearUserData(ownerId) : Promise.resolve()
-    if (ownerId) {
-      persistentStore.removeItem(focusStorageKey(ownerId))
-      persistentStore.removeItem(durationStorageKey(ownerId))
-    }
-    clearOverview()
-    clearFinanceSnapshots()
-    clearOrientationCache()
-    removeStoredSession()
-    setToken(null)
-    setUser(null)
-    setSessionValidated(true)
-    setSessionMode("none")
-    setAuthStatus(emptyStatus)
-    setAuthLoading(false)
-    setBooting(false)
-    return cleanup
-  }, [user?.id])
+  const clearSession = useCallback(
+    (revoke = false) => {
+      const revocation = revoke ? revokePersistentSession() : Promise.resolve()
+      sessionRequestId.current += 1
+      const ownerId = user?.id ?? readStoredUser()?.id
+      const cleanup = ownerId ? clearUserData(ownerId) : Promise.resolve()
+      if (ownerId) {
+        persistentStore.removeItem(focusStorageKey(ownerId))
+        persistentStore.removeItem(durationStorageKey(ownerId))
+      }
+      clearOverview()
+      clearFinanceSnapshots()
+      clearOrientationCache()
+      removeStoredSession()
+      setToken(null)
+      setUser(null)
+      setSessionValidated(true)
+      setSessionMode("none")
+      setAuthStatus(emptyStatus)
+      setAuthLoading(false)
+      setBooting(false)
+      return Promise.all([cleanup, revocation])
+    },
+    [user?.id]
+  )
 
   const handleUnauthorized = useCallback(
     (result) => {
@@ -170,6 +182,7 @@ export function useAuthSession() {
       }
 
       persistUser(result.data)
+      void ensurePersistentSession().catch(() => {})
       setSessionValidated(true)
       setSessionMode("online")
       setAuthStatus(emptyStatus)
@@ -177,6 +190,16 @@ export function useAuthSession() {
     },
     [handleUnauthorized, persistUser]
   )
+
+  useEffect(() => {
+    const updateToken = () => {
+      const next = persistentStore.getItem(TOKEN_KEY)
+      skipRestoreToken.current = next
+      setToken(next)
+    }
+    window.addEventListener("bunkermode-token-refreshed", updateToken)
+    return () => window.removeEventListener("bunkermode-token-refreshed", updateToken)
+  }, [])
 
   useEffect(() => {
     if (!token) {
@@ -261,6 +284,8 @@ export function useAuthSession() {
     }
 
     persistentStore.setItem(TOKEN_KEY, result.data.access_token)
+    if (typeof result.data.refresh_token === "string")
+      persistentStore.setItem(REFRESH_KEY, result.data.refresh_token)
     skipRestoreToken.current = result.data.access_token
     setToken(result.data.access_token)
     persistUser(result.data.usuario)

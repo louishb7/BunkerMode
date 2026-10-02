@@ -1,6 +1,6 @@
 import React from "react"
 
-import { TOKEN_KEY, USER_KEY } from "../constants/session"
+import { REFRESH_KEY, TOKEN_KEY, USER_KEY } from "../constants/session"
 import Button from "../components/ui/Button"
 import { clearUserData } from "../offline/snapshots"
 import { clearOverview } from "../state/overviewCache"
@@ -41,6 +41,7 @@ export default class AppErrorBoundary extends React.Component<
     clearFinanceSnapshots()
     clearOrientationCache()
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_KEY)
     localStorage.removeItem(USER_KEY)
     sessionStorage.removeItem(TOKEN_KEY)
     sessionStorage.removeItem(USER_KEY)

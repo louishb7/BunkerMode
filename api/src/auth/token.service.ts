@@ -9,7 +9,7 @@ type TokenPayload = {
   exp?: number
 }
 
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+const SESSION_TTL_SECONDS = 60 * 60
 
 function base64UrlEncode(value: Buffer | string): string {
   return Buffer.from(value).toString("base64url")
@@ -56,7 +56,7 @@ export class TokenService {
     }
 
     const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as TokenPayload
-    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
+    if (!payload.exp || payload.exp <= Math.floor(Date.now() / 1000)) {
       throw new Error("Token expirado.")
     }
     return payload

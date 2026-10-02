@@ -6,6 +6,7 @@ import { AuthRateLimitService } from "./rate-limit.service"
 import { AuthService } from "./auth.service"
 import { toUserResponse } from "./user-response"
 import { PasswordResetService } from "./password-reset.service"
+import { PersistentSessionService } from "./persistent-session.service"
 
 type RequestLike = {
   ip?: string
@@ -22,6 +23,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly rateLimit: AuthRateLimitService,
     private readonly passwordReset: PasswordResetService,
+    private readonly sessions: PersistentSessionService,
   ) {}
 
   @Post("auth/register")
@@ -40,6 +42,7 @@ export class AuthController {
       access_token: result.access_token,
       token_type: result.token_type,
       usuario: toUserResponse(result.usuario, false),
+      ...(await this.sessions.create(result.usuario.usuario_id)),
     }
   }
 
@@ -61,6 +64,25 @@ export class AuthController {
   @UseGuards(AuthGuard)
   currentUser(@Req() request: AuthenticatedRequest) {
     return toUserResponse(request.currentUser!)
+  }
+
+  @Post("auth/session")
+  @UseGuards(AuthGuard)
+  createSession(@Req() request: AuthenticatedRequest) {
+    return this.sessions.create(request.currentUser!.usuario_id)
+  }
+
+  @Post("auth/refresh")
+  @HttpCode(200)
+  refresh(@Body() payload: { refresh_token?: unknown }) {
+    return this.sessions.refresh(payload?.refresh_token)
+  }
+
+  @Post("auth/logout")
+  @HttpCode(200)
+  async logout(@Body() payload: { refresh_token?: unknown }) {
+    await this.sessions.revoke(payload?.refresh_token)
+    return { message: "Sessão encerrada." }
   }
 
   @Patch("usuarios/me/modulos")

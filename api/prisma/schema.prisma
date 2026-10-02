@@ -96,6 +96,7 @@ model usuarios {
   senha_hash         String
   auth_version       Int                  @default(0)
   password_resets    PasswordReset[]
+  persistent_sessions PersistentSession[]
   ativo              Boolean              @default(true)
   enabled_modules    String[]              @default(["tasks", "objectives"])
   timezone           String               @default("America/Recife") @db.VarChar(80)
@@ -149,6 +150,19 @@ model PasswordReset {
   @@index([userId, usedAt])
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+model PersistentSession {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  tokenHash   String    @unique @db.Char(64)
+  authVersion Int
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  lastUsedAt  DateTime? @db.Timestamp(6)
+  revokedAt   DateTime? @db.Timestamp(6)
+  user        usuarios  @relation(fields: [userId], references: [usuario_id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
 }
 
 // BRL em centavos inteiros; nenhum cálculo monetário usa ponto flutuante.

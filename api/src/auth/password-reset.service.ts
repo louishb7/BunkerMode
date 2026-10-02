@@ -139,6 +139,10 @@ export class PasswordResetService implements OnModuleDestroy {
         where: { userId: candidate.userId, usedAt: null },
         data: { usedAt: now }
       })
+      await tx.persistentSession.updateMany({
+        where: { userId: candidate.userId, revokedAt: null },
+        data: { revokedAt: now }
+      })
     })
     return { message: "Senha redefinida. Entre com sua nova senha." }
   }

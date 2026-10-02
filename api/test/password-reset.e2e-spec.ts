@@ -8,6 +8,7 @@ import { EmailService, ResendEmailService } from "../src/auth/email.service"
 import { PasswordResetService, FORGOT_PASSWORD_MESSAGE } from "../src/auth/password-reset.service"
 import { AuthRateLimitService } from "../src/auth/rate-limit.service"
 import { TokenService } from "../src/auth/token.service"
+import { PersistentSessionService } from "../src/auth/persistent-session.service"
 import { PrismaService } from "../src/prisma/prisma.service"
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL
@@ -122,6 +123,8 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
 
   it("changes credentials, consumes all pending resets and revokes versioned and legacy sessions", async () => {
     const legacy = new TokenService().generate({ sub: userId, email })
+    const persistent = app.get(PersistentSessionService)
+    const session = await persistent.create(userId)
     await auth.getUserFromToken(legacy)
     await forgot()
     await prisma.passwordReset.updateMany({
@@ -130,6 +133,8 @@ describeDatabase("Password reset HTTP and PostgreSQL", () => {
     })
     await forgot()
     await submit(delivered[1].token).expect(200)
+    await expect(persistent.refresh(session.refresh_token)).rejects.toThrow()
+    expect(await prisma.persistentSession.count({ where: { userId, revokedAt: null } })).toBe(0)
     await request(app.getHttpServer())
       .post("/api/v2/auth/login")
       .send({ email, senha: "abcde1" })

@@ -104,7 +104,7 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     }
     try {
       await enqueueOperation(ownerId, "task", "create", payload)
-      setFormStatus({ type: "success", message: "Aguardando sincronização." })
+      setFormStatus({ type: "success", message: "Alteração salva neste dispositivo." })
       return true
     } catch (error) {
       setFormStatus({

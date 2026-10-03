@@ -269,7 +269,7 @@ export function useTaskBoard({
   async function queue(action: string, payload: Record<string, unknown> = {}, task?: Task) {
     try {
       await enqueueOperation(ownerId, "task", action, payload, task?.id, task?.updated_at)
-      setStatus({ type: "success", message: "Aguardando sincronização." })
+      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
       return { persisted: true, synchronized: false }
     } catch (error) {
       setStatus({

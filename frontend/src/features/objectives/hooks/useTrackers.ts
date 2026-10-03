@@ -125,7 +125,7 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
   ) {
     try {
       await enqueueOperation(ownerId, domain, action, payload, target, version, parentId)
-      setStatus({ type: "success", message: "Aguardando sincronização." })
+      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
       return true
     } catch (error) {
       setStatus({

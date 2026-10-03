@@ -164,7 +164,7 @@ export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }
     try {
       const item = projectedObjectives.find((goal) => goal.id === id)
       await enqueueOperation(ownerId, "goal", action, payload, id, item?.updated_at)
-      setStatus({ type: "success", message: "Aguardando sincronização." })
+      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
       return true
     } catch (error) {
       setStatus({

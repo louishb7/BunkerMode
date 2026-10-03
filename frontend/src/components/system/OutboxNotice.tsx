@@ -58,8 +58,7 @@ export default function OutboxNotice() {
   return (
     <details className="border-b border-border px-4 py-1.5 text-xs" aria-label="Alterações locais">
       <summary className="cursor-pointer">
-        {items.length} {items.length === 1 ? "alteração local" : "alterações locais"} aguardando
-        sincronização
+        {items.length} {items.length === 1 ? "alteração local" : "alterações locais"}
       </summary>
       <div className="mx-auto grid max-w-3xl gap-2 py-2">
         {actionError && <p className="text-danger">{actionError}</p>}

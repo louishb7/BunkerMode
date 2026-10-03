@@ -211,7 +211,7 @@ test("criação vinculada preserva payload na outbox sem depender de releitura",
   assert.equal(render.queued[0][1], "task")
   assert.equal(render.queued[0][2], "create")
   assert.deepEqual(render.queued[0][3], payload)
-  assert.equal(render().formStatus.message, "Aguardando sincronização.")
+  assert.equal(render().formStatus.message, "Alteração salva neste dispositivo.")
 })
 
 test("401 de leitura aciona a sessão global; criação durável não chama API diretamente", async () => {
@@ -232,7 +232,7 @@ test("401 de leitura aciona a sessão global; criação durável não chama API 
   assert.equal(await render().refresh(), false)
   assert.equal(render().error, "")
   assert.equal(await render().createTask({ titulo: "Tarefa vinculada" }), true)
-  assert.equal(render().formStatus.message, "Aguardando sincronização.")
+  assert.equal(render().formStatus.message, "Alteração salva neste dispositivo.")
   assert.equal(unauthorizedResults.length, 1)
   assert.equal(
     unauthorizedResults.every((result) => result.status === 401),

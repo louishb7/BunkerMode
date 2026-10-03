@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { registerSW } from "virtual:pwa-register"
 import { useApiAvailability } from "../../offline/useApiAvailability"
+import { useOnlineStatus } from "../../offline/useOnlineStatus"
 import { useAuth } from "../../context/AuthContext"
 import OutboxNotice from "./OutboxNotice"
 
@@ -29,6 +30,7 @@ function iosSafari() {
 
 export default function PwaBanners() {
   const availability = useApiAvailability()
+  const online = useOnlineStatus()
   const auth = useAuth()
   const [installable, setInstallable] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
@@ -61,6 +63,11 @@ export default function PwaBanners() {
   return (
     <div className="relative z-20 bg-peripheral text-text-primary">
       <OutboxNotice />
+      {!online && (
+        <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
+          Aguardando sincronização
+        </div>
+      )}
       {availability === "unavailable" && (
         <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
           API indisponível · alterações pessoais serão sincronizadas depois

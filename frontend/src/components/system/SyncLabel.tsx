@@ -1,7 +1,6 @@
 import React from "react"
 
 const labels: Record<string, string> = {
-  pending: "Aguardando sincronização",
   syncing: "Sincronizando",
   failed: "Não foi possível sincronizar",
   conflict: "Conflito de sincronização",

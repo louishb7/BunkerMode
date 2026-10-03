@@ -254,6 +254,17 @@ async function main() {
     await cdp.send("Runtime.enable")
     await cdp.send("Network.enable")
     const evaluate = (code) => cdp.evaluate(code)
+    // Mantém o estado do navegador após navegações atendidas pelo service worker.
+    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => sessionStorage.getItem('pwa-test-offline') !== 'true' })
+    ` })
+    const setConnectivity = async (connected) => {
+      await evaluate(`sessionStorage.setItem('pwa-test-offline', ${JSON.stringify(String(!connected))})`)
+      await cdp.send("Network.emulateNetworkConditions", {
+        offline: !connected, latency: 0,
+        downloadThroughput: connected ? -1 : 0, uploadThroughput: connected ? -1 : 0,
+      })
+    }
     const navigate = async (path) => { await cdp.send("Page.navigate", { url: origin + path }); await until(() => evaluate("document.readyState === 'complete'"), `navegação ${path}`) }
     const visible = async (value) => {
       try { await until(() => evaluate(`document.body.innerText.includes(${JSON.stringify(value)})`), value) }
@@ -269,6 +280,8 @@ async function main() {
     await evaluate(`localStorage.setItem('bunkermode_token','one'); localStorage.setItem('bunkermode_usuario',${JSON.stringify(JSON.stringify(user(1)))})`)
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
+    assert.equal(await evaluate("navigator.onLine"), true)
+    assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([99,'legacy:test']);r.onsuccess=()=>ok(db.version===2 && db.objectStoreNames.contains('outbox') && r.result?.data?.preservado===true)})})()"), true)
     console.log("PWA: upgrade IndexedDB v1→v2 preserva snapshots existentes OK")
     await navigate("/objetivos")
@@ -288,10 +301,13 @@ async function main() {
     assert.equal(await evaluate("(async()=>{const names=await caches.keys();const urls=(await Promise.all(names.map(async n=>(await caches.open(n)).keys()))).flat().map(x=>x.url);return urls.some(x=>x.includes('/api/v2/'))})()"), false)
     console.log("PWA: snapshots por usuário e domínio OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
+    await visible("Aguardando sincronização")
+    assert.equal(await evaluate("navigator.onLine"), false)
     for (const path of ["/", "/tarefas", "/tarefas/foco", "/objetivos", "/financas", "/configuracoes"]) {
       await navigate(path)
       await visible("API indisponível")
+      await visible("Aguardando sincronização")
     }
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
@@ -308,11 +324,12 @@ async function main() {
     await visible("Foco local persistido")
     console.log("PWA: Foco local após reabertura OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => evaluate("!document.body.innerText.includes('Aguardando sincronização')"), "aviso removido na reconexão")
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await evaluate("window.dispatchEvent(new Event('offline'))")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Nova tarefa'))?.click()")
     await visible("Registrar tarefa")
@@ -332,7 +349,7 @@ async function main() {
     const remaining = await evaluate("(async () => { const db = await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1).length)})})()")
     assert.equal(remaining, 0)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1).length===0)})})()"), true)
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await evaluate(`localStorage.setItem('bunkermode_token','two'); localStorage.setItem('bunkermode_usuario',${JSON.stringify(JSON.stringify(user(2)))})`)
     await navigate("/tarefas")
@@ -372,7 +389,7 @@ async function main() {
     await until(() => evaluate("window.__updateMarker !== 1"), "reload aprovado")
     console.log("PWA: atualização aprovada ativa o novo worker e recarrega OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await evaluate("(async () => {const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});const tx=db.transaction('snapshots','readwrite');const store=tx.objectStore('snapshots');const old=await new Promise(ok=>{const r=store.get([2,'tasks:all']);r.onsuccess=()=>ok(r.result)});store.put({...old,data:{corrompido:true}});await new Promise(ok=>{tx.oncomplete=ok})})()")
     await navigate("/tarefas")
     await visible("Tarefas")
@@ -397,7 +414,7 @@ async function main() {
     const refreshesBeforeReconnect = refreshCount
     await navigate("/tarefas")
     await visible("API indisponível")
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh na reconexão")
     await until(() => syncCalls === 1, "sync após refresh")
@@ -423,7 +440,7 @@ async function main() {
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Resposta perdida").length, 1)
     console.log("PWA: resposta perdida é repetida com a mesma operação sem duplicar tarefa OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await navigate("/objetivos")
     await visible("Novo objetivo")
     const callsBeforeDependencies = syncCalls
@@ -459,7 +476,7 @@ async function main() {
     await visible("Meta local")
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeDependencies = refreshCount
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "dependências sincronizadas")
     assert.equal(refreshCount - refreshesBeforeDependencies, 1)
@@ -470,7 +487,7 @@ async function main() {
     assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").ocorrencias.length, 1)
     console.log("PWA: objetivo, tarefa, acompanhamento e ocorrência dependentes sincronizam em ordem após refresh OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await navigate("/financas")
     await visible("Nova reserva")
     const callsBeforeFinance = syncCalls
@@ -498,7 +515,7 @@ async function main() {
     await visible("Reserva local")
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeFinance = refreshCount
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "finanças sincronizadas")
     assert.equal(refreshCount - refreshesBeforeFinance, 1)
@@ -507,7 +524,7 @@ async function main() {
     assert.equal(reservesByOwner.get(2).find((item) => item.titulo === "Reserva local").objetivo_id, linkedGoal.id)
     console.log("PWA: lançamento e reserva persistem offline, projetam centavos e sincronizam uma vez OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await navigate("/tarefas")
     await visible("Nova tarefa")
     const callsBeforeRecurring = syncCalls
@@ -522,7 +539,7 @@ async function main() {
     await visible("Recorrente local")
     assert.equal(syncCalls, callsBeforeRecurring)
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Recorrente local").length, 0)
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "recorrência sincronizada")
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Recorrente local").length, 1)
@@ -531,7 +548,7 @@ async function main() {
 
     await navigate("/tarefas/foco")
     await visible("Tarefas de hoje")
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await navigate("/tarefas/foco")
     await visible("Tarefas de hoje")
     await evaluate("[...document.querySelectorAll('#focus-task-shortcuts button')].find(button => button.textContent.includes('Tarefa do usuário 2'))?.click()")
@@ -544,7 +561,7 @@ async function main() {
     await navigate("/tarefas/foco")
     await visible("Bloco encerrado")
     assert.equal(tasksByOwner.get(2).find((item) => item.id === 2).status, "PENDENTE")
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "conclusão de foco sincronizada")
     assert.equal(tasksByOwner.get(2).find((item) => item.id === 2).status, "CONCLUIDA")
@@ -588,17 +605,23 @@ async function main() {
     const callsBefore503 = syncCalls
     forcedStatuses.set("Servidor temporário", 503)
     await putOutbox({ ownerId: 2, operationId: serverErrorId, domain: "task", action: "create",
-      payload: { titulo: "Servidor temporário" }, createdAt: new Date().toISOString(), status: "pending" })
+      payload: { titulo: "Servidor temporário", prazo: today }, createdAt: new Date().toISOString(), status: "pending" })
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => syncCalls > callsBefore503, "503 recebido")
     assert.equal(await outboxStatus(serverErrorId), "pending")
+    await visible("Servidor temporário")
+    assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
+    await navigate("/tarefas")
+    await visible("Servidor temporário")
+    assert.equal(await outboxStatus(serverErrorId), "pending")
+    assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
     forcedStatuses.delete("Servidor temporário")
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(serverErrorId).then((status) => status === null), "pendência após 503 sincronizada")
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Servidor temporário").length, 1)
     console.log("PWA: 409 preserva conflito, 422 fica failed e 5xx mantém pending até nova oportunidade OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await evaluate("window.dispatchEvent(new Event('offline'))")
     const deleteGoalId = crypto.randomUUID()
     await putOutbox({ ownerId: 2, operationId: deleteGoalId, domain: "goal", action: "delete",
@@ -608,7 +631,7 @@ async function main() {
     await visible("Objetivos")
     assert.equal(await evaluate("document.body.innerText.includes('Objetivo 2')"), false)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([2,'objectives']);r.onsuccess=()=>ok(r.result?.data?.some(x=>x.id===2))})})()"), true)
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(deleteGoalId).then((status) => status === null), "exclusão de objetivo sincronizada")
     assert.equal(goalsByOwner.get(2).some((goal) => goal.id === 2), false)
@@ -621,7 +644,7 @@ async function main() {
     assert.equal(await evaluate("localStorage.getItem('bunkermode_refresh_token')"), null)
     console.log("PWA: refresh revogado encerra sessão OK")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await setConnectivity(false)
     await navigate("/auth")
     await visible("Entrar no Bunker")
     await navigate(`/reset-password#token=${secret}`)
@@ -641,7 +664,7 @@ async function main() {
       console.log("PWA: instrução iOS e ausência do convite em standalone OK")
     } else console.log("PWA: instrução iOS OK; display-mode standalone requer validação no dispositivo")
 
-    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await evaluate("document.querySelector('input[name=identificador]')?.focus()")
     await cdp.send("Input.insertText", { text: "pwa-2" })

@@ -42,6 +42,10 @@ export function notifyApiSuccess() {
 
 if (typeof window !== "undefined") {
   window.addEventListener("offline", () => setApiAvailability("unavailable"))
-  window.addEventListener("online", () => retryListeners.forEach((listener) => listener()))
+  window.addEventListener("online", () => {
+    // A nova conexão precisa ser verificada; a falha anterior não descreve sua saúde.
+    setApiAvailability("unknown")
+    retryListeners.forEach((listener) => listener())
+  })
   if (navigator.onLine === false) availability = "unavailable"
 }

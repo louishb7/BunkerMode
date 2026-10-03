@@ -28,5 +28,6 @@ export type FinanceOverview = {
     receitas_centavos?: number
     despesas_centavos?: number
   }[]
+  // Histórico de todos os períodos que compõem saldo_centavos, inclusive ajustes.
   lancamentos: FinanceEntry[]
 }

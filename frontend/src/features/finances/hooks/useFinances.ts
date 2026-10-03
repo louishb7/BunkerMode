@@ -125,7 +125,7 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (enabled && previous === "unavailable" && next === "available") void refresh()
+      if (enabled && previous !== "available" && next === "available") void refresh()
       previous = next
     })
   }, [enabled, refresh])

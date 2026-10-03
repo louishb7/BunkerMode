@@ -189,7 +189,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .send({})
       .expect(401);
   });
-  it("cria, lista por mês, edita e exclui valores exatos, distinguindo saldo, fluxo", async () => {
+  it("lista todo o histórico, edita e exclui valores exatos, distinguindo saldo e fluxo mensal", async () => {
     const initial = await request(app.getHttpServer())
       .post(`${base}/financas/lancamentos`)
       .set(auth())
@@ -218,6 +218,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     expect(overview.lancamentos.map((x) => x.id)).toEqual([
       expense.id,
       income.id,
+      initial.body.id,
     ]);
     await request(app.getHttpServer())
       .patch(`${base}/financas/lancamentos/${income.id}`)
@@ -235,9 +236,59 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       receitas_centavos: 0,
       despesas_centavos: 0,
     });
-    expect(overview.lancamentos.map((x) => x.id)).toEqual([initial.body.id]);
+    expect(overview.lancamentos.map((x) => x.id)).toEqual([
+      income.id,
+      initial.body.id,
+    ]);
   });
-  it("aceita movimento simples e retorna o histórico mensal completo sem truncar resumo ou série diária", async () => {
+  it("expõe o ajuste antigo que compõe R$ 140 mesmo em um mês sem movimentos e permite excluí-lo", async () => {
+    const initial = await service.createEntry(owner, {
+      ...entry,
+      valor_centavos: 14000,
+    });
+    const before = await prisma.lancamentos_financeiros.findMany({
+      where: { usuario_id: owner.usuario_id },
+    });
+    const overview = (
+      await request(app.getHttpServer())
+        .get(`${base}/financas?mes=2026-09`)
+        .set(auth())
+        .expect(200)
+    ).body;
+    expect(overview).toMatchObject({
+      saldo_centavos: 14000,
+      resultado_centavos: 0,
+      receitas_centavos: 0,
+      despesas_centavos: 0,
+    });
+    expect(overview.lancamentos).toMatchObject([
+      {
+        id: initial.id,
+        tipo: "ajuste_entrada",
+        data: "2026-01-01",
+        valor_centavos: 14000,
+      },
+    ]);
+    expect(
+      overview.serie_diaria.every(
+        (day: { resultado_centavos: number }) => day.resultado_centavos === 0,
+      ),
+    ).toBe(true);
+    expect(
+      await prisma.lancamentos_financeiros.findMany({
+        where: { usuario_id: owner.usuario_id },
+      }),
+    ).toEqual(before);
+    await request(app.getHttpServer())
+      .delete(`${base}/financas/lancamentos/${initial.id}`)
+      .set(auth())
+      .expect(204);
+    expect(await service.overview(owner, "2026-09")).toMatchObject({
+      saldo_centavos: 0,
+      lancamentos: [],
+    });
+  });
+  it("aceita movimento simples e retorna o histórico completo sem truncar resumo ou série diária", async () => {
     const created = await request(app.getHttpServer())
       .post(`${base}/financas/lancamentos`)
       .set(auth())

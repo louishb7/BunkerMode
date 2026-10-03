@@ -12,7 +12,6 @@ export default function OfflineNotice({ updatedAt }: { updatedAt?: string | null
       {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(
         timestamp
       )}
-      . Alterações locais aguardam sincronização.
     </p>
   )
 }

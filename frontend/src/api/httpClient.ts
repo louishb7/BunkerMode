@@ -233,7 +233,7 @@ async function performRequest<T>(
       signal: controller.signal,
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    setApiAvailability("available")
+    setApiAvailability(response.status >= 500 ? "unavailable" : "available")
     if (response.ok && path !== "/usuarios/me") notifyApiSuccess()
     if (response.ok && recover && !authenticationAction && !hasRefreshSession()) {
       void ensurePersistentSession().catch(() => {})

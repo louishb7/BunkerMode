@@ -29,6 +29,7 @@ const [
   { setApiAvailability },
   { default: FinanceForm },
   { projectFinances },
+  { default: FinanceChart },
 ] = await Promise.all([
   load("features/finances/hooks/useFinances.ts"),
   load("services/bunkermodeApi.ts"),
@@ -39,6 +40,7 @@ const [
   load("offline/apiAvailability.ts"),
   load("features/finances/components/FinanceForm.tsx"),
   load("offline/outbox.ts"),
+  load("features/finances/components/FinanceChart.tsx"),
 ])
 after(() => vite.close())
 beforeEach(() => setApiAvailability("available"))
@@ -473,16 +475,170 @@ test("projeção de Entrada/Saída conserva saldo, totais, gráfico, ordem e fal
   const replay = projectFinances(confirmed, [{ ...operations[0], serverId: 7 }], "2026-09")
   assert.equal(replay.saldo_centavos, 1150)
   assert.equal(replay.lancamentos.length, 1)
-  assert.equal(
-    projectFinances(official, [operation("4", "despesa", 10, "2026-08-31")], "2026-09")
-      .saldo_centavos,
-    -10
-  )
+  const past = projectFinances(official, [operation("4", "despesa", 10, "2026-08-31")], "2026-09")
+  assert.equal(past.saldo_centavos, -10)
+  assert.equal(past.lancamentos[0].data, "2026-08-31")
+  assert.equal(past.resultado_centavos, 0)
+  assert.deepEqual(past.serie_diaria, official.serie_diaria)
+  const localPast = projectFinances(null, [operation("4", "despesa", 10, "2026-08-31")], "2026-09")
+  assert.equal(localPast.saldo_centavos, -10)
+  assert.equal(localPast.lancamentos.length, 1)
+  assert.equal(localPast.resultado_centavos, 0)
   assert.equal(
     projectFinances(official, [operation("4", "inválido", 10, "2026-09-01")], "2026-09")
       .saldo_centavos,
     0
   )
+})
+
+test("saldo de ajuste antigo fica acessível no histórico e é recalculado após exclusão", async () => {
+  const original = { ...api }
+  let deleted = false
+  api.getFinances = async (_token, month) => ({
+    ok: true,
+    data: {
+      ...empty(),
+      mes: month,
+      saldo_centavos: deleted ? 0 : 14000,
+      lancamentos: deleted
+        ? []
+        : [
+            {
+              id: 140,
+              titulo: "Saldo anterior",
+              tipo: "ajuste_entrada",
+              valor_centavos: 14000,
+              data: "2026-01-01",
+            },
+          ],
+    },
+  })
+  api.deleteFinanceEntry = async (_token, id) => {
+    assert.equal(id, 140)
+    deleted = true
+    return { ok: true, status: 204 }
+  }
+  const view = await mount(Page, {
+    token: "old-balance",
+    user: { id: 140, timezone: "America/Recife" },
+    onUnauthorized: () => false,
+  })
+  try {
+    assert.equal(view.container.querySelector(".finance-result").textContent, money(14000))
+    assert.match(
+      view.container.querySelector(".finance-ledger").textContent,
+      /Saldo anterior.*Entrada.*01\/01\/2026.*Ajuste de saldo/
+    )
+    await act(async () =>
+      view.container.querySelector('[aria-label="Ações do movimento: Saldo anterior"]').click()
+    )
+    await act(async () =>
+      [...document.querySelectorAll('[role="menuitem"]')]
+        .find((button) => button.textContent === "Excluir movimento")
+        .click()
+    )
+    await act(async () =>
+      [...document.querySelectorAll('[role="dialog"] button')]
+        .find((button) => button.textContent === "Excluir")
+        .click()
+    )
+    assert.equal(view.container.querySelector(".finance-result").textContent, money(0))
+    assert.match(view.container.textContent, /Nenhum movimento registrado/)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+
+test("gráfico mostra escala em reais, valores diários e resultado acumulado sem dias futuros", async () => {
+  const points = [
+    {
+      data: "2026-09-01",
+      receitas_centavos: 10000,
+      despesas_centavos: 0,
+      resultado_centavos: 10000,
+    },
+    {
+      data: "2026-09-02",
+      receitas_centavos: 10000,
+      despesas_centavos: 12500,
+      resultado_centavos: -2500,
+    },
+    {
+      data: "2026-09-03",
+      receitas_centavos: 11250,
+      despesas_centavos: 12500,
+      resultado_centavos: -1250,
+    },
+    {
+      data: "2026-09-04",
+      receitas_centavos: 99900,
+      despesas_centavos: 12500,
+      resultado_centavos: 87400,
+    },
+  ]
+  const view = await mount(FinanceChart, { points, today: "2026-09-03" })
+  const amounts = () =>
+    [...view.container.querySelectorAll(".finance-chart-details dd")].map((el) => el.textContent)
+  try {
+    assert.equal(
+      view.container.querySelector(".finance-chart-total strong").textContent,
+      money(-1250)
+    )
+    assert.match(view.container.querySelector(".finance-chart-axis").textContent, /R\$/)
+    assert.ok(view.container.querySelector(".finance-chart-axis").textContent.includes(money(0)))
+    assert.ok(
+      view.container.querySelector(".finance-chart-axis").textContent.includes(money(-5000))
+    )
+    assert.deepEqual(amounts(), [money(1250), money(0), money(-1250)])
+    const slider = view.container.querySelector('[aria-label="Dia do gráfico"]')
+    assert.equal(slider.max, "2")
+    assert.equal(slider.getAttribute("aria-valuetext"), "03/09/2026")
+    await inputValue(slider, "1")
+    assert.deepEqual(amounts(), [money(0), money(12500), money(-2500)])
+    assert.equal(slider.getAttribute("aria-valuetext"), "02/09/2026")
+    await inputValue(slider, "0")
+    assert.deepEqual(amounts(), [money(10000), money(0), money(10000)])
+    const svg = view.container.querySelector("svg")
+    svg.getBoundingClientRect = () => ({ left: 0, width: 600 })
+    await act(async () => {
+      const event = new window.Event("pointerdown", { bubbles: true })
+      Object.defineProperty(event, "clientX", { value: 600 })
+      svg.dispatchEvent(event)
+    })
+    assert.deepEqual(amounts(), [money(1250), money(0), money(-1250)])
+    assert.doesNotMatch(view.container.textContent, /04\/09/)
+  } finally {
+    await view.close()
+  }
+})
+
+test("gráfico trata mês vazio, primeiro dia e fluxos que se anulam", async () => {
+  const view = await mount(FinanceChart, { points: [], today: "2026-09-01" })
+  try {
+    assert.match(view.container.textContent, /Ainda não há entradas ou saídas/)
+    assert.equal(view.container.querySelector("svg"), null)
+    await view.render({
+      points: [
+        {
+          data: "2026-09-01",
+          receitas_centavos: 1250,
+          despesas_centavos: 1250,
+          resultado_centavos: 0,
+        },
+      ],
+      today: "2026-09-01",
+    })
+    assert.equal(view.container.querySelector('input[type="range"]').disabled, true)
+    assert.equal(view.container.querySelector(".finance-chart-total strong").textContent, money(0))
+    assert.equal(
+      view.container.querySelectorAll(".finance-chart-details dd")[0].textContent,
+      money(1250)
+    )
+    assert.doesNotMatch(view.container.querySelector("path").getAttribute("d"), /NaN|Infinity/)
+  } finally {
+    await view.close()
+  }
 })
 
 test("histórico mostra até oito itens, ordena datas e navega por todas as páginas", async () => {

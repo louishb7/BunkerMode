@@ -100,7 +100,7 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (enabled && previous === "unavailable" && next === "available") void refresh()
+      if (enabled && previous !== "available" && next === "available") void refresh()
       previous = next
     })
   }, [enabled, refresh])
@@ -125,7 +125,7 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
   ) {
     try {
       await enqueueOperation(ownerId, domain, action, payload, target, version, parentId)
-      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
+      setStatus(emptyStatus)
       return true
     } catch (error) {
       setStatus({

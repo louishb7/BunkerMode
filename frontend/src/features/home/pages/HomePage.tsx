@@ -185,7 +185,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (previous === "unavailable" && next === "available") void refresh()
+      if (previous !== "available" && next === "available") void refresh()
       previous = next
     })
   }, [refresh])

@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom"
 
 import BootScreen from "../components/system/BootScreen"
 import PwaBanners from "../components/system/PwaBanners"
+import { SyncStatusProvider } from "../context/SyncStatusContext"
 import AppShell from "../components/layout/AppShell"
 import ExecutionLayout from "../components/layout/ExecutionLayout"
 import { emptyStatus } from "../constants/uiState"
@@ -24,6 +25,14 @@ const FocusPage = lazy(() => import("../features/tasks/pages/FocusPage"))
 const TasksPage = lazy(() => import("../features/tasks/pages/TasksPage"))
 
 export default function App() {
+  return (
+    <SyncStatusProvider>
+      <AppContent />
+    </SyncStatusProvider>
+  )
+}
+
+function AppContent() {
   const auth = useAuth()
 
   if (auth.booting)

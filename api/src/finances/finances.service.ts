@@ -84,7 +84,7 @@ export class FinancesService {
     const start = new Date(`${mes}-01T00:00:00Z`);
     const end = new Date(start);
     end.setUTCMonth(end.getUTCMonth() + 1);
-    // Resumo e série diária compartilham uma fotografia consistente do mês.
+    // O saldo e seu histórico são globais; resumo e série são do mês selecionado.
     return this.prisma.$transaction(
       async (tx) => {
         const [saldo_centavos, daily, lancamentos] = await Promise.all([
@@ -98,10 +98,7 @@ export class FinancesService {
             _sum: { valor_centavos: true },
           }),
           tx.lancamentos_financeiros.findMany({
-            where: {
-              usuario_id: user.usuario_id,
-              data: { gte: start, lt: end },
-            },
+            where: { usuario_id: user.usuario_id },
             orderBy: [{ data: "desc" }, { id: "desc" }],
           }),
         ]);

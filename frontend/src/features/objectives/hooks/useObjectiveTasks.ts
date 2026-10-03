@@ -89,7 +89,7 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (enabled && previous === "unavailable" && next === "available") void refresh()
+      if (enabled && previous !== "available" && next === "available") void refresh()
       previous = next
     })
   }, [enabled, refresh])
@@ -104,7 +104,7 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     }
     try {
       await enqueueOperation(ownerId, "task", "create", payload)
-      setFormStatus({ type: "success", message: "Alteração salva neste dispositivo." })
+      setFormStatus(emptyStatus)
       return true
     } catch (error) {
       setFormStatus({

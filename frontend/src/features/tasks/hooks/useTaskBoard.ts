@@ -258,7 +258,7 @@ export function useTaskBoard({
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (authenticated && previous === "unavailable" && next === "available") {
+      if (authenticated && previous !== "available" && next === "available") {
         if (boardMode === "focus") void loadFocusBoard()
         else void loadTasksBoard()
       }
@@ -269,7 +269,7 @@ export function useTaskBoard({
   async function queue(action: string, payload: Record<string, unknown> = {}, task?: Task) {
     try {
       await enqueueOperation(ownerId, "task", action, payload, task?.id, task?.updated_at)
-      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
+      setStatus(emptyStatus)
       return { persisted: true, synchronized: false }
     } catch (error) {
       setStatus({

@@ -113,7 +113,7 @@ export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }
     let previous = getApiAvailability()
     return subscribeApiAvailability(() => {
       const next = getApiAvailability()
-      if (enabled && previous === "unavailable" && next === "available") void loadObjectives()
+      if (enabled && previous !== "available" && next === "available") void loadObjectives()
       previous = next
     })
   }, [enabled, loadObjectives])
@@ -164,7 +164,7 @@ export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }
     try {
       const item = projectedObjectives.find((goal) => goal.id === id)
       await enqueueOperation(ownerId, "goal", action, payload, id, item?.updated_at)
-      setStatus({ type: "success", message: "Alteração salva neste dispositivo." })
+      setStatus(emptyStatus)
       return true
     } catch (error) {
       setStatus({

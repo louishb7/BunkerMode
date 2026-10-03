@@ -37,6 +37,24 @@ let activeOwner: number | null = null
 let running: Promise<void> | null = null
 let generation = 0
 let queuedWhileRunning = false
+let replayOwner: number | null = null
+const replayListeners = new Set<() => void>()
+
+export function getReplayOwner() {
+  return replayOwner
+}
+
+export function subscribeReplay(listener: () => void) {
+  replayListeners.add(listener)
+  return () => {
+    replayListeners.delete(listener)
+  }
+}
+
+function setReplayOwner(ownerId: number | null) {
+  replayOwner = ownerId
+  replayListeners.forEach((listener) => listener())
+}
 
 export function activateOutbox(ownerId: number | null) {
   activeOwner = ownerId
@@ -350,7 +368,15 @@ export function syncOutbox(ownerId: number): Promise<void> {
   if (activeOwner !== ownerId) return Promise.resolve()
   const epoch = generation
   running = (async () => {
-    const work = () => run(ownerId, epoch)
+    const work = async () => {
+      if (navigator.onLine === false || getApiAvailability() === "unavailable") return
+      setReplayOwner(ownerId)
+      try {
+        await run(ownerId, epoch)
+      } finally {
+        setReplayOwner(null)
+      }
+    }
     if (navigator.locks) await navigator.locks.request(`bunkermode-outbox-${ownerId}`, work)
     else await work()
   })().finally(() => {
@@ -596,9 +622,7 @@ export function projectFinances(
   const localMonth = month ?? new Date().toISOString().slice(0, 7)
   if (
     !official &&
-    !operations.some(
-      (item) => item.domain === "entry" && String(item.payload.data).startsWith(localMonth)
-    )
+    !operations.some((item) => item.domain === "entry" && item.action === "create")
   )
     return null
   const baseline: FinanceOverview = official ?? {
@@ -648,9 +672,8 @@ export function projectFinances(
     const inMonth = String(op.payload.data).slice(0, 7) === result.mes
     if (contributes && !(op.serverId && !inMonth))
       result.saldo_centavos += incoming ? cents : -cents
-    if (!inMonth) continue
-    if (contributes && tipo === "receita") result.receitas_centavos += cents
-    if (contributes && tipo === "despesa") result.despesas_centavos += cents
+    if (inMonth && contributes && tipo === "receita") result.receitas_centavos += cents
+    if (inMonth && contributes && tipo === "despesa") result.despesas_centavos += cents
     result.resultado_centavos = result.receitas_centavos - result.despesas_centavos
     result.lancamentos.unshift({
       id: `local:${op.operationId}`,
@@ -661,6 +684,7 @@ export function projectFinances(
       data: String(op.payload.data),
       syncStatus: op.status,
     } as FinanceOverview["lancamentos"][number])
+    if (!inMonth) continue
     result.serie_diaria = result.serie_diaria.map((point) =>
       contributes &&
       point.data >= String(op.payload.data) &&

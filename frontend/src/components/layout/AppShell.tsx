@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { Wallet, Home, ListTodo, Compass, Settings, LogOut, Menu, X } from "lucide-react"
 import Brand from "../ui/Brand"
+import OutboxNotice from "../system/OutboxNotice"
 import { NavLink } from "react-router-dom"
 
 import Button from "../ui/Button"
@@ -144,8 +145,9 @@ export default function AppShell({ children, onLogout, user }) {
   return (
     <div className="min-h-dvh bg-canvas text-text-primary lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-border bg-peripheral lg:flex">
-        <div className="flex min-h-24 items-center px-5">
+        <div className="flex min-h-24 items-center justify-between px-5">
           <Brand />
+          <OutboxNotice align="left" />
         </div>
         <div className="px-4 py-4">
           <NavigationLinks user={user} />
@@ -157,17 +159,20 @@ export default function AppShell({ children, onLogout, user }) {
 
       <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between border-b border-border bg-peripheral px-4 lg:hidden">
         <Brand compact />
-        <Button
-          ref={menuButtonRef}
-          aria-controls="mobile-navigation"
-          aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Fechar menu" : "Abrir menu"}
-          size="icon"
-          variant="ghost"
-          onClick={() => setMenuOpen((current) => !current)}
-        >
-          <Menu size={20} aria-hidden="true" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <OutboxNotice />
+          <Button
+            ref={menuButtonRef}
+            aria-controls="mobile-navigation"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? "Fechar menu" : "Abrir menu"}
+            size="icon"
+            variant="ghost"
+            onClick={() => setMenuOpen((current) => !current)}
+          >
+            <Menu size={20} aria-hidden="true" />
+          </Button>
+        </div>
       </header>
 
       {menuOpen && (

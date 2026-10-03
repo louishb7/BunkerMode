@@ -12,6 +12,7 @@ import { useFinances } from "../hooks/useFinances"
 import { money } from "../money"
 import FinanceForm from "../components/FinanceForm"
 import SyncLabel from "../../../components/system/SyncLabel"
+import FinanceChart from "../components/FinanceChart"
 
 function monthOffset(value, offset) {
   const [year, month] = value.split("-").map(Number)
@@ -27,104 +28,6 @@ function monthLabel(value) {
   }).format(new Date(Date.UTC(year, month - 1, 1)))
   return label[0].toLocaleUpperCase("pt-BR") + label.slice(1)
 }
-function ResultChart({ points = [], hasMovements = false }) {
-  const hasFlow = points.some((point) => point.receitas_centavos !== undefined)
-  const series = [
-    {
-      key: "resultado_centavos",
-      label: "Resultado",
-      color: "var(--color-text-secondary)",
-      className: "chart-result",
-    },
-    ...(hasFlow
-      ? [
-          {
-            key: "receitas_centavos",
-            label: "Entradas",
-            color: "var(--color-success)",
-            className: "chart-income",
-          },
-          {
-            key: "despesas_centavos",
-            label: "Saídas",
-            color: "var(--color-danger)",
-            className: "chart-expense",
-            dashed: true,
-          },
-        ]
-      : []),
-  ]
-  const values = series.flatMap((line) => points.map((point) => point[line.key] ?? 0))
-  const min = Math.min(0, ...values),
-    max = Math.max(0, ...values)
-  const span = Math.max(1, max - min)
-  const y = (value) => 114 - ((value - min) / span) * 94
-  const path = (key) =>
-    points
-      .map(
-        (point, index) =>
-          `${index ? "L" : "M"}${((index / Math.max(1, points.length - 1)) * 600).toFixed(1)} ${y(point[key] ?? 0).toFixed(1)}`
-      )
-      .join(" ")
-  return (
-    <div className="finance-chart">
-      <div className="finance-chart-heading">
-        <h2>Evolução no mês</h2>
-        <span>Valores acumulados em R$</span>
-      </div>
-      {!hasMovements ? (
-        <p className="empty-copy">Ainda não há entradas ou saídas para mostrar.</p>
-      ) : (
-        <svg
-          role="img"
-          aria-label="Evolução diária de entradas, saídas e resultado do mês"
-          viewBox="0 0 600 130"
-          preserveAspectRatio="none"
-        >
-          <line
-            x1="0"
-            x2="600"
-            y1={y(0)}
-            y2={y(0)}
-            stroke="var(--color-border-strong)"
-            strokeDasharray="4 5"
-          />
-          {series.map((line) => (
-            <path
-              key={line.key}
-              d={path(line.key)}
-              fill="none"
-              stroke={line.color}
-              strokeWidth="2"
-              strokeDasharray={line.dashed ? "6 4" : undefined}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            >
-              <title>{line.label}</title>
-            </path>
-          ))}
-        </svg>
-      )}
-      {hasMovements && (
-        <div className="finance-chart-legend">
-          {series.map((line) => (
-            <span key={line.key} className={line.className}>
-              {line.label}
-            </span>
-          ))}
-        </div>
-      )}
-      {hasMovements && (
-        <div className="finance-chart-ends">
-          <span>Início</span>
-          <span>Fim do mês</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function FinancesPage({ token, user, onUnauthorized }) {
   const todayDate = operationalDateFor(user?.timezone)
   const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`
@@ -206,6 +109,7 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
             <p className={`finance-result ${data.saldo_centavos < 0 ? "text-danger" : ""}`}>
               {money(data.saldo_centavos)}
             </p>
+            <p className="text-sm text-text-secondary">Saldo de todos os movimentos registrados.</p>
             <p className="text-sm text-text-secondary">
               Resultado do mês: {money(data.resultado_centavos)}
             </p>
@@ -220,14 +124,14 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
               </div>
             </dl>
           </section>
-          <ResultChart
-            points={data.serie_diaria}
-            hasMovements={data.receitas_centavos + data.despesas_centavos > 0}
-          />
+          <FinanceChart key={month} points={data.serie_diaria} today={today} />
           <section className="finance-movements" aria-labelledby="finance-movements-title">
             <h2 id="finance-movements-title">Histórico de movimentos</h2>
+            <p className="finance-history-note">
+              Todos os períodos, incluindo ajustes de saldo antigos.
+            </p>
             {!data.lancamentos.length ? (
-              <p className="empty-copy">Nenhum movimento neste mês.</p>
+              <p className="empty-copy">Nenhum movimento registrado.</p>
             ) : (
               <ol className="finance-ledger">
                 {movements.map((entry) => {
@@ -312,7 +216,7 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
       {deleting && (
         <ConfirmDialog
           title="Excluir movimento"
-          message={`O movimento "${deleting.titulo}" será excluído e o resultado será recalculado.`}
+          message={`O movimento "${deleting.titulo}" será excluído e o saldo será recalculado.`}
           confirmLabel="Excluir"
           error={finance.error}
           loading={finance.busy}

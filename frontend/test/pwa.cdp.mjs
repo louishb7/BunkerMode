@@ -71,6 +71,8 @@ async function main() {
   const processed = new Map()
   const forcedStatuses = new Map()
   let lostResponse = false
+  let syncDelayMs = 0
+  let backendFailure = null
   const tasksByOwner = new Map([[1, [task(1, 1)]], [2, [task(2, 2)]]])
   const goalsByOwner = new Map([[1, [{ id: 1, titulo: "Objetivo 1", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Objetivo 2", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]]])
   const trackersByOwner = new Map([[1, [{ id: 1, titulo: "Acompanhamento 1", objetivo_id: 1, ocorrencias: [], updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Acompanhamento 2", objetivo_id: 2, ocorrencias: [], updated_at: new Date().toISOString() }]]])
@@ -84,6 +86,8 @@ async function main() {
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
     if (request.method === "OPTIONS") { response.writeHead(204).end(); return }
     const pathname = new URL(request.url, "http://local").pathname
+    if (backendFailure === "network") { response.destroy(); return }
+    if (backendFailure === 503) { response.writeHead(503).end(JSON.stringify({ message: "Serviço temporariamente indisponível" })); return }
     if (pathname.endsWith("/auth/login") && request.method === "POST") {
       loginAttempts++
       response.setHeader("Content-Type", "application/json")
@@ -116,7 +120,7 @@ async function main() {
       request.on("end", () => {
         const operation = JSON.parse(Buffer.concat(chunks).toString())
         const forced = forcedStatuses.get(operation.payload?.titulo)
-        if (forced) { response.writeHead(forced).end(JSON.stringify({ message: "Falha de teste sem credenciais" })); return }
+        if (forced) { if (forced === 503) backendFailure = 503; response.writeHead(forced).end(JSON.stringify({ message: "Falha de teste sem credenciais" })); return }
         const key = `${id}:${operation.operationId}`
         if (!processed.has(key)) {
           if (operation.domain === "task" && operation.action === "create") {
@@ -132,6 +136,11 @@ async function main() {
                 : null }
             tasksByOwner.get(id).push(created)
             processed.set(key, created)
+          } else if (operation.domain === "task" && operation.action === "update") {
+            const current = tasksByOwner.get(id).find((item) => item.id === operation.target)
+            if (!current) { response.writeHead(404).end(JSON.stringify({ message: "Tarefa ausente" })); return }
+            Object.assign(current, operation.payload, { updated_at: new Date().toISOString() })
+            processed.set(key, current)
           } else if (operation.domain === "task" && operation.action === "complete") {
             const current = tasksByOwner.get(id).find((item) => item.id === operation.target)
             if (!current) { response.writeHead(404).end(JSON.stringify({ message: "Tarefa ausente" })); return }
@@ -176,8 +185,13 @@ async function main() {
         }
         if (operation.payload?.titulo === "Resposta perdida" && !lostResponse) {
           lostResponse = true
+          backendFailure = "network"
           response.destroy()
-        } else response.writeHead(201).end(JSON.stringify(processed.get(key)))
+        } else {
+          const reply = () => response.writeHead(201).end(JSON.stringify(processed.get(key)))
+          if (syncDelayMs) setTimeout(reply, syncDelayMs)
+          else reply()
+        }
       })
       return
     }
@@ -192,7 +206,9 @@ async function main() {
     else if (pathname.endsWith("/acompanhamentos")) response.end(JSON.stringify(trackersByOwner.get(id)))
     else if (pathname.endsWith("/financas")) {
       const month = new URL(request.url, "http://local").searchParams.get("mes") || new Date().toISOString().slice(0, 7)
-      const entries = entriesByOwner.get(id).filter((item) => item.data.slice(0, 7) === month)
+      const history = entriesByOwner.get(id)
+      const entries = history.filter((item) => item.data.slice(0, 7) === month)
+      const balance = history.reduce((sum, item) => sum + (["receita", "ajuste_entrada"].includes(item.tipo) ? 1 : -1) * item.valor_centavos, 0)
       const incoming = entries.filter((item) => item.tipo === "receita").reduce((sum, item) => sum + item.valor_centavos, 0)
       const outgoing = entries.filter((item) => item.tipo === "despesa").reduce((sum, item) => sum + item.valor_centavos, 0)
       const daily = Array.from({ length: new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate() }, (_, index) => {
@@ -201,9 +217,9 @@ async function main() {
         const expenses = entries.filter((item) => item.tipo === 'despesa' && item.data <= day).reduce((sum, item) => sum + item.valor_centavos, 0)
         return { data: day, receitas_centavos: incomes, despesas_centavos: expenses, resultado_centavos: incomes - expenses }
       })
-      response.end(JSON.stringify({ mes: month, moeda: "BRL", saldo_centavos: id * 100 + incoming - outgoing,
+      response.end(JSON.stringify({ mes: month, moeda: "BRL", saldo_centavos: id * 100 + balance,
         resultado_centavos: incoming - outgoing, receitas_centavos: incoming,
-        despesas_centavos: outgoing, serie_diaria: daily, lancamentos: entries }))
+        despesas_centavos: outgoing, serie_diaria: daily, lancamentos: history }))
     } else response.writeHead(404).end(JSON.stringify({ message: "Não encontrado" }))
   })
   await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve))
@@ -299,12 +315,12 @@ async function main() {
     console.log("PWA: snapshots por usuário e domínio OK")
 
     await setConnectivity(false)
-    await visible("Aguardando sincronização")
+    assert.equal(await evaluate("document.querySelector('[data-sync-status]')"), null)
     assert.equal(await evaluate("navigator.onLine"), false)
     for (const path of ["/", "/tarefas", "/tarefas/foco", "/objetivos", "/financas", "/configuracoes"]) {
       await navigate(path)
-      await visible("API indisponível")
-      await visible("Aguardando sincronização")
+      await visible("Bunker")
+      assert.equal(await evaluate("document.querySelector('[data-sync-status]')"), null)
     }
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
@@ -410,7 +426,7 @@ async function main() {
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeReconnect = refreshCount
     await navigate("/tarefas")
-    await visible("API indisponível")
+    await visible("Aguardando sincronização")
     await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh na reconexão")
@@ -431,11 +447,62 @@ async function main() {
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Registrar tarefa')?.click()")
     await until(() => syncCalls >= callsBeforeLostResponse + 1, "primeiro envio da operação")
     await visible("Resposta perdida")
+    await visible("Não foi possível sincronizar · 1 alteração pendente")
+    assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
+    backendFailure = null
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => syncCalls >= callsBeforeLostResponse + 2, "replay da mesma operação")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.length===0)})})()"), "reconciliação do replay")
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Resposta perdida").length, 1)
     console.log("PWA: resposta perdida é repetida com a mesma operação sem duplicar tarefa OK")
+
+    // A/B: observa também o intervalo em que a projeção já mudou e o POST ainda responde.
+    syncDelayMs = 700
+    const assertQuietSync = async () => {
+      assert.equal(await evaluate("document.querySelector('[data-sync-status]')"), null)
+      assert.equal(await evaluate("/Aguardando sincronização|Alteração salva neste dispositivo|alterações? locais|API indisponível|Sincronizando/.test(document.body.innerText)"), false)
+    }
+    await evaluate(`window.syncNoise = []; window.syncObserver = new MutationObserver(() => {
+      if (/Aguardando sincronização|Alteração salva neste dispositivo|alterações? locais|API indisponível/.test(document.body.innerText)) window.syncNoise.push(document.body.innerText)
+    }); window.syncObserver.observe(document.body, {subtree:true, childList:true, characterData:true})`)
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Nova tarefa'))?.click()")
+    await visible("Registrar tarefa")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Criação online silenciosa" })
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent === 'Registrar tarefa')?.click()")
+    await visible("Criação online silenciosa")
+    await assertQuietSync()
+    await until(() => tasksByOwner.get(2).some(t => t.titulo === "Criação online silenciosa"), "criação online enviada")
+    await until(() => evaluate("!document.querySelector('[aria-label=\"Sincronização\"]')"), "criação online reconciliada")
+    await evaluate("document.querySelector('button[aria-label=\"Ações da tarefa: Criação online silenciosa\"]')?.click()")
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.includes('Editar'))?.click()")
+    await visible("Salvar edição")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: " editada" })
+    await evaluate("document.querySelector('[role=dialog] button[type=submit]')?.click()")
+    await visible("Criação online silenciosa editada")
+    await assertQuietSync()
+    await until(() => evaluate("!document.querySelector('[aria-label=\"Sincronização\"]')"), "edição reconciliada")
+    await evaluate("document.querySelector('button[aria-label=\"Concluir: Criação online silenciosa editada\"]')?.click()")
+    await assertQuietSync()
+    await until(() => tasksByOwner.get(2).find(t => t.titulo === "Criação online silenciosa editada")?.status === "CONCLUIDA", "conclusão enviada")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "conclusão reconciliada")
+    assert.deepEqual(await evaluate("window.syncNoise"), [])
+    await evaluate("window.syncObserver.disconnect()")
+    console.log("PWA UX A/B: criação, edição e conclusão online silenciosas durante replay OK")
+
+    // F: persiste uma pendência antes de reabrir online; recuperação sem aviso de offline.
+    const onlineReloadId = crypto.randomUUID()
+    await putOutbox({ ownerId: 2, operationId: onlineReloadId, domain: "task", action: "create",
+      payload: { titulo: "Reload online pendente", prazo: today }, createdAt: new Date().toISOString(), status: "pending" })
+    await navigate("/tarefas")
+    await visible("Reload online pendente")
+    await assertQuietSync()
+    await until(() => outboxStatus(onlineReloadId).then(status => status === null), "reload online reconciliado")
+    await assertQuietSync()
+    syncDelayMs = 0
+    console.log("PWA UX F: reload online recupera outbox sem texto técnico OK")
+
 
     await setConnectivity(false)
     await navigate("/objetivos")
@@ -469,6 +536,9 @@ async function main() {
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar ocorrência')?.click()")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===4)})})()"), "quatro operações dependentes")
     assert.equal(syncCalls, callsBeforeDependencies)
+    assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
+    assert.equal(await evaluate("document.body.innerText.includes('4 alterações locais')"), false)
+    assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Sincronização\"] summary')].every(s => !s.innerText.trim())"), true)
     await navigate("/objetivos")
     await visible("Meta local")
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
@@ -523,7 +593,10 @@ async function main() {
     assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").tipo, "despesa")
     assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").valor_centavos, 100)
     await until(() => evaluate("document.querySelector('.finance-result').textContent.includes('13,34')"), "saldo oficial após entrada e saída")
-    assert.equal(await evaluate("document.querySelector('.finance-chart svg').querySelectorAll('path').length"), 3)
+    assert.equal(await evaluate("document.querySelector('.finance-chart svg').querySelectorAll('path').length"), 1)
+    assert.equal(await evaluate("document.querySelector('.finance-chart-total strong').textContent.replace(/\\s/g, '')"), "R$11,34")
+    assert.equal(await evaluate("document.querySelector('.finance-chart-axis').textContent.includes('R$')"), true)
+    assert.equal(await evaluate("document.querySelectorAll('.finance-chart-details dd').length"), 3)
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true)
     assert.equal(await evaluate("document.querySelector('.finance-toolbar').getBoundingClientRect().bottom <= document.querySelector('.finance-state').getBoundingClientRect().top"), true)
@@ -591,10 +664,10 @@ async function main() {
       createdAt: new Date().toISOString(), status: "pending" })
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(conflictId).then((status) => status === "conflict"), "conflito preservado")
-    await evaluate("document.querySelector('[aria-label=\"Alterações locais\"] summary')?.click()")
+    await evaluate("[...document.querySelectorAll('[aria-label=\"Sincronização\"] summary')].find(s => s.getBoundingClientRect().width > 0)?.click()")
     await visible("Usar versão do servidor")
     forcedStatuses.delete("Conflito simulado")
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Usar versão do servidor')?.click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Usar versão do servidor' && button.getBoundingClientRect().width > 0)?.click()")
     await until(() => outboxStatus(conflictId).then((status) => status === null), "conflito descartado após snapshot")
 
     const validationId = crypto.randomUUID()
@@ -604,7 +677,7 @@ async function main() {
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(validationId).then((status) => status === "failed"), "422 marcado como falha")
     forcedStatuses.delete("Validação simulada")
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Descartar')?.click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Descartar' && button.getBoundingClientRect().width > 0)?.click()")
     await until(() => outboxStatus(validationId).then((status) => status === null), "falha descartada")
 
     const serverErrorId = crypto.randomUUID()
@@ -614,14 +687,18 @@ async function main() {
       payload: { titulo: "Servidor temporário", prazo: today }, createdAt: new Date().toISOString(), status: "pending" })
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => syncCalls > callsBefore503, "503 recebido")
-    assert.equal(await outboxStatus(serverErrorId), "pending")
+    await until(() => outboxStatus(serverErrorId).then(status => status === "pending"), "503 mantém pending")
+    await visible("Não foi possível sincronizar · 1 alteração pendente")
+    assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
     await visible("Servidor temporário")
     assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
     await navigate("/tarefas")
     await visible("Servidor temporário")
     assert.equal(await outboxStatus(serverErrorId), "pending")
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('[role=alert]')].filter(el => el.getBoundingClientRect().width > 0).map(el => el.innerText)"), [], "indisponibilidade deve usar somente a superfície central")
     assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
     forcedStatuses.delete("Servidor temporário")
+    backendFailure = null
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(serverErrorId).then((status) => status === null), "pendência após 503 sincronizada")
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Servidor temporário").length, 1)

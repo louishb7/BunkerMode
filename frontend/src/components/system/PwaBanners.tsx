@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { registerSW } from "virtual:pwa-register"
-import { useApiAvailability } from "../../offline/useApiAvailability"
-import { useOnlineStatus } from "../../offline/useOnlineStatus"
-import { useAuth } from "../../context/AuthContext"
-import OutboxNotice from "./OutboxNotice"
+import { useSyncStatus } from "../../context/SyncStatusContext"
 
 type InstallPrompt = Event & {
   prompt: () => Promise<void>
@@ -29,9 +26,7 @@ function iosSafari() {
 }
 
 export default function PwaBanners() {
-  const availability = useApiAvailability()
-  const online = useOnlineStatus()
-  const auth = useAuth()
+  const sync = useSyncStatus()
   const [installable, setInstallable] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
   const [dismissed, setDismissed] = useState(inviteDismissed)
@@ -62,20 +57,13 @@ export default function PwaBanners() {
   const showInstall = !standalone() && !dismissed && !promptUsed && (installable || iosSafari())
   return (
     <div className="relative z-20 bg-peripheral text-text-primary">
-      <OutboxNotice />
-      {!online && (
-        <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
-          Aguardando sincronização
-        </div>
-      )}
-      {availability === "unavailable" && (
-        <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
-          API indisponível · alterações pessoais serão sincronizadas depois
-        </div>
-      )}
-      {availability !== "unavailable" && auth.sessionMode === "local" && (
-        <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
-          Sessão local · aguardando validação da API
+      {sync.message && (
+        <div
+          className="border-b border-border px-4 py-1.5 text-center text-xs"
+          role="status"
+          data-sync-status={sync.state}
+        >
+          {sync.message}
         </div>
       )}
       {needRefresh && !updateDismissed && (

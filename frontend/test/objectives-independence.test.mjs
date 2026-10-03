@@ -11,6 +11,7 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
   let index = 0
   let effects = []
   let cleanups = []
+  const queued = []
   const react = {
     useState(initial) {
       const slot = index++
@@ -40,6 +41,7 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
   const exports = {}
   vm.runInNewContext(compiled, {
     exports,
+    window: { addEventListener() {}, removeEventListener() {} },
     require(path) {
       if (path === "react") return react
       if (path.endsWith("bunkermodeApi")) return { api }
@@ -51,6 +53,12 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
       if (path.endsWith("overviewCache"))
         return { getOverview: () => ({ all: null, objectives: null }), updateOverview: () => {} }
       if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {} }
+      if (path.endsWith("offline/outbox")) return {
+        enqueueOperation: async (...args) => { queued.push(args); return "local:test" },
+        projectTasks: (items) => items,
+        projectGoals: (items) => items,
+        subscribeOutbox: () => () => {},
+      }
       if (path.endsWith("offline/snapshots")) return {
         readSnapshot: async () => null,
         saveSnapshot: async () => null,
@@ -70,12 +78,12 @@ function loadHook(file, name, api, onUnauthorized = () => false) {
     render(props)
     cleanups = effects.map((effect) => effect?.())
   }
+  render.queued = queued
   return render
 }
 
-test("desativar integração invalida leitura e criação ainda pendentes", async () => {
+test("desativar integração invalida leitura pendente sem perder criação local durável", async () => {
   let finishRead
-  let create
   let reads = 0
   const render = loadHook(
     "../src/features/objectives/hooks/useObjectiveTasks.ts",
@@ -87,10 +95,6 @@ test("desativar integração invalida leitura e criação ainda pendentes", asyn
           finishRead = resolve
         })
       },
-      createTask: () =>
-        new Promise((resolve) => {
-          create = resolve
-        }),
     }
   )
   render.activate({ enabled: true })
@@ -98,8 +102,8 @@ test("desativar integração invalida leitura e criação ainda pendentes", asyn
   const creation = render().createTask({ titulo: "Tarefa vinculada" })
   render.activate({ enabled: false })
   finishRead({ ok: true, data: [] })
-  create({ ok: true })
-  assert.equal(await creation, false)
+  assert.equal(await creation, true)
+  assert.equal(render.queued.length, 1)
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(reads, 1)
   assert.equal(render({ enabled: false }).loading, false)
@@ -125,7 +129,7 @@ test("integração desativada não consulta nem cria tarefas", async () => {
   assert.equal(await render({ enabled: false }).createTask({ titulo: "Tarefa" }), false)
 })
 
-test("Objetivos lista e executa todo CRUD sem consultar Tarefas", async () => {
+test("Objetivos lista e enfileira CRUD sem consultar Tarefas", async () => {
   const calls = []
   const api = {
     listObjetivos: async () => {
@@ -151,17 +155,14 @@ test("Objetivos lista e executa todo CRUD sem consultar Tarefas", async () => {
   const render = loadHook("../src/features/objectives/hooks/useObjectives.ts", "useObjectives", api)
   assert.equal(await render().refresh(), true)
   assert.equal(render().objetivos[0].titulo, "Objetivo independente")
-  for (const method of [
-    "createObjetivo",
-    "updateObjetivo",
-    "updateObjetivoStatus",
-    "reorderObjetivos",
-    "deleteObjetivo",
-  ]) {
-    assert.equal(await render()[method](1, {}), true)
-    assert.equal(calls.at(-2), method)
-    assert.equal(calls.at(-1), "list")
-  }
+  assert.equal(await render().createObjetivo({ titulo: "Novo" }), true)
+  assert.equal(await render().updateObjetivo(1, { titulo: "Editado" }), true)
+  assert.equal(await render().updateObjetivoStatus(1, "pausado"), true)
+  assert.equal(await render().deleteObjetivo(1), true)
+  assert.deepEqual(render.queued.map((entry) => entry[2]), ["create", "update", "status", "delete"])
+  assert.equal(await render().reorderObjetivos([1]), true)
+  assert.equal(calls.at(-2), "reorderObjetivos")
+  assert.equal(calls.at(-1), "list")
 })
 
 test("integração mostra falha local e recupera tarefas agrupadas por objetivo", async () => {
@@ -192,19 +193,11 @@ test("integração mostra falha local e recupera tarefas agrupadas por objetivo"
   assert.equal(render().tasksByObjetivo["2"], undefined)
 })
 
-test("criação vinculada preserva payload e distingue persistência de falha na releitura", async () => {
-  let available = false
-  let received
+test("criação vinculada preserva payload na outbox sem depender de releitura", async () => {
   const render = loadHook(
     "../src/features/objectives/hooks/useObjectiveTasks.ts",
     "useObjectiveTasks",
     {
-      createTask: async (_token, payload) => {
-        received = payload
-        return available
-          ? { ok: true, data: { id: 10 } }
-          : { ok: false, data: { message: "Criação indisponível" } }
-      },
       listTasks: async () => ({ ok: false, data: { message: "Leitura indisponível" } }),
     }
   )
@@ -214,16 +207,14 @@ test("criação vinculada preserva payload e distingue persistência de falha na
     duration_type: "ate_objetivo",
     recurrence_weekdays: [0],
   }
-  assert.equal(await render().createTask(payload), false)
-  assert.equal(render().formStatus.message, "Criação indisponível")
-  available = true
   assert.equal(await render().createTask(payload), true)
-  assert.equal(received, payload)
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(render().error, "Leitura indisponível")
+  assert.equal(render.queued[0][1], "task")
+  assert.equal(render.queued[0][2], "create")
+  assert.deepEqual(render.queued[0][3], payload)
+  assert.equal(render().formStatus.message, "Aguardando sincronização.")
 })
 
-test("respostas 401 da integração acionam a sessão global sem erro local", async () => {
+test("401 de leitura aciona a sessão global; criação durável não chama API diretamente", async () => {
   const unauthorizedResults = []
   const render = loadHook(
     "../src/features/objectives/hooks/useObjectiveTasks.ts",
@@ -240,9 +231,9 @@ test("respostas 401 da integração acionam a sessão global sem erro local", as
 
   assert.equal(await render().refresh(), false)
   assert.equal(render().error, "")
-  assert.equal(await render().createTask({ titulo: "Tarefa vinculada" }), false)
-  assert.equal(render().formStatus.message, "")
-  assert.equal(unauthorizedResults.length, 2)
+  assert.equal(await render().createTask({ titulo: "Tarefa vinculada" }), true)
+  assert.equal(render().formStatus.message, "Aguardando sincronização.")
+  assert.equal(unauthorizedResults.length, 1)
   assert.equal(
     unauthorizedResults.every((result) => result.status === 401),
     true

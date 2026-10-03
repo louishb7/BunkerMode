@@ -97,6 +97,7 @@ model usuarios {
   auth_version       Int                  @default(0)
   password_resets    PasswordReset[]
   persistent_sessions PersistentSession[]
+  offline_operations OfflineOperation[]
   ativo              Boolean              @default(true)
   enabled_modules    String[]              @default(["tasks", "objectives"])
   timezone           String               @default("America/Recife") @db.VarChar(80)
@@ -163,6 +164,18 @@ model PersistentSession {
   user        usuarios  @relation(fields: [userId], references: [usuario_id], onDelete: Cascade)
 
   @@index([userId, revokedAt])
+}
+
+model OfflineOperation {
+  userId      Int
+  operationId String   @db.Uuid
+  requestHash String   @db.Char(64)
+  result      Json
+  createdAt   DateTime @default(now()) @db.Timestamp(6)
+  user        usuarios @relation(fields: [userId], references: [usuario_id], onDelete: Cascade)
+
+  @@id([userId, operationId])
+  @@index([userId, createdAt])
 }
 
 // BRL em centavos inteiros; nenhum cálculo monetário usa ponto flutuante.

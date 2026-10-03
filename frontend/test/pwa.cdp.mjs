@@ -66,6 +66,19 @@ async function main() {
   let domainMutations = 0
   let loginAttempts = 0
   let refreshCount = 0
+  let syncCalls = 0
+  const syncTokens = []
+  const processed = new Map()
+  const forcedStatuses = new Map()
+  let lostResponse = false
+  const tasksByOwner = new Map([[1, [task(1, 1)]], [2, [task(2, 2)]]])
+  const goalsByOwner = new Map([[1, [{ id: 1, titulo: "Objetivo 1", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Objetivo 2", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]]])
+  const trackersByOwner = new Map([[1, [{ id: 1, titulo: "Acompanhamento 1", objetivo_id: 1, ocorrencias: [], updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Acompanhamento 2", objetivo_id: 2, ocorrencias: [], updated_at: new Date().toISOString() }]]])
+  const entriesByOwner = new Map([[1, []], [2, []]])
+  const reservesByOwner = new Map([[1, []], [2, []]])
+  const appliedOrder = []
+  let nextTaskId = 3
+  let nextGoalId = 3, nextTrackerId = 3, nextOccurrenceId = 1, nextEntryId = 1, nextReserveId = 1, nextSeriesId = 1
   const api = createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*")
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
@@ -96,18 +109,105 @@ async function main() {
     const id = token === "two" ? 2 : 1
     if (!["GET", "OPTIONS"].includes(request.method) && !pathname.endsWith("/tarefas/recorrencias/materializar")) domainMutations++
     response.setHeader("Content-Type", "application/json")
+    if (pathname.endsWith("/offline/operations") && request.method === "POST") {
+      syncCalls++
+      syncTokens.push(token)
+      const chunks = []
+      request.on("data", (chunk) => chunks.push(chunk))
+      request.on("end", () => {
+        const operation = JSON.parse(Buffer.concat(chunks).toString())
+        const forced = forcedStatuses.get(operation.payload?.titulo)
+        if (forced) { response.writeHead(forced).end(JSON.stringify({ message: "Falha de teste sem credenciais" })); return }
+        const key = `${id}:${operation.operationId}`
+        if (!processed.has(key)) {
+          if (operation.domain === "task" && operation.action === "create") {
+            if (operation.payload.objetivo_id != null && !goalsByOwner.get(id).some((goal) => goal.id === operation.payload.objetivo_id)) {
+              response.writeHead(400).end(JSON.stringify({ message: "Objetivo inválido" })); return
+            }
+            const created = { ...task(nextTaskId++, id), ...operation.payload, id: nextTaskId - 1,
+              status: "PENDENTE", status_code: "PENDENTE", status_label: "Pendente",
+              updated_at: new Date().toISOString(),
+              recurrence: operation.payload.recurrence_weekdays?.length
+                ? { series_id: nextSeriesId++, weekdays: operation.payload.recurrence_weekdays,
+                    termination_policy: operation.payload.duration_type, end_date: operation.payload.recurrence_end_date ?? null }
+                : null }
+            tasksByOwner.get(id).push(created)
+            processed.set(key, created)
+          } else if (operation.domain === "task" && operation.action === "complete") {
+            const current = tasksByOwner.get(id).find((item) => item.id === operation.target)
+            if (!current) { response.writeHead(404).end(JSON.stringify({ message: "Tarefa ausente" })); return }
+            Object.assign(current, { status: "CONCLUIDA", status_code: "CONCLUIDA", status_label: "Concluída", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            processed.set(key, current)
+          } else if (operation.domain === "goal" && operation.action === "create") {
+            const created = { id: nextGoalId++, usuario_id: id, titulo: operation.payload.titulo, descricao: operation.payload.descricao ?? null,
+              data_alvo: operation.payload.data_alvo ?? null, status: "ativo", order_index: goalsByOwner.get(id).length,
+              created_at: new Date().toISOString(), updated_at: new Date().toISOString(), concluded_at: null }
+            goalsByOwner.get(id).push(created)
+            processed.set(key, created)
+          } else if (operation.domain === "goal" && operation.action === "delete") {
+            const goals = goalsByOwner.get(id)
+            const index = goals.findIndex((goal) => goal.id === operation.target)
+            if (index < 0) { response.writeHead(404).end(JSON.stringify({ message: "Objetivo ausente" })); return }
+            goals.splice(index, 1)
+            for (const item of tasksByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
+            for (const item of trackersByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
+            for (const item of reservesByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
+            processed.set(key, { deleted: true })
+          } else if (operation.domain === "tracker" && operation.action === "create") {
+            if (operation.payload.objetivo_id != null && !goalsByOwner.get(id).some((goal) => goal.id === operation.payload.objetivo_id)) {
+              response.writeHead(400).end(JSON.stringify({ message: "Objetivo inválido" })); return
+            }
+            const created = { id: nextTrackerId++, usuario_id: id, titulo: operation.payload.titulo,
+              descricao: operation.payload.descricao ?? null, objetivo_id: operation.payload.objetivo_id ?? null,
+              created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ocorrencias: [] }
+            trackersByOwner.get(id).push(created)
+            processed.set(key, created)
+          } else if (operation.domain === "occurrence" && operation.action === "create") {
+            const parent = trackersByOwner.get(id).find((item) => item.id === operation.parentId)
+            if (!parent) { response.writeHead(400).end(JSON.stringify({ message: "Acompanhamento inválido" })); return }
+            const created = { id: nextOccurrenceId++, acompanhamento_id: parent.id, occurred_at: new Date().toISOString(), created_at: new Date().toISOString() }
+            parent.ocorrencias.push(created)
+            processed.set(key, created)
+          } else if (operation.domain === "entry" && operation.action === "create") {
+            if (!Number.isSafeInteger(operation.payload.valor_centavos)) { response.writeHead(400).end(JSON.stringify({ message: "Centavos inválidos" })); return }
+            const created = { id: nextEntryId++, usuario_id: id, ...operation.payload }
+            entriesByOwner.get(id).push(created)
+            processed.set(key, created)
+          } else if (operation.domain === "reserve" && operation.action === "create") {
+            if (operation.payload.objetivo_id != null && !goalsByOwner.get(id).some((goal) => goal.id === operation.payload.objetivo_id)) {
+              response.writeHead(400).end(JSON.stringify({ message: "Objetivo inválido" })); return
+            }
+            const created = { id: nextReserveId++, usuario_id: id, ...operation.payload }
+            reservesByOwner.get(id).push(created)
+            processed.set(key, created)
+          } else { response.writeHead(400).end(JSON.stringify({ message: "Operação de teste desconhecida" })); return }
+          appliedOrder.push({ domain: operation.domain, action: operation.action, target: operation.target, parentId: operation.parentId, payload: operation.payload })
+        }
+        if (operation.payload?.titulo === "Resposta perdida" && !lostResponse) {
+          lostResponse = true
+          response.destroy()
+        } else response.writeHead(201).end(JSON.stringify(processed.get(key)))
+      })
+      return
+    }
     if (pathname.endsWith("/auth/session")) response.end(JSON.stringify({ refresh_token: `refresh-${token}` }))
     else if (pathname.endsWith("/auth/logout")) response.end(JSON.stringify({ message: "ok" }))
     else if (pathname.endsWith("/usuarios/me")) response.end(JSON.stringify(user(id)))
-    else if (pathname.endsWith("/orientacao")) response.end(JSON.stringify({ tarefas: [task(id, id)], direcoes: [], financeiro: null, falhas: {} }))
+    else if (pathname.endsWith("/orientacao")) response.end(JSON.stringify({ tarefas: tasksByOwner.get(id).filter((item) => item.status !== "CONCLUIDA").slice(0, 3), direcoes: [], financeiro: null, falhas: {} }))
     else if (pathname.endsWith("/tarefas/recorrencias/materializar")) response.writeHead(204).end()
-    else if (pathname.endsWith("/tarefas/foco")) response.end(JSON.stringify({ tasks: [task(id, id)], daily_tasks: [task(id, id)] }))
-    else if (pathname.endsWith("/tarefas")) response.end(JSON.stringify([task(id, id)]))
-    else if (pathname.endsWith("/objetivos")) response.end(JSON.stringify([{ id, titulo: `Objetivo ${id}`, status: "ativo", order_index: 0 }]))
-    else if (pathname.endsWith("/acompanhamentos")) response.end(JSON.stringify([{ id, titulo: `Acompanhamento ${id}`, objetivo_id: id, ocorrencias: [] }]))
+    else if (pathname.endsWith("/tarefas/foco")) response.end(JSON.stringify({ tasks: tasksByOwner.get(id), daily_tasks: tasksByOwner.get(id) }))
+    else if (pathname.endsWith("/tarefas")) response.end(JSON.stringify(tasksByOwner.get(id)))
+    else if (pathname.endsWith("/objetivos")) response.end(JSON.stringify(goalsByOwner.get(id)))
+    else if (pathname.endsWith("/acompanhamentos")) response.end(JSON.stringify(trackersByOwner.get(id)))
+    else if (pathname.endsWith("/financas/reservas")) response.end(JSON.stringify(reservesByOwner.get(id)))
     else if (pathname.endsWith("/financas")) {
       const month = new URL(request.url, "http://local").searchParams.get("mes") || new Date().toISOString().slice(0, 7)
-      response.end(JSON.stringify({ mes: month, moeda: "BRL", saldo_centavos: id * 100, resultado_centavos: id * 100, receitas_centavos: id * 100, despesas_centavos: 0, serie_diaria: [], lancamentos: [] }))
+      const entries = entriesByOwner.get(id).filter((item) => item.data.slice(0, 7) === month)
+      const incoming = entries.filter((item) => item.tipo === "receita").reduce((sum, item) => sum + item.valor_centavos, 0)
+      const outgoing = entries.filter((item) => item.tipo === "despesa").reduce((sum, item) => sum + item.valor_centavos, 0)
+      response.end(JSON.stringify({ mes: month, moeda: "BRL", saldo_centavos: id * 100 + incoming - outgoing,
+        resultado_centavos: id * 100 + incoming - outgoing, receitas_centavos: id * 100 + incoming,
+        despesas_centavos: outgoing, serie_diaria: [], lancamentos: entries }))
     } else response.writeHead(404).end(JSON.stringify({ message: "Não encontrado" }))
   })
   await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve))
@@ -141,6 +241,15 @@ async function main() {
     const socket = new WebSocket(target.webSocketDebuggerUrl)
     await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }) })
     cdp = new CDP(socket)
+    let confirmDecision = false
+    let dialogCount = 0
+    socket.addEventListener("message", ({ data }) => {
+      const event = JSON.parse(data)
+      if (event.method === "Page.javascriptDialogOpening") {
+        dialogCount++
+        void cdp.send("Page.handleJavaScriptDialog", { accept: confirmDecision })
+      }
+    })
     await cdp.send("Page.enable")
     await cdp.send("Runtime.enable")
     await cdp.send("Network.enable")
@@ -150,13 +259,18 @@ async function main() {
       try { await until(() => evaluate(`document.body.innerText.includes(${JSON.stringify(value)})`), value) }
       catch (error) { throw new Error(`${error.message}; tela: ${await evaluate("document.body.innerText.slice(0, 500)")}`) }
     }
+    const putOutbox = async (operation) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});const tx=db.transaction('outbox','readwrite');tx.objectStore('outbox').put(${JSON.stringify(operation)});await new Promise(ok=>tx.oncomplete=ok);window.dispatchEvent(new CustomEvent('bunkermode-outbox-change',{detail:2}))})()`)
+    const outboxStatus = async (operationId) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').get([2,${JSON.stringify(operationId)}]);r.onsuccess=()=>ok(r.result?.status??null)})})()`)
     await until(() => evaluate("navigator.serviceWorker.ready.then(r => r.active?.state === 'activated')"), "service worker ativo", 30000)
     assert.equal(await evaluate("(async () => { const names = await caches.keys(); const keys = (await Promise.all(names.map(async n => (await caches.open(n)).keys()))).flat().map(r => r.url); return keys.some(x => new URL(x).pathname === '/index.html') && !keys.some(x => x.includes('/api/v2/')); })()"), true)
     console.log("PWA: manifest, service worker e precache estático OK")
 
+    await evaluate("(async()=>{const db=await new Promise((ok,fail)=>{const r=indexedDB.open('bunkermode-offline',1);r.onupgradeneeded=()=>{const s=r.result.createObjectStore('snapshots',{keyPath:['ownerId','key']});s.createIndex('ownerId','ownerId')};r.onsuccess=()=>ok(r.result);r.onerror=()=>fail(r.error)});const tx=db.transaction('snapshots','readwrite');tx.objectStore('snapshots').put({ownerId:99,key:'legacy:test',data:{preservado:true},updatedAt:new Date().toISOString(),schemaVersion:1});await new Promise(ok=>tx.oncomplete=ok);db.close()})()")
     await evaluate(`localStorage.setItem('bunkermode_token','one'); localStorage.setItem('bunkermode_usuario',${JSON.stringify(JSON.stringify(user(1)))})`)
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([99,'legacy:test']);r.onsuccess=()=>ok(db.version===2 && db.objectStoreNames.contains('outbox') && r.result?.data?.preservado===true)})})()"), true)
+    console.log("PWA: upgrade IndexedDB v1→v2 preserva snapshots existentes OK")
     await navigate("/objetivos")
     await visible("Objetivo 1")
     await navigate("/financas")
@@ -198,16 +312,33 @@ async function main() {
     await evaluate("window.dispatchEvent(new Event('online'))")
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await evaluate("window.dispatchEvent(new Event('offline'))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Nova tarefa'))?.click()")
+    await visible("Registrar tarefa")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Pendência privada de A" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar tarefa')?.click()")
+    await visible("Pendência privada de A")
     await evaluate("document.querySelector('button[aria-label=" + JSON.stringify("Sair") + "]')?.click()")
+    await until(() => dialogCount === 1, "confirmação de pendência")
+    assert.equal(await evaluate("location.pathname"), "/tarefas")
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1).length===1)})})()"), true)
+    confirmDecision = true
+    await evaluate("document.querySelector('button[aria-label=" + JSON.stringify("Sair") + "]')?.click()")
+    await until(() => dialogCount === 2, "descarte consciente")
     await until(() => evaluate("location.pathname === '/auth'"), "logout")
     assert.equal(await evaluate("localStorage.getItem('bunkermode_focus:1')"), null)
     const remaining = await evaluate("(async () => { const db = await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1).length)})})()")
     assert.equal(remaining, 0)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1).length===0)})})()"), true)
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
     await evaluate(`localStorage.setItem('bunkermode_token','two'); localStorage.setItem('bunkermode_usuario',${JSON.stringify(JSON.stringify(user(2)))})`)
     await navigate("/tarefas")
     await visible("Tarefa do usuário 2")
     assert.equal(await evaluate("document.body.innerText.includes('Tarefa do usuário 1')"), false)
-    console.log("PWA: logout e troca de usuário OK")
+    console.log("PWA: logout com pendência exige confirmação e isola troca de usuário OK")
 
     const secret = "a".repeat(64)
     await navigate(`/reset-password#token=${secret}`)
@@ -254,9 +385,13 @@ async function main() {
     await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
     await cdp.send("Input.insertText", { text: "Teste offline" })
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Registrar tarefa')?.click()")
-    await visible("Esta ação exige conexão com a API")
+    await visible("Aguardando sincronização")
     assert.equal(domainMutations, mutationsBefore)
-    console.log("PWA: mutation de servidor bloqueada sem requisição offline OK")
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.length===1 && r.result[0].ownerId===2 && r.result[0].domain==='task')})})()"), true)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(!/refresh-two|Bearer |Authorization|bunkermode_token/.test(JSON.stringify(r.result)))})})()"), true)
+    await navigate("/tarefas")
+    await visible("Teste offline")
+    console.log("PWA: tarefa local e outbox persistem após reabertura sem POST offline OK")
 
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeReconnect = refreshCount
@@ -265,10 +400,156 @@ async function main() {
     await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh na reconexão")
+    await until(() => syncCalls === 1, "sync após refresh")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.length===0)})})()"), "outbox vazia")
     assert.equal(await evaluate("location.pathname"), "/tarefas")
     assert.equal(refreshCount - refreshesBeforeReconnect, 1)
+    assert.deepEqual(syncTokens, ["two"])
+    assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Teste offline").length, 1)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length>0)})})()"), true)
     console.log("PWA: access expirado renova na reconexão sem sair da rota OK")
+
+    const callsBeforeLostResponse = syncCalls
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Nova tarefa'))?.click()")
+    await visible("Registrar tarefa")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Resposta perdida" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Registrar tarefa')?.click()")
+    await until(() => syncCalls >= callsBeforeLostResponse + 1, "primeiro envio da operação")
+    await visible("Resposta perdida")
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => syncCalls >= callsBeforeLostResponse + 2, "replay da mesma operação")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.length===0)})})()"), "reconciliação do replay")
+    assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Resposta perdida").length, 1)
+    console.log("PWA: resposta perdida é repetida com a mesma operação sem duplicar tarefa OK")
+
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await navigate("/objetivos")
+    await visible("Novo objetivo")
+    const callsBeforeDependencies = syncCalls
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Novo objetivo')?.click()")
+    await visible("Criar objetivo")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Meta local" })
+    await evaluate("document.querySelector('form button[type=submit]')?.click()")
+    await visible("Meta local")
+    await evaluate("[...document.querySelectorAll('button.objective-rail-item')].find(button => button.textContent.includes('Meta local'))?.click()")
+    await visible("Aguardando sincronização")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Adicionar vínculo'))?.click()")
+    await visible("Criar tarefa")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Criar tarefa')?.click()")
+    await visible("Registrar tarefa")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Tarefa ligada" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar tarefa')?.click()")
+    await visible("Tarefa ligada")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Adicionar vínculo'))?.click()")
+    await evaluate("[...document.querySelectorAll('[role=tab]')].find(button => button.textContent.includes('Acompanhamento'))?.click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Criar acompanhamento'))?.click()")
+    await visible("Adicionar acompanhamento")
+    await evaluate("document.querySelector('[role=dialog] input')?.focus()")
+    await cdp.send("Input.insertText", { text: "Tracker local" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Adicionar acompanhamento')?.click()")
+    await visible("Tracker local")
+    await evaluate("[...document.querySelectorAll('summary')].find(item => item.textContent.includes('Registrar e consultar ocorrências'))?.click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar ocorrência')?.click()")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===4)})})()"), "quatro operações dependentes")
+    assert.equal(syncCalls, callsBeforeDependencies)
+    await navigate("/objetivos")
+    await visible("Meta local")
+    await evaluate("localStorage.setItem('bunkermode_token','expired')")
+    const refreshesBeforeDependencies = refreshCount
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "dependências sincronizadas")
+    assert.equal(refreshCount - refreshesBeforeDependencies, 1)
+    assert.deepEqual(appliedOrder.slice(-4).map((item) => item.domain), ["goal", "task", "tracker", "occurrence"])
+    const linkedGoal = goalsByOwner.get(2).find((item) => item.titulo === "Meta local")
+    assert.equal(tasksByOwner.get(2).find((item) => item.titulo === "Tarefa ligada").objetivo_id, linkedGoal.id)
+    assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").objetivo_id, linkedGoal.id)
+    assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").ocorrencias.length, 1)
+    console.log("PWA: objetivo, tarefa, acompanhamento e ocorrência dependentes sincronizam em ordem após refresh OK")
+
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await navigate("/financas")
+    await visible("Nova reserva")
+    const callsBeforeFinance = syncCalls
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Movimento'))?.click()")
+    await visible("Salvar movimento")
+    await evaluate("[...document.querySelectorAll('[role=radio]')].find(button => button.textContent.includes('Entrada'))?.click()")
+    await evaluate("document.querySelectorAll('[role=dialog] input')[0]?.focus()")
+    await cdp.send("Input.insertText", { text: "12,34" })
+    await evaluate("document.querySelectorAll('[role=dialog] input')[1]?.focus()")
+    await cdp.send("Input.insertText", { text: "Receita local" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Salvar movimento')?.click()")
+    await visible("Receita local")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Nova reserva')?.click()")
+    await visible("Salvar reserva")
+    await evaluate("document.querySelectorAll('[role=dialog] input')[0]?.focus()")
+    await cdp.send("Input.insertText", { text: "Reserva local" })
+    await evaluate("document.querySelectorAll('[role=dialog] input')[1]?.focus()")
+    await cdp.send("Input.insertText", { text: "5,00" })
+    await evaluate("[...document.querySelectorAll('[role=dialog] select option')].find(option => option.textContent === 'Meta local').selected = true; document.querySelector('[role=dialog] select').dispatchEvent(new Event('change',{bubbles:true}))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Salvar reserva')?.click()")
+    await visible("Reserva local")
+    assert.equal(syncCalls, callsBeforeFinance)
+    await navigate("/financas")
+    await visible("Receita local")
+    await visible("Reserva local")
+    await evaluate("localStorage.setItem('bunkermode_token','expired')")
+    const refreshesBeforeFinance = refreshCount
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "finanças sincronizadas")
+    assert.equal(refreshCount - refreshesBeforeFinance, 1)
+    assert.equal(entriesByOwner.get(2).filter((item) => item.titulo === "Receita local").length, 1)
+    assert.equal(reservesByOwner.get(2).filter((item) => item.titulo === "Reserva local").length, 1)
+    assert.equal(reservesByOwner.get(2).find((item) => item.titulo === "Reserva local").objetivo_id, linkedGoal.id)
+    console.log("PWA: lançamento e reserva persistem offline, projetam centavos e sincronizam uma vez OK")
+
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await navigate("/tarefas")
+    await visible("Nova tarefa")
+    const callsBeforeRecurring = syncCalls
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Nova tarefa'))?.click()")
+    await visible("Registrar tarefa")
+    await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
+    await cdp.send("Input.insertText", { text: "Recorrente local" })
+    await evaluate("document.querySelector('select[name=\"repeat_type\"]').value='todos_dias'; document.querySelector('select[name=\"repeat_type\"]').dispatchEvent(new Event('change',{bubbles:true}))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar tarefa')?.click()")
+    await visible("Recorrente local")
+    await navigate("/tarefas")
+    await visible("Recorrente local")
+    assert.equal(syncCalls, callsBeforeRecurring)
+    assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Recorrente local").length, 0)
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "recorrência sincronizada")
+    assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Recorrente local").length, 1)
+    assert.equal(tasksByOwner.get(2).find((item) => item.titulo === "Recorrente local").recurrence.weekdays.length, 7)
+    console.log("PWA: intenção recorrente persiste sem materialização local e sincroniza uma série OK")
+
+    await navigate("/tarefas/foco")
+    await visible("Tarefas de hoje")
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await navigate("/tarefas/foco")
+    await visible("Tarefas de hoje")
+    await evaluate("[...document.querySelectorAll('#focus-task-shortcuts button')].find(button => button.textContent.includes('Tarefa do usuário 2'))?.click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Iniciar bloco')?.click()")
+    await visible("Encerrar bloco")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Encerrar bloco')?.click()")
+    await visible("Concluir tarefa")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Concluir tarefa')?.click()")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.some(x=>x.ownerId===2 && x.domain==='task' && x.action==='complete' && x.target===2))})})()"), "conclusão de foco na outbox")
+    await navigate("/tarefas/foco")
+    await visible("Bloco encerrado")
+    assert.equal(tasksByOwner.get(2).find((item) => item.id === 2).status, "PENDENTE")
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "conclusão de foco sincronizada")
+    assert.equal(tasksByOwner.get(2).find((item) => item.id === 2).status, "CONCLUIDA")
+    assert.equal(appliedOrder.filter((item) => item.domain === "task" && item.action === "complete" && item.target === 2).length, 1)
+    console.log("PWA: Foco mantém bloco local e conclui tarefa uma única vez após reconexão OK")
 
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeReopen = refreshCount
@@ -279,6 +560,60 @@ async function main() {
     assert.equal(refreshCount - refreshesBeforeReopen, 1)
     assert.notEqual(await evaluate("localStorage.getItem('bunkermode_refresh_token')"), credentialBeforeReopen)
     console.log("PWA: reabertura com access expirado restaura rota e sessão OK")
+
+    const conflictId = crypto.randomUUID()
+    forcedStatuses.set("Conflito simulado", 409)
+    await putOutbox({ ownerId: 2, operationId: conflictId, domain: "goal", action: "update",
+      target: 2, payload: { titulo: "Conflito simulado" }, baseUpdatedAt: goalsByOwner.get(2)[0].updated_at,
+      createdAt: new Date().toISOString(), status: "pending" })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => outboxStatus(conflictId).then((status) => status === "conflict"), "conflito preservado")
+    await evaluate("document.querySelector('[aria-label=\"Alterações locais\"] summary')?.click()")
+    await visible("Usar versão do servidor")
+    forcedStatuses.delete("Conflito simulado")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Usar versão do servidor')?.click()")
+    await until(() => outboxStatus(conflictId).then((status) => status === null), "conflito descartado após snapshot")
+
+    const validationId = crypto.randomUUID()
+    forcedStatuses.set("Validação simulada", 422)
+    await putOutbox({ ownerId: 2, operationId: validationId, domain: "task", action: "create",
+      payload: { titulo: "Validação simulada" }, createdAt: new Date().toISOString(), status: "pending" })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => outboxStatus(validationId).then((status) => status === "failed"), "422 marcado como falha")
+    forcedStatuses.delete("Validação simulada")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Descartar')?.click()")
+    await until(() => outboxStatus(validationId).then((status) => status === null), "falha descartada")
+
+    const serverErrorId = crypto.randomUUID()
+    const callsBefore503 = syncCalls
+    forcedStatuses.set("Servidor temporário", 503)
+    await putOutbox({ ownerId: 2, operationId: serverErrorId, domain: "task", action: "create",
+      payload: { titulo: "Servidor temporário" }, createdAt: new Date().toISOString(), status: "pending" })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => syncCalls > callsBefore503, "503 recebido")
+    assert.equal(await outboxStatus(serverErrorId), "pending")
+    forcedStatuses.delete("Servidor temporário")
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => outboxStatus(serverErrorId).then((status) => status === null), "pendência após 503 sincronizada")
+    assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Servidor temporário").length, 1)
+    console.log("PWA: 409 preserva conflito, 422 fica failed e 5xx mantém pending até nova oportunidade OK")
+
+    await cdp.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
+    await evaluate("window.dispatchEvent(new Event('offline'))")
+    const deleteGoalId = crypto.randomUUID()
+    await putOutbox({ ownerId: 2, operationId: deleteGoalId, domain: "goal", action: "delete",
+      target: 2, payload: {}, baseUpdatedAt: goalsByOwner.get(2).find((goal) => goal.id === 2).updated_at,
+      createdAt: new Date().toISOString(), status: "pending" })
+    await navigate("/objetivos")
+    await visible("Objetivos")
+    assert.equal(await evaluate("document.body.innerText.includes('Objetivo 2')"), false)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([2,'objectives']);r.onsuccess=()=>ok(r.result?.data?.some(x=>x.id===2))})})()"), true)
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => outboxStatus(deleteGoalId).then((status) => status === null), "exclusão de objetivo sincronizada")
+    assert.equal(goalsByOwner.get(2).some((goal) => goal.id === 2), false)
+    assert.equal(trackersByOwner.get(2).find((item) => item.id === 2).objetivo_id, null)
+    console.log("PWA: exclusão de objetivo mantém snapshot oficial até sync e desvincula dependentes OK")
 
     await evaluate("localStorage.setItem('bunkermode_refresh_token','revoked'); localStorage.setItem('bunkermode_token','expired')")
     await navigate("/tarefas")

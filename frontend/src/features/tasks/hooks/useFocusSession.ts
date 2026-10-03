@@ -41,6 +41,15 @@ export function useFocusSession(userId: number | string) {
   }
 
   useEffect(() => {
+    const resolved = (event: Event) => {
+      if ((event as CustomEvent<number>).detail === userId)
+        setSession(readFocusSession(window.localStorage, userId))
+    }
+    window.addEventListener("bunkermode-focus-resolved", resolved)
+    return () => window.removeEventListener("bunkermode-focus-resolved", resolved)
+  }, [userId])
+
+  useEffect(() => {
     function updateClock() {
       setNow(Date.now())
     }

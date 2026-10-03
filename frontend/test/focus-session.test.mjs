@@ -275,18 +275,16 @@ test("tarefa removida, concluída ou sem permissão mantém atividade e omite co
   }
 })
 
-test("conclusão explícita integra API, cache e releitura; 401 chega ao handler global", async () => {
+test("conclusão no Foco não envia API antes de persistir na outbox", async () => {
   const original = { ...api }
   const container = document.createElement("div")
   document.body.append(container)
   let root
   try {
-    for (const status of [200, 401]) {
       storage.clear()
       clearOverview()
       seed({ ...model.newFocusBlock({ activityText: "Contexto", taskId: 7 }, 45), phase: "ended" })
       const calls = []
-      let completed = false
       let unauthorized = 0
       const onUnauthorized = (result) => {
         if (result.status === 401) {
@@ -303,14 +301,10 @@ test("conclusão explícita integra API, cache e releitura; 401 chega ao handler
         calls.push("read")
         return {
           ok: true,
-          data: { daily_tasks: [{ ...task, status_code: completed ? "CONCLUIDA" : "PENDENTE" }] },
+          data: { daily_tasks: [{ ...task, status_code: "PENDENTE" }] },
         }
       }
-      api.completeTask = async (token, id) => {
-        calls.push(`complete:${token}:${id}`)
-        completed = status === 200
-        return { ok: completed, status, data: { ...task, status_code: "CONCLUIDA" } }
-      }
+      api.completeTask = async () => { throw Error("Foco não deve chamar API diretamente") }
       function Harness() {
         const board = useTaskBoard({
           authenticated: true,
@@ -333,18 +327,12 @@ test("conclusão explícita integra API, cache e releitura; 401 chega ao handler
           .find((el) => el.textContent === "Concluir tarefa")
           .click()
       )
-      assert.equal(unauthorized, status === 401 ? 1 : 0)
-      assert.deepEqual(
-        calls,
-        status === 200
-          ? ["complete:focus-test:7", "materialize", "read"]
-          : ["complete:focus-test:7"]
-      )
-      if (status === 200) assert.equal(getOverview(1).daily[0].status_code, "CONCLUIDA")
+      assert.equal(unauthorized, 0)
+      assert.deepEqual(calls, [])
+      assert.match(container.textContent, /Armazenamento local indisponível/)
       assert.match(container.textContent, /Contexto/)
       await act(async () => root.unmount())
       root = null
-    }
   } finally {
     if (root) await act(async () => root.unmount())
     container.remove()

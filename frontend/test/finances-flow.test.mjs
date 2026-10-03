@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { after, test } from "node:test"
+import { after, beforeEach, test } from "node:test"
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
@@ -26,6 +26,7 @@ const [
   { summarizeObjective },
   { default: Page },
   { default: Home },
+  { setApiAvailability },
 ] = await Promise.all([
   load("features/finances/hooks/useFinances.ts"),
   load("services/bunkermodeApi.ts"),
@@ -33,8 +34,11 @@ const [
   load("features/objectives/objectiveSummary.ts"),
   load("features/finances/pages/FinancesPage.tsx"),
   load("features/home/pages/HomePage.tsx"),
+  load("offline/apiAvailability.ts"),
 ])
 after(() => vite.close())
+api.listReserves = async () => ({ ok: true, data: [] })
+beforeEach(() => setApiAvailability("available"))
 const empty = () => ({
   mes: "2026-09",
   moeda: "BRL",
@@ -123,7 +127,7 @@ test("Finanças desativado não consulta API; mudança de token ignora dados ant
     Object.assign(api, original)
   }
 })
-test("mutação espera releitura e não aplica resultado otimista; CRUD chama contratos próprios", async () => {
+test("edição oficial espera releitura e CRUD financeiro online usa contratos próprios", async () => {
   const original = { ...api }
   let current
   let data = empty()
@@ -163,7 +167,7 @@ test("mutação espera releitura e não aplica resultado otimista; CRUD chama co
   try {
     let pending
     await act(async () => {
-      pending = current.saveEntry({ valor_centavos: 123 })
+      pending = current.saveEntry({ valor_centavos: 123 }, 1)
     })
     assert.equal(current.data.saldo_centavos, 0)
     assert.equal(current.busy, true)
@@ -185,7 +189,7 @@ test("mutação espera releitura e não aplica resultado otimista; CRUD chama co
     Object.assign(api, original)
   }
 })
-test("erro após persistência não convida a duplicar lançamento; snapshot permanece e 401 é global", async () => {
+test("erro após edição oficial preserva snapshot e 401 é global", async () => {
   const original = { ...api }
   let current
   let fail = false
@@ -208,7 +212,7 @@ test("erro após persistência não convida a duplicar lançamento; snapshot per
   }
   const view = await mount(Probe, {})
   try {
-    await act(async () => assert.equal(await current.saveEntry({}), true))
+    await act(async () => assert.equal(await current.saveEntry({}, 1), true))
     assert.equal(current.data.saldo_centavos, 0)
     assert.match(current.error, /Consulta indisponível/)
     api.deleteReserve = async () => ({ ok: false, status: 401 })
@@ -232,7 +236,7 @@ test("página financeira funciona sem Objetivos e tem formulários operáveis", 
   })
   try {
     assert.match(view.container.textContent, /Resultado do mês|Nenhum movimento/)
-    assert.doesNotMatch(view.container.textContent, /Reserva|Livre após reservas/)
+    assert.match(view.container.textContent, /Reservas|Livre/)
     await act(async () =>
       [...view.container.querySelectorAll("button")]
         .find((b) => b.textContent.trim() === "Movimento")
@@ -262,7 +266,7 @@ test("Home consulta somente orientação e preserva direções", async () => {
       data: {
         tarefas: [],
         direcoes: [
-          { id: 1, titulo: "Direção independente", tasks: [], trackers: [], reserves: [] },
+          { id: 1, titulo: "Direção independente", status: "ativo", tasks: [], trackers: [], reserves: [] },
         ],
         financeiro: null,
       },

@@ -74,10 +74,8 @@ async function mount(props = {}) {
     },
   }
 }
-test("Home espera confirmação e releitura; não replica concluídas nem descrição", async () => {
+test("Home não envia conclusão à API antes da gravação local", async () => {
   const original = { ...api }
-  let finish
-  let done = false
   const calls = []
   api.materializeTaskRecurrences = async () => {
     calls.push("prepare")
@@ -85,15 +83,9 @@ test("Home espera confirmação e releitura; não replica concluídas nem descri
   }
   api.getOrientation = async () => {
     calls.push("read")
-    return { ok: true, data: { ...snapshot(), tarefas: done ? [] : [task] } }
+    return { ok: true, data: snapshot() }
   }
-  api.completeTask = () =>
-    new Promise((resolve) => {
-      finish = () => {
-        done = true
-        resolve({ ok: true, data: { ...task, status: "CONCLUIDA" } })
-      }
-    })
+  api.completeTask = () => { throw Error("Conclusão deve usar a outbox") }
   const view = await mount()
   try {
     assert.deepEqual(calls, ["read"])
@@ -101,20 +93,19 @@ test("Home espera confirmação e releitura; não replica concluídas nem descri
     await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
     assert.match(view.container.textContent, /Ler/)
     assert.equal(view.container.querySelector(".line-through"), null)
-    await act(async () => finish())
-    assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
-    assert.deepEqual(calls, ["read", "read"])
+    assert.match(view.container.textContent, /Armazenamento local indisponível/)
+    assert.deepEqual(calls, ["read"])
   } finally {
     await view.close()
     Object.assign(api, original)
   }
 })
-test("falha de conclusão preserva snapshot e 401 é global", async () => {
+test("falha de armazenamento local preserva snapshot sem falso 401", async () => {
   const original = { ...api }
   let unauthorized = 0
   api.materializeTaskRecurrences = async () => ({ ok: true })
   api.getOrientation = async () => ({ ok: true, data: snapshot() })
-  api.completeTask = async () => ({ ok: false, status: 503, data: { message: "Falha ao salvar" } })
+  api.completeTask = async () => { throw Error("Conclusão deve usar a outbox") }
   const view = await mount({
     onUnauthorized: (r) => {
       if (r.status === 401) unauthorized++
@@ -123,10 +114,8 @@ test("falha de conclusão preserva snapshot e 401 é global", async () => {
   })
   try {
     await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
-    assert.match(view.container.textContent, /Ler|Falha ao salvar/)
-    api.completeTask = async () => ({ ok: false, status: 401 })
-    await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
-    assert.equal(unauthorized, 1)
+    assert.match(view.container.textContent, /Ler|Armazenamento local indisponível/)
+    assert.equal(unauthorized, 0)
   } finally {
     await view.close()
     Object.assign(api, original)

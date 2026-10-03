@@ -7,6 +7,7 @@ import { GoalsModule } from "./goals/goals.module";
 import { HealthController } from "./health.controller";
 import { TasksModule } from "./tasks/tasks.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { OfflineModule } from "./offline/offline.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     GoalsModule,
     TasksModule,
     PrismaModule,
+    OfflineModule,
   ],
   controllers: [HealthController],
 })

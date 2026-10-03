@@ -6,6 +6,8 @@ import { api } from "../../../services/bunkermodeApi"
 import { getOverview, updateOverview } from "../../../state/overviewCache"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
 import { isObjectiveList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
+import type { OutboxOperation } from "../../../offline/snapshots"
+import { enqueueOperation, projectGoals, subscribeOutbox } from "../../../offline/outbox"
 
 function sortObjetivosByOrder(objetivos = []) {
   return [...objetivos].sort((left, right) => {
@@ -16,6 +18,23 @@ function sortObjetivosByOrder(objetivos = []) {
 
 export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }) {
   const [objetivos, setObjetivos] = useState(() => getOverview(ownerId).objectives ?? [])
+  const [operations, setOperations] = useState<OutboxOperation[]>([])
+  const projectedObjectives = projectGoals(objetivos, operations)
+  useEffect(() => (ownerId ? subscribeOutbox(ownerId, setOperations) : undefined), [ownerId])
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
+      if (detail?.ownerId !== ownerId || detail.key !== "objectives") return
+      void readSnapshot(ownerId, "objectives", isObjectiveList).then((entry) => {
+        if (entry) {
+          setObjetivos(entry.data)
+          updateOverview(ownerId, { objectives: entry.data })
+        }
+      })
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [ownerId])
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
@@ -137,43 +156,46 @@ export function useObjectives({ onUnauthorized, token, ownerId, enabled = true }
     return true
   }
 
+  async function queue(
+    action: string,
+    payload: Record<string, unknown> = {},
+    id?: number | string
+  ) {
+    try {
+      const item = projectedObjectives.find((goal) => goal.id === id)
+      await enqueueOperation(ownerId, "goal", action, payload, id, item?.updated_at)
+      setStatus({ type: "success", message: "Aguardando sincronização." })
+      return true
+    } catch (error) {
+      setStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Não foi possível salvar localmente.",
+      })
+      return false
+    }
+  }
+
   return {
     lastUpdated,
     loading,
     mutating,
-    objetivos,
+    objetivos: projectedObjectives,
     refresh: loadObjectives,
     setStatus,
     status,
-    createObjetivo: (payload) =>
-      mutate(
-        () => api.createObjetivo(token, payload),
-        "Objetivo registrado.",
-        "Não foi possível registrar o objetivo."
-      ),
-    deleteObjetivo: (objetivoId) =>
-      mutate(
-        () => api.deleteObjetivo(token, objetivoId),
-        "Objetivo removido.",
-        "Não foi possível remover o objetivo."
-      ),
+    createObjetivo: (payload) => queue("create", payload),
+    deleteObjetivo: (objetivoId) => queue("delete", {}, objetivoId),
     reorderObjetivos: (objetivoIds) =>
-      mutate(
-        () => api.reorderObjetivos(token, { objetivo_ids: objetivoIds }),
-        "Organização dos objetivos atualizada.",
-        "Não foi possível reordenar os objetivos."
-      ),
-    updateObjetivo: (objetivoId, payload) =>
-      mutate(
-        () => api.updateObjetivo(token, objetivoId, payload),
-        "Objetivo atualizado.",
-        "Não foi possível atualizar o objetivo."
-      ),
+      getApiAvailability() === "unavailable" || objetivoIds.some((id) => typeof id !== "number")
+        ? (setStatus({ type: "error", message: "Organização exige conexão com a API." }),
+          Promise.resolve(false))
+        : mutate(
+            () => api.reorderObjetivos(token, { objetivo_ids: objetivoIds }),
+            "Organização dos objetivos atualizada.",
+            "Não foi possível reordenar os objetivos."
+          ),
+    updateObjetivo: (objetivoId, payload) => queue("update", payload, objetivoId),
     updateObjetivoStatus: (objetivoId, objetivoStatus) =>
-      mutate(
-        () => api.updateObjetivoStatus(token, objetivoId, { status: objetivoStatus }),
-        "Status atualizado.",
-        "Não foi possível atualizar o status."
-      ),
+      queue("status", { status: objetivoStatus }, objetivoId),
   }
 }

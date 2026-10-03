@@ -7,18 +7,39 @@ import { getOverview, updateOverview } from "../../../state/overviewCache"
 import type { Tracker, TrackerOccurrence } from "../../../types/trackerContract"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
 import { isTrackerList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
+import type { OutboxOperation } from "../../../offline/snapshots"
+import { enqueueOperation, projectTrackers, subscribeOutbox } from "../../../offline/outbox"
 
 export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) {
   const initial = getOverview(ownerId).trackers
   const [trackers, setTrackers] = useState<Tracker[]>(initial ?? [])
+  const [operations, setOperations] = useState<OutboxOperation[]>([])
+  const projectedTrackers = useMemo(
+    () => projectTrackers(trackers, operations),
+    [trackers, operations]
+  )
+  useEffect(() => (ownerId ? subscribeOutbox(ownerId, setOperations) : undefined), [ownerId])
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
+      if (detail?.ownerId !== ownerId || detail.key !== "trackers") return
+      void readSnapshot(ownerId, "trackers", isTrackerList).then((entry) => {
+        if (entry) {
+          setTrackers(entry.data as Tracker[])
+          updateOverview(ownerId, { trackers: entry.data as Tracker[] })
+        }
+      })
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [ownerId])
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(initial !== null)
   const [loading, setLoading] = useState(initial === null)
-  const [busyId, setBusyId] = useState<number | null>(null)
+  const [busyId] = useState<number | null>(null)
   const [status, setStatus] = useState(emptyStatus)
   const [error, setError] = useState("")
   const requestId = useRef(0)
-  const busyRef = useRef(false)
 
   const refresh = useCallback(async () => {
     if (!token || !enabled) return false
@@ -86,55 +107,46 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
 
   const byObjective = useMemo(() => {
     const grouped: Record<string, Tracker[]> = {}
-    for (const tracker of trackers) {
+    for (const tracker of projectedTrackers) {
       const key = String(tracker.objetivo_id)
       grouped[key] ??= []
       grouped[key].push(tracker)
     }
     return grouped
-  }, [trackers])
+  }, [projectedTrackers])
 
-  async function mutate(action, id: number | null = null) {
-    if (busyRef.current) return false
-    busyRef.current = true
-    setBusyId(id)
-    const currentRequest = ++requestId.current
-    const result = await action()
-    if (currentRequest !== requestId.current) return false
-    busyRef.current = false
-    setBusyId(null)
-    if (onUnauthorized?.(result)) return false
-    if (!result.ok) {
+  async function queue(
+    domain: "tracker" | "occurrence",
+    action: string,
+    payload: Record<string, unknown> = {},
+    target?: number | string,
+    version?: string,
+    parentId?: number | string
+  ) {
+    try {
+      await enqueueOperation(ownerId, domain, action, payload, target, version, parentId)
+      setStatus({ type: "success", message: "Aguardando sincronização." })
+      return true
+    } catch (error) {
       setStatus({
         type: "error",
-        message: getErrorMessage(result, "Não foi possível salvar o acompanhamento."),
+        message: error instanceof Error ? error.message : "Não foi possível salvar localmente.",
       })
       return false
     }
-    const reloaded = await refresh()
-    if (!reloaded && requestId.current === currentRequest + 1)
-      setStatus({
-        type: "error",
-        message: "Alteração salva. Não foi possível atualizar os acompanhamentos.",
-      })
-    return requestId.current === currentRequest + 1
   }
-  const createTracker = (payload) => mutate(() => api.createTracker(token, payload))
+  const createTracker = (payload) => queue("tracker", "create", payload)
   const updateTracker = (tracker: Tracker, payload) =>
-    mutate(() => api.updateTracker(token, tracker.id, payload), tracker.id)
+    queue("tracker", "update", payload, tracker.id, tracker.updated_at)
   const deleteTracker = (tracker: Tracker) =>
-    mutate(() => api.deleteTracker(token, tracker.id), tracker.id)
+    queue("tracker", "delete", {}, tracker.id, tracker.updated_at)
   const recordOccurrence = (tracker: Tracker) =>
-    mutate(() => api.recordTrackerOccurrence(token, tracker.id), tracker.id)
+    queue("occurrence", "create", {}, undefined, undefined, tracker.id)
   const deleteOccurrence = (tracker: Tracker, occurrence: TrackerOccurrence) =>
-    mutate(() => api.deleteTrackerOccurrence(token, tracker.id, occurrence.id), tracker.id)
-  function removeForObjective() {
-    void refresh()
-  }
-
+    queue("occurrence", "delete", {}, occurrence.id, undefined, tracker.id)
   return {
     lastUpdated,
-    trackers,
+    trackers: projectedTrackers,
     byObjective,
     loaded,
     loading,
@@ -147,6 +159,5 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
     deleteTracker,
     recordOccurrence,
     deleteOccurrence,
-    removeForObjective,
   }
 }

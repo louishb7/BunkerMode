@@ -13,6 +13,9 @@ import ResetPasswordScreen from "../features/auth/components/ResetPasswordScreen
 import HomePage from "../features/home/pages/HomePage"
 import { getEnabledModules } from "../modules/moduleCatalog"
 import { APP_ROUTES } from "../routes/routeConstants"
+import { listOutbox } from "../offline/snapshots"
+import { syncOutbox } from "../offline/outbox"
+import { getApiAvailability } from "../offline/apiAvailability"
 
 const FinancesPage = lazy(() => import("../features/finances/pages/FinancesPage"))
 const ObjectivesPage = lazy(() => import("../features/objectives/pages/ObjectivesPage"))
@@ -224,6 +227,17 @@ function useLogout() {
   const auth = useAuth()
 
   return async () => {
+    if (auth.user?.id) {
+      if (getApiAvailability() !== "unavailable" && navigator.onLine !== false)
+        await syncOutbox(auth.user.id)
+      if (
+        (await listOutbox(auth.user.id)).length > 0 &&
+        !window.confirm(
+          "Existem alterações deste dispositivo que ainda não foram sincronizadas. Sair agora removerá essas alterações locais."
+        )
+      )
+        return
+    }
     await auth.clearSession(true)
     navigate(APP_ROUTES.AUTH, { replace: true })
   }

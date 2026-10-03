@@ -5,6 +5,7 @@ import { operationalDateFor, normalizeTaskDate } from "../../calendar/calendarUt
 import Badge from "../../../components/ui/Badge"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
 import { isCompleted, isNotPerformed } from "../../../utils/taskStatus"
+import SyncLabel from "../../../components/system/SyncLabel"
 
 export default function TaskCard({
   completing = false,
@@ -27,8 +28,8 @@ export default function TaskCard({
   const busy = completing || pinning || reopening
   const focus = variant === "focus"
   const compactCompleted = !focus && completed
-  const inlineRecurrence = !focus && task.recurrence
-  const weekdays = task.recurrence?.weekdays || []
+  const inlineRecurrence = !focus && (task.recurrence || task.recurringIntent)
+  const weekdays = task.recurrence?.weekdays || task.recurringIntent?.weekdays || []
   const recurrenceLabel =
     weekdays.length === 7
       ? "Todos os dias"
@@ -123,6 +124,7 @@ export default function TaskCard({
               )}
               {title}
             </h3>
+            <SyncLabel status={task.syncStatus} />
             {inlineRecurrence && compactCompleted && (
               <span
                 className="inline-flex items-center gap-1 text-xs text-text-muted"

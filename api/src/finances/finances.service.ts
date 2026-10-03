@@ -337,6 +337,12 @@ export class FinancesService {
           });
     });
   }
+  listReserves(user: UserRecord) {
+    return this.prisma.reservas_financeiras.findMany({
+      where: { usuario_id: user.usuario_id },
+      orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    });
+  }
   deleteReserve(user: UserRecord, id: number) {
     return this.write(user, async (tx) => {
       const deleted = await tx.reservas_financeiras.deleteMany({

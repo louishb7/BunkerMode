@@ -69,7 +69,7 @@ function authHarness(api, stored = {}) {
     ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText,
     {
       exports,
-      window: { localStorage, sessionStorage },
+      window: { localStorage, sessionStorage, addEventListener() {}, removeEventListener() {} },
       require(path) {
         if (path === "react") return react
         if (path.endsWith("authValidation")) return validationExports
@@ -80,12 +80,13 @@ function authHarness(api, stored = {}) {
         if (path.endsWith("offline/snapshots")) return { allowUserData: () => {}, clearUserData: async (id) => { clearedOwners.push(id) } }
         if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {}, subscribeApiRetry: (listener) => { retryListener = listener; return () => { retryListener = undefined } }, subscribeApiSuccess: () => () => {} }
         if (path.endsWith("focusSession")) return { focusStorageKey: (id) => `focus:${id}`, durationStorageKey: (id) => `duration:${id}` }
+        if (path.endsWith("offline/outbox")) return { activateOutbox: () => {}, syncOutbox: async () => {} }
         if (path.endsWith("/session")) {
-          return { TOKEN_KEY: "bunkermode_token", USER_KEY: "bunkermode_usuario" }
+          return { TOKEN_KEY: "bunkermode_token", USER_KEY: "bunkermode_usuario", REFRESH_KEY: "bunkermode_refresh_token" }
         }
         if (path.endsWith("uiState")) return { emptyStatus: { type: "", message: "" } }
         if (path.endsWith("httpClient")) {
-          return { getErrorMessage: (result, fallback) => result.data?.message || fallback }
+          return { getErrorMessage: (result, fallback) => result.data?.message || fallback, hasRefreshSession: () => false, ensurePersistentSession: async () => {}, revokePersistentSession: async () => {} }
         }
         throw new Error(path)
       },
@@ -103,7 +104,7 @@ function authHarness(api, stored = {}) {
     render,
     reconnect() {
       render()
-      effects[1]?.()
+      effects.at(-1)?.()
       retryListener?.()
     },
     restore() {

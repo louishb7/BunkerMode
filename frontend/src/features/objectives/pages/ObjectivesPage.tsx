@@ -18,7 +18,6 @@ import { useObjectives } from "../hooks/useObjectives"
 import { useObjectiveTasks } from "../hooks/useObjectiveTasks"
 import { useTrackers } from "../hooks/useTrackers"
 import TrackerForm from "../components/TrackerForm"
-import { removeObjectiveFromOverview } from "../../../state/overviewCache"
 
 export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const objectives = useObjectives({ onUnauthorized, token, ownerId: user.id })
@@ -306,9 +305,6 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           onConfirm={async () => {
             const removed = await objectives.deleteObjetivo(deleteTarget.id)
             if (removed) {
-              objectiveTasks.detachObjective(deleteTarget.id)
-              trackers.removeForObjective()
-              removeObjectiveFromOverview(user.id, deleteTarget.id)
               setDeleteTarget(null)
             }
           }}

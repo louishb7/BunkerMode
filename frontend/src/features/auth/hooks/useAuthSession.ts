@@ -21,6 +21,7 @@ import {
   subscribeApiSuccess,
 } from "../../../offline/apiAvailability"
 import { focusStorageKey, durationStorageKey } from "../../tasks/focusSession"
+import { activateOutbox, syncOutbox } from "../../../offline/outbox"
 
 const persistentStore = window.localStorage
 const sessionStore = window.sessionStorage
@@ -119,6 +120,7 @@ export function useAuthSession() {
       sessionRequestId.current += 1
       const ownerId = user?.id ?? readStoredUser()?.id
       const cleanup = ownerId ? clearUserData(ownerId) : Promise.resolve()
+      activateOutbox(null)
       if (ownerId) {
         persistentStore.removeItem(focusStorageKey(ownerId))
         persistentStore.removeItem(durationStorageKey(ownerId))
@@ -190,6 +192,35 @@ export function useAuthSession() {
     },
     [handleUnauthorized, persistUser]
   )
+
+  useEffect(() => {
+    if (!authenticated || !user?.id || sessionMode !== "online") {
+      activateOutbox(null)
+      return
+    }
+    activateOutbox(user.id)
+    const onAvailable = () => {
+      if (getApiAvailability() === "available") void syncOutbox(user.id)
+    }
+    const stop = subscribeApiAvailability(onAvailable)
+    const stopRetry = subscribeApiRetry(() => {
+      void api.getCurrentUser(persistentStore.getItem(TOKEN_KEY)).then((result) => {
+        if (result.status === 401) clearSession()
+        else if (result.ok) void syncOutbox(user.id)
+      })
+    })
+    return () => {
+      stop()
+      stopRetry()
+      activateOutbox(null)
+    }
+  }, [authenticated, user?.id, sessionMode, clearSession])
+
+  useEffect(() => {
+    const onInvalid = () => clearSession()
+    window.addEventListener("bunkermode-auth-invalid", onInvalid)
+    return () => window.removeEventListener("bunkermode-auth-invalid", onInvalid)
+  }, [clearSession])
 
   useEffect(() => {
     const updateToken = () => {

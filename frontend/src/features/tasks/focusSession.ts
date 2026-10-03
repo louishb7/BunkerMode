@@ -2,7 +2,7 @@ export const FOCUS_DURATIONS = [25, 45, 60, 90] as const
 export type FocusDuration = (typeof FOCUS_DURATIONS)[number]
 export type FocusSession = {
   activityText: string
-  taskId?: number
+  taskId?: number | string
   taskTitle?: string
   phase: "active" | "ended" | "break" | "break-ended"
   startedAt: number
@@ -69,7 +69,9 @@ export function readFocusSession(
       value.endsAt <= 8640000000000000 &&
       value.endsAt - value.startedAt ===
         (["break", "break-ended"].includes(value.phase) ? 5 : value.durationMinutes) * 60000 &&
-      (value.taskId === undefined || (Number.isSafeInteger(value.taskId) && value.taskId > 0)) &&
+      (value.taskId === undefined ||
+        (Number.isSafeInteger(value.taskId) && value.taskId > 0) ||
+        (typeof value.taskId === "string" && /^local:[0-9a-f-]{36}$/i.test(value.taskId))) &&
       (value.taskTitle === undefined || typeof value.taskTitle === "string") &&
       (value.endedManually === undefined || typeof value.endedManually === "boolean")
     if (valid) return resolveFocusTime(value, now)

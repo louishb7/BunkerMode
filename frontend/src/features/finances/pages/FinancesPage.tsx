@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import Button from "../../../components/ui/Button"
 import PageHeader from "../../../components/ui/PageHeader"
@@ -11,6 +11,10 @@ import { operationalDateFor } from "../../calendar/calendarUtils"
 import { useFinances } from "../hooks/useFinances"
 import { money } from "../money"
 import FinanceForm from "../components/FinanceForm"
+import SyncLabel from "../../../components/system/SyncLabel"
+import ReserveForm from "../components/ReserveForm"
+import { isObjectiveList, readSnapshot } from "../../../offline/snapshots"
+import { projectGoals, subscribeOutbox } from "../../../offline/outbox"
 
 function monthOffset(value, offset) {
   const [year, month] = value.split("-").map(Number)
@@ -92,7 +96,19 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
   const finance = useFinances({ token, ownerId: user.id, onUnauthorized, month })
   const [form, setForm] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [reserveForm, setReserveForm] = useState(null)
+  const [reserveDeleting, setReserveDeleting] = useState(null)
+  const [knownGoals, setKnownGoals] = useState([])
+  const [goalOperations, setGoalOperations] = useState([])
+  useEffect(() => {
+    void readSnapshot(user.id, "objectives", isObjectiveList).then((entry) => {
+      if (entry) setKnownGoals(entry.data)
+    })
+    return subscribeOutbox(user.id, setGoalOperations)
+  }, [user.id])
   const data = finance.data
+  const goals = projectGoals(knownGoals, goalOperations)
+  const reserved = finance.reserves.reduce((sum, item) => sum + item.valor_centavos, 0)
   async function save(payload, id) {
     if (await finance.saveEntry(payload, id)) setForm(null)
   }
@@ -107,6 +123,9 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
         }
       />
       <OfflineNotice updatedAt={finance.lastUpdated} />
+      {!finance.hasOfficialSnapshot && finance.data && (
+        <p className="text-xs text-text-secondary">Valores locais sem último saldo oficial.</p>
+      )}
       {finance.error && !form && !deleting && (
         <div role="alert" className="text-sm text-danger">
           {finance.error}{" "}
@@ -178,6 +197,7 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
                       <Icon size={18} aria-hidden="true" />
                       <div className="min-w-0">
                         <strong>{entry.titulo}</strong>
+                        <SyncLabel status={entry.syncStatus} />
                         <span>
                           {entry.data.split("-").reverse().join("/")}
                           {entry.tipo.startsWith("ajuste") ? " · Ajuste de saldo" : ""}
@@ -233,6 +253,76 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           onCancel={() => setDeleting(null)}
           onConfirm={async () => {
             if (await finance.deleteEntry(deleting.id)) setDeleting(null)
+          }}
+        />
+      )}
+      <section className="border-t border-border pt-5" aria-label="Reservas">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">Reservas</h2>
+          <Button variant="secondary" onClick={() => setReserveForm({ item: null })}>
+            Nova reserva
+          </Button>
+        </div>
+        {data && (
+          <p className="text-sm text-text-secondary">
+            Reservado: {money(reserved)} · Livre: {money(data.saldo_centavos - reserved)}
+            {(finance.reserves.some((item) => item.syncStatus) ||
+              data.lancamentos.some((item) => item.syncStatus)) &&
+              " · inclui alterações pendentes"}
+          </p>
+        )}
+        <ul className="list-none p-0">
+          {finance.reserves.map((item) => (
+            <li
+              key={item.id}
+              className="flex items-center justify-between gap-3 border-b border-border py-2 text-sm"
+            >
+              <span>
+                {item.titulo} · {money(item.valor_centavos)} <SyncLabel status={item.syncStatus} />
+              </span>
+              <ActionsMenu
+                label={`Ações da reserva: ${item.titulo}`}
+                items={[
+                  { label: "Editar reserva", onSelect: () => setReserveForm({ item }) },
+                  {
+                    label: "Excluir reserva",
+                    onSelect: () => setReserveDeleting(item),
+                    danger: true,
+                  },
+                ]}
+              />
+            </li>
+          ))}
+        </ul>
+      </section>
+      {reserveForm && (
+        <Dialog
+          title={reserveForm.item ? "Editar reserva" : "Nova reserva"}
+          closeOnBackdrop={false}
+          onClose={() => setReserveForm(null)}
+        >
+          <ReserveForm
+            item={reserveForm.item}
+            goals={goals}
+            busy={finance.busy}
+            error={finance.error}
+            onCancel={() => setReserveForm(null)}
+            onSave={async (payload, id) => {
+              if (await finance.saveReserve(payload, id)) setReserveForm(null)
+            }}
+          />
+        </Dialog>
+      )}
+      {reserveDeleting && (
+        <ConfirmDialog
+          title="Excluir reserva"
+          message={`A reserva "${reserveDeleting.titulo}" será excluída.`}
+          confirmLabel="Excluir"
+          error={finance.error}
+          loading={finance.busy}
+          onCancel={() => setReserveDeleting(null)}
+          onConfirm={async () => {
+            if (await finance.deleteReserve(reserveDeleting.id)) setReserveDeleting(null)
           }}
         />
       )}

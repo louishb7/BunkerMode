@@ -3,6 +3,7 @@ import { X } from "lucide-react"
 import { registerSW } from "virtual:pwa-register"
 import { useApiAvailability } from "../../offline/useApiAvailability"
 import { useAuth } from "../../context/AuthContext"
+import OutboxNotice from "./OutboxNotice"
 
 type InstallPrompt = Event & {
   prompt: () => Promise<void>
@@ -59,9 +60,10 @@ export default function PwaBanners() {
   const showInstall = !standalone() && !dismissed && !promptUsed && (installable || iosSafari())
   return (
     <div className="relative z-20 bg-peripheral text-text-primary">
+      <OutboxNotice />
       {availability === "unavailable" && (
         <div className="border-b border-border px-4 py-1.5 text-center text-xs" role="status">
-          API indisponível · dados salvos disponíveis para leitura
+          API indisponível · alterações pessoais serão sincronizadas depois
         </div>
       )}
       {availability !== "unavailable" && auth.sessionMode === "local" && (

@@ -243,7 +243,7 @@ export default function TaskForm({
     const payload: {
       titulo: string
       instrucao: string
-      objetivo_id?: number | null
+      objetivo_id?: number | string | null
       prazo?: string | null
     } = {
       titulo: form.titulo.trim(),
@@ -251,7 +251,12 @@ export default function TaskForm({
     }
 
     if (!isEditing)
-      payload.objetivo_id = lockObjetivo && initialObjetivoId ? Number(initialObjetivoId) : null
+      payload.objetivo_id =
+        lockObjetivo && initialObjetivoId
+          ? String(initialObjetivoId).startsWith("local:")
+            ? String(initialObjetivoId)
+            : Number(initialObjetivoId)
+          : null
 
     if (!isSeriesOccurrence) {
       payload.prazo = form.prazo ? form.prazo.trim() : null

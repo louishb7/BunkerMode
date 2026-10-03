@@ -7,6 +7,7 @@ import ObjectiveStatus from "./ObjectiveStatus"
 import { trackerOccurrenceLabel } from "../objectiveSummary"
 import { normalizeTaskDate, operationalDateFor } from "../../calendar/calendarUtils"
 import { formatDateForApi } from "../../../utils/date"
+import SyncLabel from "../../../components/system/SyncLabel"
 
 function taskRelationSignal(task, timezone) {
   if (task.status === "CONCLUIDA") return "Concluída"
@@ -74,6 +75,7 @@ export default function ObjetivoCard({
           />
         </div>
         <h2>{objetivo.titulo}</h2>
+        <SyncLabel status={objetivo.syncStatus} />
         {objetivo.descricao && <p className="objective-description">{objetivo.descricao}</p>}
         {date && (
           <p className="objective-date">

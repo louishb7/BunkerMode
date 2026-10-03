@@ -1,5 +1,6 @@
 export type FinanceEntry = {
   id: number
+  syncStatus?: string
   titulo: string
   tipo: "receita" | "despesa" | "ajuste_entrada" | "ajuste_saida"
   categoria: string
@@ -8,6 +9,7 @@ export type FinanceEntry = {
 }
 export type Reserve = {
   id: number
+  syncStatus?: string
   titulo: string
   objetivo_id: number | null
   valor_centavos: number

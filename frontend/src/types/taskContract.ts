@@ -26,6 +26,8 @@ export type TaskRecurrence = {
 
 export type Task = {
   id: number
+  syncStatus?: string
+  recurringIntent?: { weekdays: number[] }
   titulo: string
   instrucao: string | null
   prioridade: TaskPriority

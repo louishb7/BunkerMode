@@ -7,6 +7,7 @@ import ts from "typescript"
 // Mesmo harness de hooks dos testes de Objetivos, com efeitos disparados pelo teste.
 function boardHarness(api, onUnauthorized = () => false) {
   const values = []
+  const queued = []
   let index = 0
   let effects = []
   let cleanups = []
@@ -31,6 +32,7 @@ function boardHarness(api, onUnauthorized = () => false) {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, {
     exports,
+    window: { addEventListener() {}, removeEventListener() {} },
     require(path) {
       if (path === "react") return react
       if (path.endsWith("bunkermodeApi")) return { api }
@@ -47,7 +49,12 @@ function boardHarness(api, onUnauthorized = () => false) {
       if (path.endsWith("calendarUtils")) return { operationalDateFor: () => new Date(2026, 8, 9) }
       if (path.endsWith("/date")) return { formatDateForApi: () => "09-09-2026" }
       if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {} }
-      if (path.endsWith("offline/snapshots")) return { readSnapshot: async () => null, saveSnapshot: async () => null }
+      if (path.endsWith("offline/outbox")) return {
+        enqueueOperation: async (...args) => { queued.push(args); return "local:test" },
+        projectTasks: (items) => items,
+        subscribeOutbox: () => () => {},
+      }
+      if (path.endsWith("offline/snapshots")) return { readSnapshot: async () => null, saveSnapshot: async () => null, isTaskList: Array.isArray }
       throw new Error(path)
     },
   })
@@ -58,6 +65,7 @@ function boardHarness(api, onUnauthorized = () => false) {
   }
   return {
     render,
+    queued,
     load(mode) {
       cleanups.forEach((cleanup) => cleanup?.())
       render(mode)
@@ -75,7 +83,7 @@ const boardResult = (mode, id) => ({
 })
 const methodFor = (mode) => mode === "focus" ? "getFocusBoard" : "listTasks"
 
-test("reabertura usa comando explícito e recarrega o board após persistir", async () => {
+test("reabertura persiste intenção local sem chamar API antes do coordenador", async () => {
   const calls = []
   const harness = boardHarness({
     reopenTask: async (_token, id) => { calls.push(`reopen:${id}`); return ok },
@@ -83,10 +91,11 @@ test("reabertura usa comando explícito e recarrega o board após persistir", as
     materializeTaskRecurrences: async () => { calls.push("POST"); return ok },
     listTasks: async () => { calls.push("GET"); return boardResult("tasks", 1) },
   })
-  const result = await harness.render().reopenTask({ id: 1 })
+  const result = await harness.render().reopenTask({ id: 1, updated_at: "2026-09-09T00:00:00.000Z" })
   assert.equal(result.persisted, true)
-  assert.equal(result.synchronized, true)
-  assert.deepEqual(calls, ["reopen:1", "POST", "GET"])
+  assert.equal(result.synchronized, false)
+  assert.deepEqual(calls, [])
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.queued[0].slice(0, 4))), [1, "task", "reopen", {}])
 })
 
 test("cliente HTTP de reabertura aponta para POST /tarefas/:id/reabrir", async () => {
@@ -195,7 +204,7 @@ for (const mode of ["tasks", "focus"]) {
     assert.equal(reads, 0)
   })
 
-  test(`${mode}: releitura após mutação prepara recorrências e não aplica erro stale`, async () => {
+  test(`${mode}: mutação local não aguarda a preparação do board`, async () => {
     const pending = []
     const calls = []
     const harness = boardHarness({
@@ -206,30 +215,25 @@ for (const mode of ["tasks", "focus"]) {
       },
       [methodFor(mode)]: async () => { calls.push("GET"); return boardResult(mode, 2) },
     })
-    const mutation = harness.render(mode).completeTask({ id: 1 })
-    await flush()
-    harness.load(mode)
-    pending[1](ok)
-    await flush()
-    pending[0](error())
+    const mutation = harness.render(mode).completeTask({ id: 1, updated_at: "2026-09-09T00:00:00.000Z" })
     const result = await mutation
     assert.equal(result.persisted, true)
     assert.equal(result.synchronized, false)
-    assert.deepEqual(calls, ["complete", "POST", "POST", "GET"])
+    assert.equal(harness.queued[0][2], "complete")
+    assert.deepEqual(calls, [])
+    harness.load(mode)
+    pending[0](ok)
+    await flush()
+    assert.deepEqual(calls, ["POST", "GET"])
     assert.equal(harness.render(mode).status.message, "")
     assert.equal(harness.render(mode).tasks[0].id, 2)
   })
 }
 
-test("mutação antiga após desmontagem não altera estado nem dispara unauthorized", async () => {
-  let resolveMutation
+test("mutação local persistida antes da desmontagem não dispara unauthorized", async () => {
   let unauthorized = 0
   const harness = boardHarness(
     {
-      completeTask: () =>
-        new Promise((resolve) => {
-          resolveMutation = resolve
-        }),
       materializeTaskRecurrences: async () => ok,
       listTasks: async () => boardResult("tasks", 1),
     },
@@ -242,7 +246,6 @@ test("mutação antiga após desmontagem não altera estado nem dispara unauthor
   await flush()
   const mutation = harness.render("tasks").completeTask({ id: 1 })
   harness.unmount()
-  resolveMutation({ ok: false, status: 401, data: { message: "Sessão antiga" } })
-  assert.equal(await mutation, false)
+  assert.equal((await mutation).persisted, true)
   assert.equal(unauthorized, 0)
 })

@@ -13,6 +13,14 @@ import { getApiAvailability, subscribeApiAvailability } from "../../../offline/a
 import { readSnapshot, saveSnapshot } from "../../../offline/snapshots"
 import OfflineNotice from "../../../components/system/OfflineNotice"
 import { getOrientationCache, setOrientationCache } from "../../../state/orientationCache"
+import {
+  enqueueOperation,
+  projectGoals,
+  projectTasks,
+  subscribeOutbox,
+} from "../../../offline/outbox"
+import type { OutboxOperation } from "../../../offline/snapshots"
+import SyncLabel from "../../../components/system/SyncLabel"
 
 export const selectHomeTasks = (tasks = []) =>
   tasks.filter((task) => task.status !== "CONCLUIDA").slice(0, 3)
@@ -69,8 +77,25 @@ export default function HomePage({ token, user, onUnauthorized }) {
   const key = `${user.id}:${preferenceKey}`
   const durableKey = `orientation:${preferenceKey}`
   const [snapshot, setSnapshot] = useState(() => getOrientationCache())
+  const [operations, setOperations] = useState<OutboxOperation[]>([])
+  useEffect(() => subscribeOutbox(user.id, setOperations), [user.id])
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
-  const data = snapshot?.key === key ? snapshot.data : null
+  const officialData = snapshot?.key === key ? snapshot.data : null
+  const data = officialData
+    ? {
+        ...officialData,
+        tarefas: projectTasks(
+          officialData.tarefas,
+          operations.filter((item) => item.action !== "create")
+        )
+          .filter((task) => task.status !== "CONCLUIDA")
+          .slice(0, 3),
+        direcoes: projectGoals(
+          officialData.direcoes,
+          operations.filter((item) => item.action !== "create")
+        ).filter((goal) => goal.status === "ativo"),
+      }
+    : null
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(null)
   const version = useRef(0)
@@ -164,19 +189,23 @@ export default function HomePage({ token, user, onUnauthorized }) {
       previous = next
     })
   }, [refresh])
+  useEffect(() => {
+    const update = (event: Event) => {
+      if ((event as CustomEvent<{ ownerId: number }>).detail?.ownerId === user.id) void refresh()
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [user.id, refresh])
   async function complete(task) {
     if (busy !== null) return
     setBusy(task.id)
-    const current = ++version.current
-    const result = await api.completeTask(token, task.id)
-    if (current !== version.current) return
-    setBusy(null)
-    if (onUnauthorized?.(result)) return
-    if (!result.ok) {
-      setError(getErrorMessage(result, "Não foi possível concluir a tarefa."))
-      return
+    try {
+      await enqueueOperation(user.id, "task", "complete", {}, task.id, task.updated_at)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
+    } finally {
+      setBusy(null)
     }
-    await refresh()
   }
   return (
     <section className="home-orientation">
@@ -245,6 +274,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
                         <Circle size={21} aria-hidden="true" />
                       </button>
                       <span>{task.titulo}</span>
+                      <SyncLabel status={task.syncStatus} />
                     </li>
                   ))}
                 </ol>

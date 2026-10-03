@@ -1,4 +1,5 @@
 import React from "react"
+import SyncLabel from "../../../components/system/SyncLabel"
 import { Check, Circle, ListChecks } from "lucide-react"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Button from "../../../components/ui/Button"
@@ -45,6 +46,7 @@ export default function ObjectiveOperationalPanel({
             <div className="min-w-0">
               <span className="eyebrow">Acompanhamento</span>
               <h4>{tracker.titulo}</h4>
+              <SyncLabel status={tracker.syncStatus} />
               <p>{trackerOccurrenceLabel(tracker, timezone)}</p>
               <details className="mt-3 text-xs text-text-secondary">
                 <summary className="min-h-9 cursor-pointer">

@@ -50,6 +50,11 @@ export class FinancesController {
   ) {
     return this.service.saveReserve(r.currentUser!, p);
   }
+  @Get("reservas")
+  @Header("Cache-Control", "private, no-store")
+  listReserves(@Req() r: AuthenticatedRequest) {
+    return this.service.listReserves(r.currentUser!);
+  }
   @Patch("reservas/:id") updateReserve(
     @Req() r: AuthenticatedRequest,
     @Param("id") id: string,

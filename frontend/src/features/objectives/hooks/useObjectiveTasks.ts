@@ -4,18 +4,37 @@ import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import type { Task } from "../../../types/taskContract"
-import { detachObjectiveTaskList, getOverview, updateOverview } from "../../../state/overviewCache"
+import { getOverview, updateOverview } from "../../../state/overviewCache"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
 import { isTaskList, readSnapshot, saveSnapshot } from "../../../offline/snapshots"
+import type { OutboxOperation } from "../../../offline/snapshots"
+import { enqueueOperation, projectTasks, subscribeOutbox } from "../../../offline/outbox"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
 export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = true }) {
   const [tasks, setTasks] = useState<Task[]>(() => getOverview(ownerId).all ?? [])
+  const [operations, setOperations] = useState<OutboxOperation[]>([])
+  const projectedTasks = useMemo(() => projectTasks(tasks, operations), [tasks, operations])
+  useEffect(() => (ownerId ? subscribeOutbox(ownerId, setOperations) : undefined), [ownerId])
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
+      if (detail?.ownerId !== ownerId || detail.key !== "tasks:all") return
+      void readSnapshot(ownerId, "tasks:all", isTaskList).then((entry) => {
+        if (entry) {
+          setTasks(entry.data as Task[])
+          updateOverview(ownerId, { all: entry.data as Task[] })
+        }
+      })
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [ownerId])
   const [loading, setLoading] = useState(() => !getOverview(ownerId).all)
   const [error, setError] = useState("")
   const [formLoading, setFormLoading] = useState(false)
   const [formStatus, setFormStatus] = useState(emptyStatus)
-  const [unlinkingId, setUnlinkingId] = useState<number | null>(null)
+  const [unlinkingId] = useState<number | null>(null)
   const requestId = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -75,7 +94,7 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     })
   }, [enabled, refresh])
 
-  const tasksByObjetivo = useMemo(() => groupObjectiveTasks(tasks), [tasks])
+  const tasksByObjetivo = useMemo(() => groupObjectiveTasks(projectedTasks), [projectedTasks])
 
   async function createTask(payload) {
     if (!enabled || !token || formLoading) return false
@@ -83,65 +102,52 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
       setFormStatus({ type: "error", message: "Informe o título da tarefa." })
       return false
     }
-    setFormLoading(true)
-    setFormStatus(emptyStatus)
-    const currentRequest = requestId.current
-    const result = await api.createTask(token, payload)
-    if (currentRequest !== requestId.current) return false
-    setFormLoading(false)
-    if (onUnauthorized?.(result)) return false
-    if (!result.ok) {
+    try {
+      await enqueueOperation(ownerId, "task", "create", payload)
+      setFormStatus({ type: "success", message: "Aguardando sincronização." })
+      return true
+    } catch (error) {
       setFormStatus({
         type: "error",
-        message: getErrorMessage(result, "Não foi possível criar a tarefa vinculada."),
+        message: error instanceof Error ? error.message : "Não foi possível salvar localmente.",
       })
       return false
     }
-    void refresh()
-    return true
   }
 
   async function unlinkTask(task: Task) {
     if (!token || unlinkingId !== null) return false
-    const currentRequest = ++requestId.current
-    setUnlinkingId(task.id)
-    const result = await api.unlinkTaskFromObjective(token, task.id)
-    if (currentRequest !== requestId.current) return false
-    setUnlinkingId(null)
-    if (onUnauthorized?.(result)) return false
-    if (!result.ok) {
-      setError(getErrorMessage(result, "Não foi possível desvincular a tarefa."))
+    try {
+      await enqueueOperation(ownerId, "task", "unlink", {}, task.id, task.updated_at)
+      return true
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
       return false
     }
-    return refresh()
   }
   async function operateTask(task: Task, payload = null) {
     if (!enabled || unlinkingId !== null) return false
-    const currentRequest = ++requestId.current
-    setUnlinkingId(task.id)
-    const result = payload
-      ? await api.linkTaskToObjective(token, task.id, payload.objetivo_id)
-      : await api.completeTask(token, task.id)
-    if (currentRequest !== requestId.current) return false
-    setUnlinkingId(null)
-    if (onUnauthorized?.(result)) return false
-    if (!result.ok) {
-      setError(getErrorMessage(result, "Não foi possível atualizar a tarefa."))
+    try {
+      await enqueueOperation(
+        ownerId,
+        "task",
+        payload ? "link" : "complete",
+        payload ?? {},
+        task.id,
+        task.updated_at
+      )
+      return true
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
       return false
     }
-    return refresh()
-  }
-
-  function detachObjective(objectiveId: number) {
-    requestId.current += 1
-    setTasks((current) => detachObjectiveTaskList(current, objectiveId))
   }
 
   return {
-    tasks,
+    tasks: projectedTasks,
     operateTask,
     tasksByObjetivo,
-    summaryTasksByObjetivo: groupObjectiveTasks(tasks, false),
+    summaryTasksByObjetivo: groupObjectiveTasks(projectedTasks, false),
     loading,
     error,
     refresh,
@@ -151,7 +157,6 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     setFormStatus,
     unlinkTask,
     unlinkingId,
-    detachObjective,
   }
 }
 

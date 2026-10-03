@@ -46,7 +46,7 @@ async function mount(hook, props) {
   }
 }
 
-test("acompanhamento registra eventos reais, permite remoção e não chama tarefas", async () => {
+test("acompanhamento exige gravação local antes de qualquer POST", async () => {
   const token = "tracker-flow"
   const original = {
     listTrackers: api.listTrackers,
@@ -55,7 +55,6 @@ test("acompanhamento registra eventos reais, permite remoção e não chama tare
     deleteTrackerOccurrence: api.deleteTrackerOccurrence,
     deleteTracker: api.deleteTracker,
   }
-  let finishRecord
   let taskCalls = 0
   let records = []
   api.listTrackers = async () => ({ ok: true, data: structuredClone(records) })
@@ -64,10 +63,7 @@ test("acompanhamento registra eventos reais, permite remoção e não chama tare
     records = [{ id: 10, objetivo_id: 4, titulo: payload.titulo, descricao: null, ocorrencias: [] }]
     return { ok: true, data: records[0] }
   }
-  api.recordTrackerOccurrence = async () =>
-    new Promise((resolve) => {
-      finishRecord = resolve
-    })
+  api.recordTrackerOccurrence = async () => { throw Error("Ocorrência deve usar a outbox") }
   api.deleteTrackerOccurrence = async () => {
     records[0].ocorrencias = []
     return { ok: true, status: 204 }
@@ -84,47 +80,7 @@ test("acompanhamento registra eventos reais, permite remoção e não chama tare
   const view = await mount(useTrackers, { token, ownerId: 1, onUnauthorized: () => false })
   try {
     await act(async () => {
-      assert.equal(await view.current.createTracker({ objetivo_id: 4, titulo: "Não fumar" }), true)
-    })
-    assert.equal(view.current.byObjective[4][0].ocorrencias.length, 0)
-    let pending
-    await act(async () => {
-      pending = view.current.recordOccurrence(view.current.byObjective[4][0])
-    })
-    assert.equal(view.current.byObjective[4][0].ocorrencias.length, 0)
-    records[0].ocorrencias = [
-      {
-        id: 21,
-        acompanhamento_id: 10,
-        occurred_at: "2026-09-23T12:00:00Z",
-        created_at: "2026-09-23T12:00:00Z",
-      },
-    ]
-    await act(async () =>
-      finishRecord({
-        ok: true,
-        data: {
-          id: 21,
-          acompanhamento_id: 10,
-          occurred_at: "2026-09-23T12:00:00Z",
-          created_at: "2026-09-23T12:00:00Z",
-        },
-      })
-    )
-    assert.equal(await pending, true)
-    assert.equal(view.current.byObjective[4][0].ocorrencias[0].id, 21)
-    await act(async () => {
-      assert.equal(
-        await view.current.deleteOccurrence(
-          view.current.byObjective[4][0],
-          view.current.byObjective[4][0].ocorrencias[0]
-        ),
-        true
-      )
-    })
-    assert.equal(view.current.byObjective[4][0].ocorrencias.length, 0)
-    await act(async () => {
-      assert.equal(await view.current.deleteTracker(view.current.byObjective[4][0]), true)
+      assert.equal(await view.current.createTracker({ objetivo_id: 4, titulo: "Não fumar" }), false)
     })
     assert.equal(view.current.byObjective[4], undefined)
     assert.equal(taskCalls, 0)
@@ -135,7 +91,7 @@ test("acompanhamento registra eventos reais, permite remoção e não chama tare
   }
 })
 
-test("desvincular série atualiza cache de todas as ocorrências sem remover tarefas", async () => {
+test("desvincular série preserva snapshot se armazenamento local falhar", async () => {
   const token = "unlink-flow"
   const task = (id, seriesId, status = "PENDENTE") => ({
     id,
@@ -169,16 +125,14 @@ test("desvincular série atualiza cache de todas as ocorrências sem remover tar
   const view = await mount(useObjectiveTasks, { token, ownerId: 1, enabled: true, onUnauthorized: () => false })
   try {
     await act(async () => {
-      assert.equal(await view.current.unlinkTask(tasks[0]), true)
+      assert.equal(await view.current.unlinkTask(tasks[0]), false)
     })
-    assert.equal(view.current.tasksByObjetivo[4].length, 1)
-    assert.equal(view.current.tasksByObjetivo[4][0].recurrence.series_id, 31)
+    assert.equal(view.current.tasksByObjetivo[4].length, 2)
     assert.deepEqual(
       cache.getOverview(1).all.map((item) => item.objetivo_id),
-      [null, null, 4]
+      [4, 4, 4]
     )
     assert.equal(cache.getOverview(1).all[0].status, "CONCLUIDA")
-    assert.equal(cache.getOverview(1).all[0].recurrence.termination_policy, "sem_termino")
   } finally {
     Object.assign(api, original)
     await view.close()
@@ -229,23 +183,20 @@ test("remover objetivo limpa vínculos e acompanhamentos do cache sem apagar tar
   cache.clearOverview()
 })
 
-test("401 em Acompanhamentos passa pelo tratamento global", async () => {
+test("401 na leitura de Acompanhamentos passa pelo tratamento global", async () => {
   const token = "tracker-401"
   const original = { listTrackers: api.listTrackers, createTracker: api.createTracker }
   let unauthorized = 0
-  api.listTrackers = async () => ({ ok: true, data: [] })
-  api.createTracker = async () => ({ ok: false, status: 401 })
+  api.listTrackers = async () => ({ ok: false, status: 401, data: {} })
   const view = await mount(useTrackers, {
     token,
+    ownerId: 1,
     onUnauthorized: (result) => {
       if (result.status === 401) unauthorized++
       return result.status === 401
     },
   })
   try {
-    await act(async () => {
-      assert.equal(await view.current.createTracker({ objetivo_id: 4, titulo: "Não fumar" }), false)
-    })
     assert.equal(unauthorized, 1)
     assert.equal(view.current.byObjective[4], undefined)
   } finally {
@@ -255,7 +206,7 @@ test("401 em Acompanhamentos passa pelo tratamento global", async () => {
   }
 })
 
-test("falha ao remover ocorrência preserva o evento sem alteração otimista", async () => {
+test("falha na gravação local preserva ocorrência oficial", async () => {
   const token = "tracker-rollback"
   const occurrence = {
     id: 9,
@@ -269,21 +220,14 @@ test("falha ao remover ocorrência preserva o evento sem alteração otimista", 
     listTrackers: api.listTrackers,
     deleteTrackerOccurrence: api.deleteTrackerOccurrence,
   }
-  let finish
   api.listTrackers = async () => ({ ok: true, data: [tracker] })
-  api.deleteTrackerOccurrence = async () =>
-    new Promise((resolve) => {
-      finish = resolve
-    })
+  api.deleteTrackerOccurrence = async () => { throw Error("Exclusão deve usar a outbox") }
   const view = await mount(useTrackers, { token, ownerId: 1, onUnauthorized: () => false })
   try {
-    let pending
     await act(async () => {
-      pending = view.current.deleteOccurrence(tracker, occurrence)
+      assert.equal(await view.current.deleteOccurrence(tracker, occurrence), false)
     })
     assert.equal(view.current.byObjective[4][0].ocorrencias.length, 1)
-    await act(async () => finish({ ok: false, status: 503, data: { message: "Falha" } }))
-    assert.equal(await pending, false)
     assert.equal(view.current.byObjective[4][0].ocorrencias[0].id, 9)
     assert.equal(cache.getOverview(1).trackers[0].ocorrencias[0].id, 9)
   } finally {

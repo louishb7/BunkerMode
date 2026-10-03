@@ -136,6 +136,7 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
   const { default: App } = await vite.ssrLoadModule("/src/app/App.tsx")
   const { AuthProvider } = await vite.ssrLoadModule("/src/context/AuthContext.tsx")
   const { api } = await vite.ssrLoadModule("/src/services/bunkermodeApi.ts")
+  const { setApiAvailability } = await vite.ssrLoadModule("/src/offline/apiAvailability.ts")
   const original = { ...api }
   const user = {
     id: 1,
@@ -158,7 +159,9 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
     for (const route of ["/tarefas", "/"]) {
       window.localStorage.clear()
       window.localStorage.setItem("bunkermode_token", "test")
+      window.localStorage.setItem("bunkermode_refresh_token", "refresh-test")
       window.localStorage.setItem("bunkermode_usuario", JSON.stringify(user))
+      setApiAvailability("available")
       const container = document.createElement("div")
       document.body.append(container)
       const root = createRoot(container)
@@ -180,9 +183,11 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
             await new Promise((resolve) => setTimeout(resolve, 25))
           })
         if (route === "/") {
+          assert.ok(container.querySelector("main"), container.textContent)
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
           const card = container.querySelector('[aria-labelledby="now-title"]')
+          assert.ok(card, container.textContent)
           assert.equal(card.querySelectorAll('a[href="/tarefas/foco"]').length, 1)
           assert.match(card.textContent, /Entrar em Foco/)
         }

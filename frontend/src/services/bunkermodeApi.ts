@@ -89,6 +89,9 @@ export const api = {
       { token }
     )
   },
+  listReserves(token) {
+    return request<import("../types/financeContract").Reserve[]>("/financas/reservas", { token })
+  },
   saveFinanceEntry(token, payload, id?) {
     return request(`/financas/lancamentos${id ? `/${id}` : ""}`, {
       token,

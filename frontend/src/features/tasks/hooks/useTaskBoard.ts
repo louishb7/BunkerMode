@@ -3,13 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getErrorMessage } from "../../../api/httpClient"
 import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
-import { getOverview, updateCachedTask, updateOverview } from "../../../state/overviewCache"
-import { operationalDateFor } from "../../calendar/calendarUtils"
+import { getOverview, updateOverview } from "../../../state/overviewCache"
+import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUtils"
 import { formatDateForApi } from "../../../utils/date"
 import { getActionTasks } from "../taskSelectors"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
 import { readSnapshot, saveSnapshot, isTaskList } from "../../../offline/snapshots"
 import type { Task } from "../../../types/taskContract"
+import { enqueueOperation, projectTasks, subscribeOutbox } from "../../../offline/outbox"
+import type { OutboxOperation } from "../../../offline/snapshots"
 
 const allKey = "tasks:all"
 const dailyKey = "tasks:daily:last"
@@ -31,6 +33,7 @@ export function useTaskBoard({
   const [tasks, setTasks] = useState(() =>
     boardMode === "focus" ? (getOverview(ownerId).daily ?? []) : (getOverview(ownerId).all ?? [])
   )
+  const [operations, setOperations] = useState<OutboxOperation[]>([])
   const [hasBoardSnapshot, setHasBoardSnapshot] = useState(() =>
     boardMode === "focus" ? getOverview(ownerId).daily !== null : getOverview(ownerId).all !== null
   )
@@ -46,8 +49,28 @@ export function useTaskBoard({
   const loadRequestRef = useRef(0)
   const lifecycleRef = useRef(0)
 
-  const actionTasks = useMemo(() => getActionTasks(tasks), [tasks])
-  const dailyTasks = tasks
+  const projectedTasks = useMemo(() => projectTasks(tasks, operations), [tasks, operations])
+  const actionTasks = useMemo(() => getActionTasks(projectedTasks), [projectedTasks])
+  const dailyTasks = projectedTasks
+
+  useEffect(() => (ownerId ? subscribeOutbox(ownerId, setOperations) : undefined), [ownerId])
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
+      if (detail?.ownerId !== ownerId || detail.key !== allKey) return
+      void readSnapshot(ownerId, allKey, isTaskList).then((entry) => {
+        if (!entry) return
+        const official = entry.data as Task[]
+        updateOverview(ownerId, { all: official })
+        if (boardMode === "focus") {
+          const today = operationalDateFor(timezone)
+          setTasks(official.filter((task) => taskBelongsToDate(task, today, timezone)))
+        } else setTasks(official)
+      })
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [ownerId, boardMode, timezone])
 
   const loadTasksBoard = useCallback(
     async (successMessage = "") => {
@@ -243,27 +266,18 @@ export function useTaskBoard({
     })
   }, [authenticated, boardMode, loadFocusBoard, loadTasksBoard])
 
-  async function reloadCurrentBoard(successMessage = "") {
-    return boardMode === "focus" ? loadFocusBoard(successMessage) : loadTasksBoard(successMessage)
-  }
-
-  async function refreshAfterPersistedMutation(successMessage) {
-    const synchronization = reloadCurrentBoard()
-    const requestId = loadRequestRef.current
-    const synchronized = await synchronization
-    if (requestId !== loadRequestRef.current) {
+  async function queue(action: string, payload: Record<string, unknown> = {}, task?: Task) {
+    try {
+      await enqueueOperation(ownerId, "task", action, payload, task?.id, task?.updated_at)
+      setStatus({ type: "success", message: "Aguardando sincronização." })
       return { persisted: true, synchronized: false }
-    }
-    if (!synchronized) {
+    } catch (error) {
       setStatus({
         type: "error",
-        message: `${successMessage} A tarefa foi salva, mas não foi possível atualizar a visão. Recarregue a página.`,
+        message: error instanceof Error ? error.message : "Não foi possível salvar localmente.",
       })
-      return { persisted: true, synchronized: false }
+      return false
     }
-
-    setStatus({ type: "success", message: successMessage })
-    return { persisted: true, synchronized: true }
   }
 
   async function createTask(payload) {
@@ -272,28 +286,7 @@ export function useTaskBoard({
       return false
     }
 
-    const currentLifecycle = lifecycleRef.current
-    setFormLoading(true)
-    setFormStatus(emptyStatus)
-    const result = await api.createTask(token, payload)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-    setFormLoading(false)
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setFormStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível registrar a tarefa."),
-      })
-      return false
-    }
-
-    return refreshAfterPersistedMutation("Tarefa registrada.")
+    return queue("create", payload)
   }
 
   async function updateTask(taskId, payload) {
@@ -302,28 +295,9 @@ export function useTaskBoard({
       return false
     }
 
-    const currentLifecycle = lifecycleRef.current
-    setFormLoading(true)
-    setFormStatus(emptyStatus)
-    const result = await api.updateTask(token, taskId, payload)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-    setFormLoading(false)
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setFormStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível salvar a tarefa."),
-      })
-      return false
-    }
-
-    return refreshAfterPersistedMutation("Tarefa atualizada.")
+    const task = projectedTasks.find((item) => item.id === taskId)
+    if (!task) return false
+    return queue("update", payload, task)
   }
 
   async function toggleTaskPin(task) {
@@ -332,29 +306,7 @@ export function useTaskBoard({
       return false
     }
 
-    const currentLifecycle = lifecycleRef.current
-    setPinLoadingId(task.id)
-    setStatus(emptyStatus)
-    const result = await api.toggleTaskPin(token, task.id)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-    setPinLoadingId(null)
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível subir prioridade."),
-      })
-      await reloadCurrentBoard()
-      return false
-    }
-
-    return refreshAfterPersistedMutation("Prioridade da tarefa atualizada.")
+    return queue("pin", { is_pinned: !task.is_pinned }, task)
   }
 
   async function deleteTask(task) {
@@ -363,54 +315,11 @@ export function useTaskBoard({
       return false
     }
 
-    const currentLifecycle = lifecycleRef.current
-    setStatus(emptyStatus)
-    const result = await api.deleteTask(token, task.id)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível remover a tarefa."),
-      })
-      return false
-    }
-
-    return refreshAfterPersistedMutation("Tarefa removida.")
+    return queue("delete", {}, task)
   }
 
   async function completeTask(task) {
-    const currentLifecycle = lifecycleRef.current
-    setCompleteLoadingId(task.id)
-    setStatus(emptyStatus)
-    const result = await api.completeTask(token, task.id)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-    setCompleteLoadingId(null)
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível concluir a tarefa."),
-      })
-      await reloadCurrentBoard()
-      return false
-    }
-
-    updateCachedTask(ownerId, result.data)
-    setTasks((current) => current.map((item) => (item.id === task.id ? result.data : item)))
-    return refreshAfterPersistedMutation("Tarefa concluída.")
+    return queue("complete", {}, task)
   }
 
   async function reopenTask(task) {
@@ -419,29 +328,7 @@ export function useTaskBoard({
       return false
     }
 
-    const currentLifecycle = lifecycleRef.current
-    setReopenLoadingId(task.id)
-    setStatus(emptyStatus)
-    const result = await api.reopenTask(token, task.id)
-    if (currentLifecycle !== lifecycleRef.current) {
-      return false
-    }
-    setReopenLoadingId(null)
-
-    if (onUnauthorized(result)) {
-      return false
-    }
-
-    if (!result.ok) {
-      setStatus({
-        type: "error",
-        message: getErrorMessage(result, "Não foi possível reabrir a tarefa."),
-      })
-      await reloadCurrentBoard()
-      return false
-    }
-
-    return refreshAfterPersistedMutation("Tarefa reaberta.")
+    return queue("reopen", {}, task)
   }
 
   return {
@@ -457,7 +344,7 @@ export function useTaskBoard({
     formLoading,
     formStatus,
     taskLoading,
-    tasks,
+    tasks: projectedTasks,
     pinLoadingId,
     refreshTasksBoard: loadTasksBoard,
     refreshFocusBoard: loadFocusBoard,

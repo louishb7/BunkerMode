@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useState } from "react"
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import Button from "../../../components/ui/Button"
 import PageHeader from "../../../components/ui/PageHeader"
@@ -12,9 +12,6 @@ import { useFinances } from "../hooks/useFinances"
 import { money } from "../money"
 import FinanceForm from "../components/FinanceForm"
 import SyncLabel from "../../../components/system/SyncLabel"
-import ReserveForm from "../components/ReserveForm"
-import { isObjectiveList, readSnapshot } from "../../../offline/snapshots"
-import { projectGoals, subscribeOutbox } from "../../../offline/outbox"
 
 function monthOffset(value, offset) {
   const [year, month] = value.split("-").map(Number)
@@ -31,29 +28,56 @@ function monthLabel(value) {
   return label[0].toLocaleUpperCase("pt-BR") + label.slice(1)
 }
 function ResultChart({ points = [], hasMovements = false }) {
-  const values = points.map((item) => item.resultado_centavos)
+  const hasFlow = points.some((point) => point.receitas_centavos !== undefined)
+  const series = [
+    {
+      key: "resultado_centavos",
+      label: "Resultado",
+      color: "var(--color-text-secondary)",
+      className: "chart-result",
+    },
+    ...(hasFlow
+      ? [
+          {
+            key: "receitas_centavos",
+            label: "Entradas",
+            color: "var(--color-success)",
+            className: "chart-income",
+          },
+          {
+            key: "despesas_centavos",
+            label: "Saídas",
+            color: "var(--color-danger)",
+            className: "chart-expense",
+            dashed: true,
+          },
+        ]
+      : []),
+  ]
+  const values = series.flatMap((line) => points.map((point) => point[line.key] ?? 0))
   const min = Math.min(0, ...values),
     max = Math.max(0, ...values)
   const span = Math.max(1, max - min)
   const y = (value) => 114 - ((value - min) / span) * 94
-  const path = values
-    .map(
-      (value, index) =>
-        `${index ? "L" : "M"}${((index / Math.max(1, values.length - 1)) * 600).toFixed(1)} ${y(value).toFixed(1)}`
-    )
-    .join(" ")
+  const path = (key) =>
+    points
+      .map(
+        (point, index) =>
+          `${index ? "L" : "M"}${((index / Math.max(1, points.length - 1)) * 600).toFixed(1)} ${y(point[key] ?? 0).toFixed(1)}`
+      )
+      .join(" ")
   return (
     <div className="finance-chart">
       <div className="finance-chart-heading">
         <h2>Evolução no mês</h2>
-        <span>Resultado acumulado</span>
+        <span>Valores acumulados em R$</span>
       </div>
       {!hasMovements ? (
         <p className="empty-copy">Ainda não há entradas ou saídas para mostrar.</p>
       ) : (
         <svg
           role="img"
-          aria-label="Evolução diária do resultado do mês"
+          aria-label="Evolução diária de entradas, saídas e resultado do mês"
           viewBox="0 0 600 130"
           preserveAspectRatio="none"
         >
@@ -65,18 +89,31 @@ function ResultChart({ points = [], hasMovements = false }) {
             stroke="var(--color-border-strong)"
             strokeDasharray="4 5"
           />
-          {values.length > 0 && (
+          {series.map((line) => (
             <path
-              d={path}
+              key={line.key}
+              d={path(line.key)}
               fill="none"
-              stroke="var(--color-accent)"
-              strokeWidth="3"
+              stroke={line.color}
+              strokeWidth="2"
+              strokeDasharray={line.dashed ? "6 4" : undefined}
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
-            />
-          )}
+            >
+              <title>{line.label}</title>
+            </path>
+          ))}
         </svg>
+      )}
+      {hasMovements && (
+        <div className="finance-chart-legend">
+          {series.map((line) => (
+            <span key={line.key} className={line.className}>
+              {line.label}
+            </span>
+          ))}
+        </div>
       )}
       {hasMovements && (
         <div className="finance-chart-ends">
@@ -96,32 +133,24 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
   const finance = useFinances({ token, ownerId: user.id, onUnauthorized, month })
   const [form, setForm] = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const [reserveForm, setReserveForm] = useState(null)
-  const [reserveDeleting, setReserveDeleting] = useState(null)
-  const [knownGoals, setKnownGoals] = useState([])
-  const [goalOperations, setGoalOperations] = useState([])
-  useEffect(() => {
-    void readSnapshot(user.id, "objectives", isObjectiveList).then((entry) => {
-      if (entry) setKnownGoals(entry.data)
-    })
-    return subscribeOutbox(user.id, setGoalOperations)
-  }, [user.id])
+  const [historyPage, setHistoryPage] = useState(1)
   const data = finance.data
-  const goals = projectGoals(knownGoals, goalOperations)
-  const reserved = finance.reserves.reduce((sum, item) => sum + item.valor_centavos, 0)
+  const pageCount = Math.max(1, Math.ceil((data?.lancamentos.length ?? 0) / 8))
+  const page = Math.min(historyPage, pageCount)
+  const movements = data?.lancamentos.slice((page - 1) * 8, page * 8) ?? []
+  function selectMonth(value) {
+    setMonth(value)
+    setHistoryPage(1)
+  }
   async function save(payload, id) {
-    if (await finance.saveEntry(payload, id)) setForm(null)
+    if (await finance.saveEntry(payload, id)) {
+      setForm(null)
+      setHistoryPage(1)
+    }
   }
   return (
     <section className="finance-page">
-      <PageHeader
-        title="Finanças"
-        actions={
-          <Button onClick={() => setForm({ item: null })}>
-            <Plus size={17} aria-hidden="true" /> Movimento
-          </Button>
-        }
-      />
+      <PageHeader title="Finanças" />
       <OfflineNotice updatedAt={finance.lastUpdated} />
       {!finance.hasOfficialSnapshot && finance.data && (
         <p className="text-xs text-text-secondary">Valores locais sem último saldo oficial.</p>
@@ -134,28 +163,37 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           </Button>
         </div>
       )}
-      <div className="finance-month" aria-label="Período financeiro">
-        <button
-          type="button"
-          aria-label="Mês anterior"
-          onClick={() => setMonth((value) => monthOffset(value, -1))}
-        >
-          <ChevronLeft size={20} />
-        </button>
-        <strong>{monthLabel(month)}</strong>
-        <button
-          type="button"
-          aria-label="Próximo mês"
-          disabled={month >= currentMonth}
-          onClick={() => setMonth((value) => monthOffset(value, 1))}
-        >
-          <ChevronRight size={20} />
-        </button>
-        {month !== currentMonth && (
-          <button type="button" className="finance-current" onClick={() => setMonth(currentMonth)}>
-            Mês atual
+      <div className="finance-toolbar">
+        <div className="finance-month" aria-label="Período financeiro">
+          <button
+            type="button"
+            aria-label="Mês anterior"
+            onClick={() => selectMonth(monthOffset(month, -1))}
+          >
+            <ChevronLeft size={20} />
           </button>
-        )}
+          <strong>{monthLabel(month)}</strong>
+          <button
+            type="button"
+            aria-label="Próximo mês"
+            disabled={month >= currentMonth}
+            onClick={() => selectMonth(monthOffset(month, 1))}
+          >
+            <ChevronRight size={20} />
+          </button>
+          {month !== currentMonth && (
+            <button
+              type="button"
+              className="finance-current"
+              onClick={() => selectMonth(currentMonth)}
+            >
+              Mês atual
+            </button>
+          )}
+        </div>
+        <Button onClick={() => setForm({ item: null })}>
+          <Plus size={17} aria-hidden="true" /> Movimento
+        </Button>
       </div>
       {!data ? (
         finance.loading ? (
@@ -164,9 +202,12 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
       ) : (
         <>
           <section className="finance-state" aria-label="Resultado financeiro do mês">
-            <p className="eyebrow">Resultado do mês</p>
-            <p className={`finance-result ${data.resultado_centavos < 0 ? "text-danger" : ""}`}>
-              {money(data.resultado_centavos)}
+            <p className="eyebrow">Saldo registrado</p>
+            <p className={`finance-result ${data.saldo_centavos < 0 ? "text-danger" : ""}`}>
+              {money(data.saldo_centavos)}
+            </p>
+            <p className="text-sm text-text-secondary">
+              Resultado do mês: {money(data.resultado_centavos)}
             </p>
             <dl className="finance-flow">
               <div>
@@ -184,21 +225,25 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
             hasMovements={data.receitas_centavos + data.despesas_centavos > 0}
           />
           <section className="finance-movements" aria-labelledby="finance-movements-title">
-            <h2 id="finance-movements-title">Movimentos recentes</h2>
+            <h2 id="finance-movements-title">Histórico de movimentos</h2>
             {!data.lancamentos.length ? (
               <p className="empty-copy">Nenhum movimento neste mês.</p>
             ) : (
               <ol className="finance-ledger">
-                {data.lancamentos.map((entry) => {
+                {movements.map((entry) => {
                   const incoming = entry.tipo === "receita" || entry.tipo === "ajuste_entrada"
                   const Icon = incoming ? ArrowDownLeft : ArrowUpRight
                   return (
-                    <li key={entry.id} className="ledger-row">
+                    <li
+                      key={entry.id}
+                      className={`ledger-row ${incoming ? "ledger-income" : "ledger-expense"}`}
+                    >
                       <Icon size={18} aria-hidden="true" />
                       <div className="min-w-0">
                         <strong>{entry.titulo}</strong>
                         <SyncLabel status={entry.syncStatus} />
                         <span>
+                          {incoming ? "Entrada" : "Saída"} ·{" "}
                           {entry.data.split("-").reverse().join("/")}
                           {entry.tipo.startsWith("ajuste") ? " · Ajuste de saldo" : ""}
                         </span>
@@ -222,6 +267,27 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
                   )
                 })}
               </ol>
+            )}
+            {pageCount > 1 && (
+              <nav className="finance-pagination" aria-label="Paginação dos movimentos">
+                <Button
+                  variant="secondary"
+                  disabled={page === 1}
+                  onClick={() => setHistoryPage(page - 1)}
+                >
+                  <ChevronLeft size={16} aria-hidden="true" /> Anterior
+                </Button>
+                <span role="status">
+                  Página {page} de {pageCount}
+                </span>
+                <Button
+                  variant="secondary"
+                  disabled={page === pageCount}
+                  onClick={() => setHistoryPage(page + 1)}
+                >
+                  Próxima <ChevronRight size={16} aria-hidden="true" />
+                </Button>
+              </nav>
             )}
           </section>
         </>
@@ -253,76 +319,6 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           onCancel={() => setDeleting(null)}
           onConfirm={async () => {
             if (await finance.deleteEntry(deleting.id)) setDeleting(null)
-          }}
-        />
-      )}
-      <section className="border-t border-border pt-5" aria-label="Reservas">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">Reservas</h2>
-          <Button variant="secondary" onClick={() => setReserveForm({ item: null })}>
-            Nova reserva
-          </Button>
-        </div>
-        {data && (
-          <p className="text-sm text-text-secondary">
-            Reservado: {money(reserved)} · Livre: {money(data.saldo_centavos - reserved)}
-            {(finance.reserves.some((item) => item.syncStatus) ||
-              data.lancamentos.some((item) => item.syncStatus)) &&
-              " · inclui alterações pendentes"}
-          </p>
-        )}
-        <ul className="list-none p-0">
-          {finance.reserves.map((item) => (
-            <li
-              key={item.id}
-              className="flex items-center justify-between gap-3 border-b border-border py-2 text-sm"
-            >
-              <span>
-                {item.titulo} · {money(item.valor_centavos)} <SyncLabel status={item.syncStatus} />
-              </span>
-              <ActionsMenu
-                label={`Ações da reserva: ${item.titulo}`}
-                items={[
-                  { label: "Editar reserva", onSelect: () => setReserveForm({ item }) },
-                  {
-                    label: "Excluir reserva",
-                    onSelect: () => setReserveDeleting(item),
-                    danger: true,
-                  },
-                ]}
-              />
-            </li>
-          ))}
-        </ul>
-      </section>
-      {reserveForm && (
-        <Dialog
-          title={reserveForm.item ? "Editar reserva" : "Nova reserva"}
-          closeOnBackdrop={false}
-          onClose={() => setReserveForm(null)}
-        >
-          <ReserveForm
-            item={reserveForm.item}
-            goals={goals}
-            busy={finance.busy}
-            error={finance.error}
-            onCancel={() => setReserveForm(null)}
-            onSave={async (payload, id) => {
-              if (await finance.saveReserve(payload, id)) setReserveForm(null)
-            }}
-          />
-        </Dialog>
-      )}
-      {reserveDeleting && (
-        <ConfirmDialog
-          title="Excluir reserva"
-          message={`A reserva "${reserveDeleting.titulo}" será excluída.`}
-          confirmLabel="Excluir"
-          error={finance.error}
-          loading={finance.busy}
-          onCancel={() => setReserveDeleting(null)}
-          onConfirm={async () => {
-            if (await finance.deleteReserve(reserveDeleting.id)) setReserveDeleting(null)
           }}
         />
       )}

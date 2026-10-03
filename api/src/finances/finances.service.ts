@@ -14,28 +14,17 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 
 const TYPES = ["receita", "despesa", "ajuste_entrada", "ajuste_saida"];
-export const CATEGORIES = [
-  "Trabalho",
-  "Moradia",
-  "Alimentação",
-  "Transporte",
-  "Saúde",
-  "Estudos",
-  "Lazer",
-  "Outros",
-  "Ajuste",
-];
 type Payload = Record<string, unknown>;
 function body(value: unknown): Payload {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new BadRequestException("Dados financeiros inválidos.");
   return value as Payload;
 }
-export function cents(value: unknown, allowZero = false): number {
+export function cents(value: unknown): number {
   if (
     typeof value !== "number" ||
     !Number.isSafeInteger(value) ||
-    value < (allowZero ? 0 : 1) ||
+    value < 1 ||
     value > 2147483647
   )
     throw new BadRequestException(
@@ -84,46 +73,6 @@ export class FinancesService {
     );
   }
 
-  async totals(
-    user: UserRecord,
-    tx?: Prisma.TransactionClient,
-  ): Promise<{
-    saldo_centavos: number;
-    reservado_centavos: number;
-    livre_centavos: number;
-  }> {
-    if (!tx)
-      return this.prisma.$transaction((current) => this.totals(user, current), {
-        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      });
-    const [groups, reserves] = await Promise.all([
-      tx.lancamentos_financeiros.groupBy({
-        by: ["tipo"],
-        where: { usuario_id: user.usuario_id },
-        _sum: { valor_centavos: true },
-      }),
-      tx.reservas_financeiras.aggregate({
-        where: { usuario_id: user.usuario_id },
-        _sum: { valor_centavos: true },
-      }),
-    ]);
-    const saldo_centavos = safeTotal(
-      groups.reduce(
-        (sum, g) =>
-          sum +
-          (g.tipo === "receita" || g.tipo === "ajuste_entrada" ? 1 : -1) *
-            (g._sum.valor_centavos ?? 0),
-        0,
-      ),
-    );
-    const reservado_centavos = safeTotal(reserves._sum.valor_centavos ?? 0);
-    return {
-      saldo_centavos,
-      reservado_centavos,
-      livre_centavos: safeTotal(saldo_centavos - reservado_centavos),
-    };
-  }
-
   async overview(user: UserRecord, month?: string) {
     const mes = month ?? this.today(user).slice(0, 7);
     if (
@@ -154,7 +103,6 @@ export class FinancesService {
               data: { gte: start, lt: end },
             },
             orderBy: [{ data: "desc" }, { id: "desc" }],
-            take: 20,
           }),
         ]);
         const incomes = new Map<string, number>();
@@ -173,7 +121,9 @@ export class FinancesService {
         const despesas_centavos = safeTotal(
           [...expenses.values()].reduce((sum, value) => sum + value, 0),
         );
-        let running = 0;
+        let running = 0,
+          incoming = 0,
+          outgoing = 0;
         const serie_diaria = [];
         for (
           let current = new Date(start);
@@ -181,10 +131,15 @@ export class FinancesService {
           current.setUTCDate(current.getUTCDate() + 1)
         ) {
           const day = current.toISOString().slice(0, 10);
-          running = safeTotal(
-            running + (incomes.get(day) ?? 0) - (expenses.get(day) ?? 0),
-          );
-          serie_diaria.push({ data: day, resultado_centavos: running });
+          incoming = safeTotal(incoming + (incomes.get(day) ?? 0));
+          outgoing = safeTotal(outgoing + (expenses.get(day) ?? 0));
+          running = safeTotal(incoming - outgoing);
+          serie_diaria.push({
+            data: day,
+            resultado_centavos: running,
+            receitas_centavos: incoming,
+            despesas_centavos: outgoing,
+          });
         }
         return {
           mes,
@@ -220,12 +175,6 @@ export class FinancesService {
     const tipo = requiredText(p.tipo, "Tipo de lançamento inválido.");
     if (!TYPES.includes(tipo))
       throw new BadRequestException("Tipo de lançamento inválido.");
-    const categoria =
-      p.categoria == null
-        ? "Outros"
-        : requiredText(p.categoria, "Categoria inválida.");
-    if (!CATEGORIES.includes(categoria))
-      throw new BadRequestException("Categoria inválida.");
     const data = parseIsoDate(p.data ?? this.today(user), "Data inválida.");
     if (!data || data.toISOString().slice(0, 10) > this.today(user))
       throw new BadRequestException(
@@ -238,7 +187,6 @@ export class FinancesService {
         200,
       ),
       tipo,
-      categoria: tipo.startsWith("ajuste") ? "Ajuste" : categoria,
       data,
       valor_centavos: cents(p.valor_centavos),
     };
@@ -282,77 +230,6 @@ export class FinancesService {
       });
       if (!deleted.count)
         throw new NotFoundException("Lançamento não encontrado.");
-    });
-  }
-
-  saveReserve(user: UserRecord, raw: unknown, id?: number) {
-    const patch = body(raw);
-    return this.write(user, async (tx) => {
-      const existing =
-        id === undefined
-          ? null
-          : await tx.reservas_financeiras.findFirst({
-              where: {
-                id: positiveInt(id, "Reserva inválida."),
-                usuario_id: user.usuario_id,
-              },
-            });
-      if (id !== undefined && !existing)
-        throw new NotFoundException("Reserva não encontrada.");
-      const p = { ...existing, ...patch };
-      const objetivo_id =
-        p.objetivo_id == null
-          ? null
-          : positiveInt(p.objetivo_id, "Objetivo inválido.");
-      if (objetivo_id !== null) {
-        const goal = await tx.objetivos.findFirst({
-          where: { id: objetivo_id, usuario_id: user.usuario_id },
-        });
-        if (!goal) throw new NotFoundException("Objetivo não encontrado.");
-      }
-      const data = {
-        titulo: requiredText(
-          p.titulo,
-          "Nome da reserva obrigatório, com até 200 caracteres.",
-          200,
-        ),
-        objetivo_id,
-        valor_centavos: cents(p.valor_centavos ?? 0, true),
-        alvo_centavos: p.alvo_centavos == null ? null : cents(p.alvo_centavos),
-      };
-      // Despesas reais podem consumir saldo reservado. Não escondemos esse déficit;
-      // só impedimos ampliar reservas sem recursos livres para cobrir o acréscimo.
-      const increase = data.valor_centavos - (existing?.valor_centavos ?? 0);
-      if (
-        increase > 0 &&
-        increase > (await this.totals(user, tx)).livre_centavos
-      )
-        throw new BadRequestException(
-          "Saldo livre insuficiente para ampliar esta reserva.",
-        );
-      return existing
-        ? tx.reservas_financeiras.update({ where: { id: existing.id }, data })
-        : tx.reservas_financeiras.create({
-            data: { ...data, usuario_id: user.usuario_id },
-          });
-    });
-  }
-  listReserves(user: UserRecord) {
-    return this.prisma.reservas_financeiras.findMany({
-      where: { usuario_id: user.usuario_id },
-      orderBy: [{ created_at: "asc" }, { id: "asc" }],
-    });
-  }
-  deleteReserve(user: UserRecord, id: number) {
-    return this.write(user, async (tx) => {
-      const deleted = await tx.reservas_financeiras.deleteMany({
-        where: {
-          id: positiveInt(id, "Reserva inválida."),
-          usuario_id: user.usuario_id,
-        },
-      });
-      if (!deleted.count)
-        throw new NotFoundException("Reserva não encontrada.");
     });
   }
 }

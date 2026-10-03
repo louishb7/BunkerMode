@@ -12,13 +12,14 @@ export type Snapshot<T> = {
 export type OutboxOperation = {
   ownerId: number
   operationId: string
-  domain: "task" | "goal" | "tracker" | "occurrence" | "entry" | "reserve"
+  domain: "task" | "goal" | "tracker" | "occurrence" | "entry"
   action: string
   target?: number | string
   parentId?: number | string
   payload: Record<string, unknown>
   baseUpdatedAt?: string
   createdAt: string
+  serverId?: number
   attemptedAt?: string
   status: "pending" | "syncing" | "failed" | "conflict"
   error?: string
@@ -41,8 +42,8 @@ let database: Promise<IDBPDatabase<OfflineDB>> | null = null
 function openDatabase() {
   if (typeof indexedDB === "undefined") return null
   try {
-    database ??= openDB<OfflineDB>("bunkermode-offline", 2, {
-      upgrade(db, oldVersion) {
+    database ??= openDB<OfflineDB>("bunkermode-offline", 3, {
+      async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const store = db.createObjectStore("snapshots", { keyPath: ["ownerId", "key"] })
           store.createIndex("ownerId", "ownerId")
@@ -50,6 +51,31 @@ function openDatabase() {
         if (oldVersion < 2) {
           const outbox = db.createObjectStore("outbox", { keyPath: ["ownerId", "operationId"] })
           outbox.createIndex("ownerId", "ownerId")
+        }
+        if (oldVersion < 3) {
+          let operation = await transaction.objectStore("outbox").openCursor()
+          while (operation) {
+            if ((operation.value.domain as string) === "reserve") await operation.delete()
+            else if (operation.value.domain === "entry" && !operation.value.attemptedAt) {
+              delete operation.value.payload.categoria
+              await operation.update(operation.value)
+            }
+            // Operações já enviadas preservam o payload usado na identidade idempotente.
+            operation = await operation.continue()
+          }
+          let snapshot = await transaction.objectStore("snapshots").openCursor()
+          while (snapshot) {
+            if (snapshot.value.key === "reserves") await snapshot.delete()
+            else if (snapshot.value.key.startsWith("finances:")) {
+              const data = snapshot.value.data as { lancamentos?: Record<string, unknown>[] }
+              if (Array.isArray(data?.lancamentos)) {
+                for (const entry of data.lancamentos)
+                  if (entry && typeof entry === "object") delete entry.categoria
+                await snapshot.update(snapshot.value)
+              }
+            }
+            snapshot = await snapshot.continue()
+          }
         }
       },
     })
@@ -150,9 +176,13 @@ export async function listOutbox(ownerId: number): Promise<OutboxOperation[]> {
   const db = openDatabase()
   if (!db || !validOwner(ownerId)) return []
   try {
-    return (await (await db).getAllFromIndex("outbox", "ownerId", ownerId)).sort(
-      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.operationId.localeCompare(b.operationId)
-    )
+    // Domínios desconhecidos não entram na fila ativa.
+    return (await (await db).getAllFromIndex("outbox", "ownerId", ownerId))
+      .filter((item) => ["task", "goal", "tracker", "occurrence", "entry"].includes(item.domain))
+      .sort(
+        (a, b) =>
+          a.createdAt.localeCompare(b.createdAt) || a.operationId.localeCompare(b.operationId)
+      )
   } catch {
     return []
   }

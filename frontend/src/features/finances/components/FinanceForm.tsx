@@ -1,38 +1,49 @@
 import React, { useState } from "react"
+import type {
+  FinanceEntry,
+  FinanceEntryPayload,
+  FinanceEntryType,
+} from "../../../types/financeContract"
 import Button from "../../../components/ui/Button"
-import { moneyInput, parseMoney } from "../money"
+import { formatMoneyInput, moneyInput, parseMoney } from "../money"
 
-const categories = [
-  "Trabalho",
-  "Moradia",
-  "Alimentação",
-  "Transporte",
-  "Saúde",
-  "Estudos",
-  "Lazer",
-  "Outros",
-]
+type FinanceFormProps = {
+  item?: FinanceEntry | null
+  today: string
+  busy: boolean
+  error: string
+  onSave: (payload: FinanceEntryPayload, id?: number | string) => Promise<unknown>
+  onCancel: () => void
+}
 
-export default function FinanceForm({ item = null, today, busy, error, onSave, onCancel }) {
+export default function FinanceForm({
+  item = null,
+  today,
+  busy,
+  error,
+  onSave,
+  onCancel,
+}: FinanceFormProps) {
   const legacyAdjustment = item?.tipo?.startsWith("ajuste")
-  const [type, setType] = useState(item?.tipo ?? "despesa")
+  const [type, setType] = useState<FinanceEntryType>(item?.tipo ?? "despesa")
   const [value, setValue] = useState(item ? moneyInput(item.valor_centavos) : "")
   const [title, setTitle] = useState(item?.titulo ?? "")
   const [date, setDate] = useState(item?.data?.slice(0, 10) ?? today)
-  const [category, setCategory] = useState(item?.categoria ?? "Outros")
   const [validation, setValidation] = useState("")
   async function submit(event) {
     event.preventDefault()
+    if (busy) return
+    if (!title.trim()) {
+      setValidation("Informe a descrição do movimento.")
+      return
+    }
     const cents = parseMoney(value)
     if (!cents) {
-      setValidation("Informe um valor válido, como 1250,50.")
+      setValidation("Informe um valor entre R$ 0,01 e R$ 21.474.836,47.")
       return
     }
     setValidation("")
-    await onSave(
-      { titulo: title.trim(), tipo: type, valor_centavos: cents, data: date, categoria: category },
-      item?.id
-    )
+    await onSave({ titulo: title.trim(), tipo: type, valor_centavos: cents, data: date }, item?.id)
   }
   return (
     <form onSubmit={submit} className="finance-form">
@@ -43,6 +54,7 @@ export default function FinanceForm({ item = null, today, busy, error, onSave, o
           <button
             type="button"
             role="radio"
+            disabled={busy}
             aria-checked={type === "receita"}
             onClick={() => setType("receita")}
           >
@@ -51,6 +63,7 @@ export default function FinanceForm({ item = null, today, busy, error, onSave, o
           <button
             type="button"
             role="radio"
+            disabled={busy}
             aria-checked={type === "despesa"}
             onClick={() => setType("despesa")}
           >
@@ -64,17 +77,25 @@ export default function FinanceForm({ item = null, today, busy, error, onSave, o
           className="form-field"
           required
           autoFocus
-          inputMode="decimal"
+          name="valor"
+          disabled={busy}
+          inputMode="numeric"
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => setValue(formatMoneyInput(event.target.value))}
           placeholder="0,00"
+          aria-describedby="finance-value-helper"
         />
+        <small id="finance-value-helper" className="text-text-secondary">
+          Digite os centavos: 1 = 0,01; 1250 = 12,50.
+        </small>
       </label>
       <label className="form-label">
         Descrição
         <input
           className="form-field"
           required
+          name="descricao"
+          disabled={busy}
           maxLength={200}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
@@ -86,29 +107,14 @@ export default function FinanceForm({ item = null, today, busy, error, onSave, o
         <input
           className="form-field"
           required
+          name="data"
+          disabled={busy}
           type="date"
           max={today}
           value={date}
           onChange={(event) => setDate(event.target.value)}
         />
       </label>
-      {!legacyAdjustment && (
-        <details className="finance-more">
-          <summary>Mais opções</summary>
-          <label className="form-label">
-            Categoria
-            <select
-              className="form-field"
-              value={category}
-              onChange={(event) => setCategory(event.target.value)}
-            >
-              {categories.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-        </details>
-      )}
       {(validation || error) && (
         <p role="alert" className="text-sm text-danger">
           {validation || error}

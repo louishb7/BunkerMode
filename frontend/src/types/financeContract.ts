@@ -1,19 +1,19 @@
-export type FinanceEntry = {
-  id: number
-  syncStatus?: string
+export const financeEntryTypes = ["receita", "despesa", "ajuste_entrada", "ajuste_saida"] as const
+export type FinanceEntryType = (typeof financeEntryTypes)[number]
+export type FinanceEntryPayload = {
   titulo: string
-  tipo: "receita" | "despesa" | "ajuste_entrada" | "ajuste_saida"
-  categoria: string
+  tipo: FinanceEntryType
   valor_centavos: number
   data: string
 }
-export type Reserve = {
-  id: number
+export type FinanceEntry = {
+  id: number | string
   syncStatus?: string
+  created_at?: string
   titulo: string
-  objetivo_id: number | null
+  tipo: FinanceEntryType
   valor_centavos: number
-  alvo_centavos: number | null
+  data: string
 }
 export type FinanceOverview = {
   mes: string
@@ -22,6 +22,11 @@ export type FinanceOverview = {
   resultado_centavos: number
   receitas_centavos: number
   despesas_centavos: number
-  serie_diaria: { data: string; resultado_centavos: number }[]
+  serie_diaria: {
+    data: string
+    resultado_centavos: number
+    receitas_centavos?: number
+    despesas_centavos?: number
+  }[]
   lancamentos: FinanceEntry[]
 }

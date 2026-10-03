@@ -10,7 +10,7 @@ import {
 } from "./snapshots"
 import type { Task } from "../types/taskContract"
 import type { Tracker } from "../types/trackerContract"
-import type { FinanceOverview, Reserve } from "../types/financeContract"
+import { financeEntryTypes, type FinanceOverview } from "../types/financeContract"
 import { focusStorageKey } from "../features/tasks/focusSession"
 
 type Domain = OutboxOperation["domain"]
@@ -30,8 +30,7 @@ const fields: Record<Domain, string[]> = {
   goal: ["titulo", "descricao", "data_alvo", "status"],
   tracker: ["titulo", "descricao", "objetivo_id"],
   occurrence: [],
-  entry: ["titulo", "tipo", "categoria", "valor_centavos", "data"],
-  reserve: ["titulo", "objetivo_id", "valor_centavos", "alvo_centavos"],
+  entry: ["titulo", "tipo", "valor_centavos", "data"],
 }
 
 let activeOwner: number | null = null
@@ -111,14 +110,14 @@ export async function enqueueOperation(
       }
       return target
     }
-    if (action === "update" && create.attemptedAt && ["entry", "reserve"].includes(domain))
+    if (action === "update" && create.attemptedAt && domain === "entry")
       throw new Error(
         "A criação financeira já foi enviada. Aguarde a reconciliação antes de editar."
       )
     if (
       action === "update" &&
       !create.attemptedAt &&
-      ["task", "goal", "tracker", "entry", "reserve"].includes(domain)
+      ["task", "goal", "tracker", "entry"].includes(domain)
     ) {
       await saveOutboxOperation({ ...create, payload: { ...create.payload, ...normalized } })
       if (activeOwner === ownerId) void syncOutbox(ownerId)
@@ -151,9 +150,7 @@ async function refreshOfficial(ownerId: number, op: OutboxOperation) {
         ? "/objetivos"
         : op.domain === "tracker" || op.domain === "occurrence"
           ? "/acompanhamentos"
-          : op.domain === "reserve"
-            ? "/financas/reservas"
-            : `/financas?mes=${String(op.payload.data ?? new Date().toISOString()).slice(0, 7)}`
+          : `/financas?mes=${String(op.payload.data ?? new Date().toISOString()).slice(0, 7)}`
   const key =
     op.domain === "task"
       ? "tasks:all"
@@ -161,9 +158,7 @@ async function refreshOfficial(ownerId: number, op: OutboxOperation) {
         ? "objectives"
         : op.domain === "tracker" || op.domain === "occurrence"
           ? "trackers"
-          : op.domain === "reserve"
-            ? "reserves"
-            : `finances:${String(op.payload.data ?? new Date().toISOString()).slice(0, 7)}`
+          : `finances:${String(op.payload.data ?? new Date().toISOString()).slice(0, 7)}`
   const result = await request(endpoint)
   if (!result.ok) return false
   await saveSnapshot(ownerId, key, result.data)
@@ -181,7 +176,6 @@ async function refreshSecondaryAfterGoalDelete(ownerId: number) {
     [
       ["tasks:all", "/tarefas"],
       ["trackers", "/acompanhamentos"],
-      ["reserves", "/financas/reservas"],
     ].map(async ([key, endpoint]) => {
       const result = await request(endpoint)
       if (!result.ok || activeOwner !== ownerId) return
@@ -284,6 +278,11 @@ async function run(ownerId: number, epoch: number): Promise<void> {
             : "Não foi possível sincronizar.",
       })
       continue
+    }
+    if (op.domain === "entry" && op.action === "create" && Number.isSafeInteger(result.data?.id)) {
+      op.serverId = result.data.id
+      attempted.serverId = op.serverId
+      await saveOutboxOperation({ ...attempted, status: "syncing", serverId: op.serverId })
     }
     if (!(await refreshOfficial(ownerId, op))) {
       await saveOutboxOperation({ ...attempted, status: "pending" })
@@ -609,7 +608,21 @@ export function projectFinances(
     resultado_centavos: 0,
     receitas_centavos: 0,
     despesas_centavos: 0,
-    serie_diaria: [],
+    serie_diaria: Array.from(
+      {
+        length: new Date(
+          Number(localMonth.slice(0, 4)),
+          Number(localMonth.slice(5, 7)),
+          0
+        ).getDate(),
+      },
+      (_, index) => ({
+        data: `${localMonth}-${String(index + 1).padStart(2, "0")}`,
+        resultado_centavos: 0,
+        receitas_centavos: 0,
+        despesas_centavos: 0,
+      })
+    ),
     lancamentos: [],
   }
   const result = {
@@ -618,70 +631,60 @@ export function projectFinances(
     serie_diaria: [...baseline.serie_diaria],
   }
   for (const op of operations) {
+    if (op.domain !== "entry" || op.action !== "create") continue
+    if (op.serverId && baseline.lancamentos.some((entry) => entry.id === op.serverId)) continue
+    const cents = op.payload.valor_centavos
+    const tipo = op.payload.tipo as FinanceOverview["lancamentos"][number]["tipo"]
     if (
-      op.domain !== "entry" ||
-      op.action !== "create" ||
-      String(op.payload.data).slice(0, 7) !== result.mes
+      typeof cents !== "number" ||
+      !Number.isSafeInteger(cents) ||
+      cents <= 0 ||
+      cents > 2147483647 ||
+      !financeEntryTypes.includes(tipo)
     )
       continue
-    const cents = Number(op.payload.valor_centavos)
-    if (!Number.isSafeInteger(cents)) continue
+    const contributes = op.status !== "failed" && op.status !== "conflict"
     const incoming = op.payload.tipo === "receita" || op.payload.tipo === "ajuste_entrada"
-    result.saldo_centavos += incoming ? cents : -cents
-    if (op.payload.tipo === "receita") result.receitas_centavos += cents
-    if (op.payload.tipo === "despesa") result.despesas_centavos += cents
+    const inMonth = String(op.payload.data).slice(0, 7) === result.mes
+    if (contributes && !(op.serverId && !inMonth))
+      result.saldo_centavos += incoming ? cents : -cents
+    if (!inMonth) continue
+    if (contributes && tipo === "receita") result.receitas_centavos += cents
+    if (contributes && tipo === "despesa") result.despesas_centavos += cents
     result.resultado_centavos = result.receitas_centavos - result.despesas_centavos
     result.lancamentos.unshift({
-      id: `local:${op.operationId}` as unknown as number,
+      id: `local:${op.operationId}`,
       titulo: String(op.payload.titulo ?? ""),
-      tipo: op.payload.tipo as any,
-      categoria: String(op.payload.categoria ?? "Outros"),
+      created_at: op.createdAt,
+      tipo,
       valor_centavos: cents,
       data: String(op.payload.data),
       syncStatus: op.status,
     } as FinanceOverview["lancamentos"][number])
     result.serie_diaria = result.serie_diaria.map((point) =>
+      contributes &&
       point.data >= String(op.payload.data) &&
       ["receita", "despesa"].includes(String(op.payload.tipo))
-        ? { ...point, resultado_centavos: point.resultado_centavos + (incoming ? cents : -cents) }
+        ? {
+            ...point,
+            resultado_centavos: point.resultado_centavos + (incoming ? cents : -cents),
+            receitas_centavos: (point.receitas_centavos ?? 0) + (incoming ? cents : 0),
+            despesas_centavos: (point.despesas_centavos ?? 0) + (incoming ? 0 : cents),
+          }
         : point
     )
   }
-  return result
-}
-
-export function projectReserves(official: Reserve[], operations: OutboxOperation[]): Reserve[] {
-  const items = official.map((item) => ({ ...item }))
-  for (const op of operations) {
-    if (op.domain !== "reserve") continue
-    const id = op.action === "create" ? `local:${op.operationId}` : op.target
-    if (op.action === "create")
-      items.push({
-        id: id as unknown as number,
-        titulo: String(op.payload.titulo ?? ""),
-        objetivo_id: (op.payload.objetivo_id as number) ?? null,
-        valor_centavos: Number(op.payload.valor_centavos ?? 0),
-        alvo_centavos: (op.payload.alvo_centavos as number) ?? null,
-        syncStatus: op.status,
-      })
-    else {
-      const index = items.findIndex((item) => item.id === id)
-      if (index < 0) continue
-      if (op.action === "delete") items.splice(index, 1)
-      else {
-        Object.assign(items[index], op.payload)
-        items[index].syncStatus = op.status
-      }
-    }
-  }
-  const deletedGoals = new Set(
-    operations.filter((op) => op.domain === "goal" && op.action === "delete").map((op) => op.target)
+  result.lancamentos.sort(
+    (a, b) =>
+      b.data.localeCompare(a.data) ||
+      (b.created_at ?? "").localeCompare(a.created_at ?? "") ||
+      (typeof a.id === "number" && typeof b.id === "number"
+        ? b.id - a.id
+        : typeof a.id === "string" && typeof b.id === "number"
+          ? -1
+          : typeof b.id === "string" && typeof a.id === "number"
+            ? 1
+            : String(b.id).localeCompare(String(a.id)))
   )
-  for (const item of items) {
-    if (item.objetivo_id != null && deletedGoals.has(item.objetivo_id)) {
-      item.objetivo_id = null
-      item.syncStatus = item.syncStatus ?? "pending"
-    }
-  }
-  return items
+  return result
 }

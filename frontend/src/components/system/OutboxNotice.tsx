@@ -18,7 +18,6 @@ const domains: Record<OutboxOperation["domain"], string> = {
   tracker: "Acompanhamento",
   occurrence: "Ocorrência",
   entry: "Lançamento",
-  reserve: "Reserva",
 }
 const actions: Record<string, string> = {
   create: "criação",

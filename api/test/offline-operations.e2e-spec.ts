@@ -213,7 +213,6 @@ suite("offline operations on PostgreSQL", () => {
       payload: {
         titulo: "Entrada offline",
         tipo: "receita",
-        categoria: "Outros",
         valor_centavos: 12345,
         data: "2026-01-01",
       },
@@ -332,7 +331,7 @@ suite("offline operations on PostgreSQL", () => {
     ).toBe(0);
   });
 
-  it("replays tracker and reserve mutations without leaking ownership", async () => {
+  it("replays tracker mutations without leaking ownership", async () => {
     const tracker = await send(token, {
       operationId: randomUUID(),
       domain: "tracker",
@@ -370,21 +369,6 @@ suite("offline operations on PostgreSQL", () => {
         where: { id: event.body.id },
       }),
     ).toBe(0);
-    const reserve = {
-      operationId: randomUUID(),
-      domain: "reserve",
-      action: "create",
-      payload: { titulo: "Reserva idempotente", valor_centavos: 500 },
-    };
-    const first = await send(token, reserve).expect(201);
-    expect((await send(token, reserve).expect(201)).body.id).toBe(
-      first.body.id,
-    );
-    expect(
-      await prisma.reservas_financeiras.count({
-        where: { titulo: "Reserva idempotente", usuario_id: userId },
-      }),
-    ).toBe(1);
     await send(otherToken, {
       operationId: randomUUID(),
       domain: "occurrence",
@@ -414,16 +398,6 @@ suite("offline operations on PostgreSQL", () => {
       payload: {
         titulo: "Acompanhamento preservado",
         objetivo_id: goal.body.id,
-      },
-    }).expect(201);
-    const reserve = await send(token, {
-      operationId: randomUUID(),
-      domain: "reserve",
-      action: "create",
-      payload: {
-        titulo: "Reserva preservada",
-        objetivo_id: goal.body.id,
-        valor_centavos: 0,
       },
     }).expect(201);
     const status = {
@@ -466,13 +440,6 @@ suite("offline operations on PostgreSQL", () => {
       (
         await prisma.acompanhamentos.findUnique({
           where: { id: tracker.body.id },
-        })
-      )?.objetivo_id,
-    ).toBeNull();
-    expect(
-      (
-        await prisma.reservas_financeiras.findUnique({
-          where: { id: reserve.body.id },
         })
       )?.objetivo_id,
     ).toBeNull();

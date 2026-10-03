@@ -44,28 +44,4 @@ export class FinancesController {
   ) {
     return this.service.deleteEntry(r.currentUser!, Number(id));
   }
-  @Post("reservas") createReserve(
-    @Req() r: AuthenticatedRequest,
-    @Body() p: unknown,
-  ) {
-    return this.service.saveReserve(r.currentUser!, p);
-  }
-  @Get("reservas")
-  @Header("Cache-Control", "private, no-store")
-  listReserves(@Req() r: AuthenticatedRequest) {
-    return this.service.listReserves(r.currentUser!);
-  }
-  @Patch("reservas/:id") updateReserve(
-    @Req() r: AuthenticatedRequest,
-    @Param("id") id: string,
-    @Body() p: unknown,
-  ) {
-    return this.service.saveReserve(r.currentUser!, p, Number(id));
-  }
-  @Delete("reservas/:id") @HttpCode(204) deleteReserve(
-    @Req() r: AuthenticatedRequest,
-    @Param("id") id: string,
-  ) {
-    return this.service.deleteReserve(r.currentUser!, Number(id));
-  }
 }

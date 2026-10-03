@@ -89,9 +89,6 @@ export const api = {
       { token }
     )
   },
-  listReserves(token) {
-    return request<import("../types/financeContract").Reserve[]>("/financas/reservas", { token })
-  },
   saveFinanceEntry(token, payload, id?) {
     return request(`/financas/lancamentos${id ? `/${id}` : ""}`, {
       token,
@@ -101,16 +98,6 @@ export const api = {
   },
   deleteFinanceEntry(token, id) {
     return request(`/financas/lancamentos/${id}`, { token, method: "DELETE" })
-  },
-  saveReserve(token, payload, id?) {
-    return request(`/financas/reservas${id ? `/${id}` : ""}`, {
-      token,
-      method: id ? "PATCH" : "POST",
-      body: payload,
-    })
-  },
-  deleteReserve(token, id) {
-    return request(`/financas/reservas/${id}`, { token, method: "DELETE" })
   },
   forgotPassword(payload: { email: string }) {
     return request<{ message: string }>("/auth/forgot-password", { method: "POST", body: payload })

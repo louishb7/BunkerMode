@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import { after, beforeEach, test } from "node:test"
 import React, { act } from "react"
-import { createRoot } from "react-dom/client"
 import { MemoryRouter } from "react-router-dom"
 import { JSDOM } from "jsdom"
 import { createServer } from "vite"
@@ -12,6 +11,7 @@ Object.assign(globalThis, {
   HTMLElement: dom.window.HTMLElement,
   IS_REACT_ACT_ENVIRONMENT: true,
 })
+const { createRoot } = await import("react-dom/client")
 const vite = await createServer({
   appType: "custom",
   logLevel: "silent",
@@ -22,11 +22,13 @@ const load = (p) => vite.ssrLoadModule(`/src/${p}`)
 const [
   { useFinances },
   { api },
-  { parseMoney, money },
+  { parseMoney, money, formatMoneyInput },
   { summarizeObjective },
   { default: Page },
   { default: Home },
   { setApiAvailability },
+  { default: FinanceForm },
+  { projectFinances },
 ] = await Promise.all([
   load("features/finances/hooks/useFinances.ts"),
   load("services/bunkermodeApi.ts"),
@@ -35,9 +37,10 @@ const [
   load("features/finances/pages/FinancesPage.tsx"),
   load("features/home/pages/HomePage.tsx"),
   load("offline/apiAvailability.ts"),
+  load("features/finances/components/FinanceForm.tsx"),
+  load("offline/outbox.ts"),
 ])
 after(() => vite.close())
-api.listReserves = async () => ({ ok: true, data: [] })
 beforeEach(() => setApiAvailability("available"))
 const empty = () => ({
   mes: "2026-09",
@@ -72,7 +75,7 @@ test("dinheiro converte decimal em centavos exatos e rejeita representações am
     ["0,01", 1],
     ["0,10", 10],
     ["1,99", 199],
-    ["4200", 420000],
+    ["4200", 4200],
     ["21474836,47", 2147483647],
   ])
     assert.equal(parseMoney(input), cents)
@@ -86,7 +89,10 @@ test("direção mostra vínculos factuais de tarefas e acompanhamentos sem concl
     trackers: [{ titulo: "Fumar", ocorrencias: [] }],
     tasks: [{ titulo: "Ler", status: "PENDENTE" }],
   })
-  assert.deepEqual(result.map((x) => x.kind), ["tracker", "task"])
+  assert.deepEqual(
+    result.map((x) => x.kind),
+    ["tracker", "task"]
+  )
   assert.doesNotMatch(JSON.stringify(result), /%|sucesso|melhor|concluído/)
 })
 test("Finanças desativado não consulta API; mudança de token ignora dados antigos e 401 antigos", async () => {
@@ -146,16 +152,8 @@ test("edição oficial espera releitura e CRUD financeiro online usa contratos p
         resolve({ ok: true, data: { id: 1 } })
       }
     })
-  api.saveReserve = async (_t, p, id) => {
-    actions.push(["reserve", id, p])
-    return { ok: true }
-  }
   api.deleteFinanceEntry = async (_t, id) => {
     actions.push(["deleteEntry", id])
-    return { ok: true }
-  }
-  api.deleteReserve = async (_t, id) => {
-    actions.push(["deleteReserve", id])
     return { ok: true }
   }
   function Probe() {
@@ -175,14 +173,12 @@ test("edição oficial espera releitura e CRUD financeiro online usa contratos p
     assert.equal(await pending, true)
     assert.equal(current.data.saldo_centavos, 123)
     await act(async () => {
-      await current.saveReserve({ objetivo_id: null }, 5)
       await current.deleteEntry(1)
-      await current.deleteReserve(5)
     })
-    assert.equal(reads, 5)
+    assert.equal(reads, 3)
     assert.deepEqual(
       actions.map((a) => a[0]),
-      ["entry", "reserve", "deleteEntry", "deleteReserve"]
+      ["entry", "deleteEntry"]
     )
   } finally {
     await view.close()
@@ -215,8 +211,8 @@ test("erro após edição oficial preserva snapshot e 401 é global", async () =
     await act(async () => assert.equal(await current.saveEntry({}, 1), true))
     assert.equal(current.data.saldo_centavos, 0)
     assert.match(current.error, /Consulta indisponível/)
-    api.deleteReserve = async () => ({ ok: false, status: 401 })
-    await act(async () => assert.equal(await current.deleteReserve(1), false))
+    api.deleteFinanceEntry = async () => ({ ok: false, status: 401 })
+    await act(async () => assert.equal(await current.deleteEntry(1), false))
     assert.equal(unauthorized, 1)
   } finally {
     await view.close()
@@ -236,13 +232,13 @@ test("página financeira funciona sem Objetivos e tem formulários operáveis", 
   })
   try {
     assert.match(view.container.textContent, /Resultado do mês|Nenhum movimento/)
-    assert.match(view.container.textContent, /Reservas|Livre/)
+    assert.doesNotMatch(view.container.textContent, /Reservas|Livre|Categoria/)
     await act(async () =>
       [...view.container.querySelectorAll("button")]
         .find((b) => b.textContent.trim() === "Movimento")
         .click()
     )
-    assert.ok(document.querySelector("input[inputmode=decimal]"))
+    assert.ok(document.querySelector("input[inputmode=numeric]"))
     assert.match(document.querySelector("[role=dialog]").textContent, /Entrada|Saída/)
     assert.doesNotMatch(
       document.querySelector("[role=dialog]").textContent,
@@ -266,7 +262,7 @@ test("Home consulta somente orientação e preserva direções", async () => {
       data: {
         tarefas: [],
         direcoes: [
-          { id: 1, titulo: "Direção independente", status: "ativo", tasks: [], trackers: [], reserves: [] },
+          { id: 1, titulo: "Direção independente", status: "ativo", tasks: [], trackers: [] },
         ],
         financeiro: null,
       },
@@ -304,7 +300,6 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
               titulo: "Estudos",
               tipo: "despesa",
               data: "2026-09-01",
-              categoria: "Outros",
               valor_centavos: 100,
             },
           ],
@@ -345,6 +340,209 @@ test("falha na exclusão financeira aparece na confirmação e permite tentar no
     assert.equal(attempts, 2)
     assert.equal(document.querySelector('[role="dialog"]'), null)
     assert.doesNotMatch(view.container.textContent, /Estudos/)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+
+test("máscara monetária usa os dígitos como centavos sem multiplicação decimal", () => {
+  for (const [digits, formatted, cents] of [
+    ["1", "0,01", 1],
+    ["10", "0,10", 10],
+    ["100", "1,00", 100],
+    ["1000", "10,00", 1000],
+    ["1250", "12,50", 1250],
+    ["2147483647", "21474836,47", 2147483647],
+  ]) {
+    assert.equal(formatMoneyInput(digits), formatted)
+    assert.equal(parseMoney(formatted), cents)
+    assert.equal(parseMoney(digits), cents)
+  }
+  assert.equal(formatMoneyInput("1.250,50"), "1250,50")
+  assert.equal(formatMoneyInput(""), "")
+  assert.equal(parseMoney(formatMoneyInput("2147483648")), null)
+})
+
+async function inputValue(element, value) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(
+      element,
+      value
+    )
+    element.dispatchEvent(new window.Event("input", { bubbles: true }))
+  })
+}
+
+for (const [label, type] of [
+  ["Entrada", "receita"],
+  ["Saída", "despesa"],
+]) {
+  test(`formulário grava ${label} com tipo e centavos corretos, sem categoria`, async () => {
+    const saved = []
+    const view = await mount(FinanceForm, {
+      today: "2026-09-01",
+      busy: false,
+      error: "",
+      onCancel: () => {},
+      onSave: async (...args) => saved.push(args),
+    })
+    try {
+      await act(async () =>
+        [...view.container.querySelectorAll('[role="radio"]')]
+          .find((button) => button.textContent === label)
+          .click()
+      )
+      const value = view.container.querySelector('[name="valor"]')
+      for (const [digits, formatted] of [
+        ["1", "0,01"],
+        ["10", "0,10"],
+        ["100", "1,00"],
+        ["1000", "10,00"],
+        ["1250", "12,50"],
+      ]) {
+        await inputValue(value, digits)
+        assert.equal(value.value, formatted)
+      }
+      await inputValue(view.container.querySelector('[name="descricao"]'), "  Movimento de teste  ")
+      await act(async () =>
+        view.container
+          .querySelector("form")
+          .dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+      )
+      assert.deepEqual(saved[0][0], {
+        titulo: "Movimento de teste",
+        tipo: type,
+        valor_centavos: 1250,
+        data: "2026-09-01",
+      })
+      assert.equal(view.container.querySelectorAll("input").length, 3)
+      assert.equal(view.container.querySelector("select"), null)
+      await inputValue(value, "0")
+      await act(async () =>
+        view.container
+          .querySelector("form")
+          .dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+      )
+      assert.equal(saved.length, 1)
+      assert.match(view.container.querySelector('[role="alert"]').textContent, /valor/)
+    } finally {
+      await view.close()
+    }
+  })
+}
+
+test("projeção de Entrada/Saída conserva saldo, totais, gráfico, ordem e falhas", () => {
+  const official = {
+    ...empty(),
+    mes: "2026-09",
+    serie_diaria: [
+      { data: "2026-09-01", resultado_centavos: 0, receitas_centavos: 0, despesas_centavos: 0 },
+      { data: "2026-09-02", resultado_centavos: 0, receitas_centavos: 0, despesas_centavos: 0 },
+    ],
+  }
+  const operation = (operationId, tipo, valor_centavos, data, status = "pending") => ({
+    domain: "entry",
+    action: "create",
+    operationId,
+    createdAt: `2026-09-02T12:00:0${operationId}Z`,
+    status,
+    payload: { tipo, valor_centavos, data, titulo: tipo },
+  })
+  const operations = [
+    operation("1", "receita", 1250, "2026-09-02"),
+    operation("2", "despesa", 100, "2026-09-01"),
+    operation("3", "receita", 500, "2026-09-02", "failed"),
+  ]
+  const projected = projectFinances(official, operations, "2026-09")
+  assert.equal(projected.saldo_centavos, 1150)
+  assert.equal(projected.receitas_centavos, 1250)
+  assert.equal(projected.despesas_centavos, 100)
+  assert.equal(projected.resultado_centavos, 1150)
+  assert.deepEqual(
+    projected.serie_diaria.map((point) => point.resultado_centavos),
+    [-100, 1150]
+  )
+  assert.equal(projected.serie_diaria.at(-1).receitas_centavos, 1250)
+  assert.equal(projected.serie_diaria.at(-1).despesas_centavos, 100)
+  assert.deepEqual(
+    projected.lancamentos.map((entry) => entry.id),
+    ["local:3", "local:1", "local:2"]
+  )
+  const confirmed = { ...projected, lancamentos: [{ ...projected.lancamentos[1], id: 7 }] }
+  const replay = projectFinances(confirmed, [{ ...operations[0], serverId: 7 }], "2026-09")
+  assert.equal(replay.saldo_centavos, 1150)
+  assert.equal(replay.lancamentos.length, 1)
+  assert.equal(
+    projectFinances(official, [operation("4", "despesa", 10, "2026-08-31")], "2026-09")
+      .saldo_centavos,
+    -10
+  )
+  assert.equal(
+    projectFinances(official, [operation("4", "inválido", 10, "2026-09-01")], "2026-09")
+      .saldo_centavos,
+    0
+  )
+})
+
+test("histórico mostra até oito itens, ordena datas e navega por todas as páginas", async () => {
+  const original = { ...api }
+  api.getFinances = async (_token, month) => ({
+    ok: true,
+    data: {
+      ...empty(),
+      mes: month,
+      lancamentos: Array.from({ length: 17 }, (_, index) => ({
+        id: index + 1,
+        titulo: `Movimento ${index + 1}`,
+        tipo: index % 2 ? "receita" : "despesa",
+        data: `${month}-01`,
+        valor_centavos: 100,
+      })),
+    },
+  })
+  const view = await mount(Page, {
+    token: "pagination",
+    user: { id: 91, timezone: "America/Recife" },
+    onUnauthorized: () => false,
+  })
+  const rows = () =>
+    [...view.container.querySelectorAll(".finance-ledger li")].map(
+      (row) => row.querySelector("strong").textContent
+    )
+  const click = async (label) =>
+    act(async () =>
+      [...view.container.querySelectorAll("button")]
+        .find((button) => button.textContent.trim() === label)
+        .click()
+    )
+  try {
+    assert.deepEqual(
+      rows(),
+      Array.from({ length: 8 }, (_, i) => `Movimento ${17 - i}`)
+    )
+    assert.match(view.container.querySelector(".finance-ledger").textContent, /Entrada/)
+    assert.match(view.container.querySelector(".finance-ledger").textContent, /Saída/)
+    assert.match(view.container.textContent, /Página 1 de 3/)
+    await click("Próxima")
+    assert.deepEqual(
+      rows(),
+      Array.from({ length: 8 }, (_, i) => `Movimento ${9 - i}`)
+    )
+    await click("Próxima")
+    assert.deepEqual(rows(), ["Movimento 1"])
+    assert.equal(
+      [...view.container.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Próxima"
+      ).disabled,
+      true
+    )
+    await click("Anterior")
+    assert.equal(rows().length, 8)
+    await act(async () => view.container.querySelector('[aria-label="Mês anterior"]').click())
+    assert.match(view.container.textContent, /Página 1 de 3/)
+    assert.match(view.container.querySelector(".finance-toolbar").textContent, /Movimento/)
+    assert.doesNotMatch(view.container.textContent, /Reservas|Categoria/)
   } finally {
     await view.close()
     Object.assign(api, original)

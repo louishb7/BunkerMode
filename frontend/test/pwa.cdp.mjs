@@ -75,10 +75,9 @@ async function main() {
   const goalsByOwner = new Map([[1, [{ id: 1, titulo: "Objetivo 1", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Objetivo 2", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]]])
   const trackersByOwner = new Map([[1, [{ id: 1, titulo: "Acompanhamento 1", objetivo_id: 1, ocorrencias: [], updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Acompanhamento 2", objetivo_id: 2, ocorrencias: [], updated_at: new Date().toISOString() }]]])
   const entriesByOwner = new Map([[1, []], [2, []]])
-  const reservesByOwner = new Map([[1, []], [2, []]])
   const appliedOrder = []
   let nextTaskId = 3
-  let nextGoalId = 3, nextTrackerId = 3, nextOccurrenceId = 1, nextEntryId = 1, nextReserveId = 1, nextSeriesId = 1
+  let nextGoalId = 3, nextTrackerId = 3, nextOccurrenceId = 1, nextEntryId = 1, nextSeriesId = 1
   const api = createServer((request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*")
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
@@ -151,7 +150,6 @@ async function main() {
             goals.splice(index, 1)
             for (const item of tasksByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
             for (const item of trackersByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
-            for (const item of reservesByOwner.get(id)) if (item.objetivo_id === operation.target) item.objetivo_id = null
             processed.set(key, { deleted: true })
           } else if (operation.domain === "tracker" && operation.action === "create") {
             if (operation.payload.objetivo_id != null && !goalsByOwner.get(id).some((goal) => goal.id === operation.payload.objetivo_id)) {
@@ -173,13 +171,6 @@ async function main() {
             const created = { id: nextEntryId++, usuario_id: id, ...operation.payload }
             entriesByOwner.get(id).push(created)
             processed.set(key, created)
-          } else if (operation.domain === "reserve" && operation.action === "create") {
-            if (operation.payload.objetivo_id != null && !goalsByOwner.get(id).some((goal) => goal.id === operation.payload.objetivo_id)) {
-              response.writeHead(400).end(JSON.stringify({ message: "Objetivo inválido" })); return
-            }
-            const created = { id: nextReserveId++, usuario_id: id, ...operation.payload }
-            reservesByOwner.get(id).push(created)
-            processed.set(key, created)
           } else { response.writeHead(400).end(JSON.stringify({ message: "Operação de teste desconhecida" })); return }
           appliedOrder.push({ domain: operation.domain, action: operation.action, target: operation.target, parentId: operation.parentId, payload: operation.payload })
         }
@@ -199,15 +190,20 @@ async function main() {
     else if (pathname.endsWith("/tarefas")) response.end(JSON.stringify(tasksByOwner.get(id)))
     else if (pathname.endsWith("/objetivos")) response.end(JSON.stringify(goalsByOwner.get(id)))
     else if (pathname.endsWith("/acompanhamentos")) response.end(JSON.stringify(trackersByOwner.get(id)))
-    else if (pathname.endsWith("/financas/reservas")) response.end(JSON.stringify(reservesByOwner.get(id)))
     else if (pathname.endsWith("/financas")) {
       const month = new URL(request.url, "http://local").searchParams.get("mes") || new Date().toISOString().slice(0, 7)
       const entries = entriesByOwner.get(id).filter((item) => item.data.slice(0, 7) === month)
       const incoming = entries.filter((item) => item.tipo === "receita").reduce((sum, item) => sum + item.valor_centavos, 0)
       const outgoing = entries.filter((item) => item.tipo === "despesa").reduce((sum, item) => sum + item.valor_centavos, 0)
+      const daily = Array.from({ length: new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate() }, (_, index) => {
+        const day = `${month}-${String(index + 1).padStart(2, '0')}`
+        const incomes = entries.filter((item) => item.tipo === 'receita' && item.data <= day).reduce((sum, item) => sum + item.valor_centavos, 0)
+        const expenses = entries.filter((item) => item.tipo === 'despesa' && item.data <= day).reduce((sum, item) => sum + item.valor_centavos, 0)
+        return { data: day, receitas_centavos: incomes, despesas_centavos: expenses, resultado_centavos: incomes - expenses }
+      })
       response.end(JSON.stringify({ mes: month, moeda: "BRL", saldo_centavos: id * 100 + incoming - outgoing,
-        resultado_centavos: id * 100 + incoming - outgoing, receitas_centavos: id * 100 + incoming,
-        despesas_centavos: outgoing, serie_diaria: [], lancamentos: entries }))
+        resultado_centavos: incoming - outgoing, receitas_centavos: incoming,
+        despesas_centavos: outgoing, serie_diaria: daily, lancamentos: entries }))
     } else response.writeHead(404).end(JSON.stringify({ message: "Não encontrado" }))
   })
   await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve))
@@ -276,14 +272,15 @@ async function main() {
     assert.equal(await evaluate("(async () => { const names = await caches.keys(); const keys = (await Promise.all(names.map(async n => (await caches.open(n)).keys()))).flat().map(r => r.url); return keys.some(x => new URL(x).pathname === '/index.html') && !keys.some(x => x.includes('/api/v2/')); })()"), true)
     console.log("PWA: manifest, service worker e precache estático OK")
 
-    await evaluate("(async()=>{const db=await new Promise((ok,fail)=>{const r=indexedDB.open('bunkermode-offline',1);r.onupgradeneeded=()=>{const s=r.result.createObjectStore('snapshots',{keyPath:['ownerId','key']});s.createIndex('ownerId','ownerId')};r.onsuccess=()=>ok(r.result);r.onerror=()=>fail(r.error)});const tx=db.transaction('snapshots','readwrite');tx.objectStore('snapshots').put({ownerId:99,key:'legacy:test',data:{preservado:true},updatedAt:new Date().toISOString(),schemaVersion:1});await new Promise(ok=>tx.oncomplete=ok);db.close()})()")
+    await evaluate("(async()=>{const db=await new Promise((ok,fail)=>{const r=indexedDB.open('bunkermode-offline',2);r.onupgradeneeded=()=>{const s=r.result.createObjectStore('snapshots',{keyPath:['ownerId','key']});s.createIndex('ownerId','ownerId');const o=r.result.createObjectStore('outbox',{keyPath:['ownerId','operationId']});o.createIndex('ownerId','ownerId')};r.onsuccess=()=>ok(r.result);r.onerror=()=>fail(r.error)});const tx=db.transaction(['snapshots','outbox'],'readwrite');tx.objectStore('snapshots').put({ownerId:99,key:'legacy:test',data:{preservado:true},updatedAt:new Date().toISOString(),schemaVersion:1});tx.objectStore('snapshots').put({ownerId:99,key:'reserves',data:[],updatedAt:new Date().toISOString(),schemaVersion:1});tx.objectStore('snapshots').put({ownerId:99,key:'finances:2026-01',data:{lancamentos:[{categoria:'Outros'}]},updatedAt:new Date().toISOString(),schemaVersion:1});tx.objectStore('outbox').put({ownerId:99,operationId:'legacy-reserve',domain:'reserve',action:'create',payload:{titulo:'Legado'},createdAt:new Date().toISOString(),status:'pending'});await new Promise(ok=>tx.oncomplete=ok);db.close()})()")
     await evaluate(`localStorage.setItem('bunkermode_token','one'); localStorage.setItem('bunkermode_usuario',${JSON.stringify(JSON.stringify(user(1)))})`)
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
     assert.equal(await evaluate("navigator.onLine"), true)
     assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
-    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([99,'legacy:test']);r.onsuccess=()=>ok(db.version===2 && db.objectStoreNames.contains('outbox') && r.result?.data?.preservado===true)})})()"), true)
-    console.log("PWA: upgrade IndexedDB v1→v2 preserva snapshots existentes OK")
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([99,'legacy:test']);r.onsuccess=()=>ok(db.version===3 && db.objectStoreNames.contains('outbox') && r.result?.data?.preservado===true)})})()"), true)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});const read=(store,key)=>new Promise(ok=>{const r=db.transaction(store).objectStore(store).get(key);r.onsuccess=()=>ok(r.result)});return !(await read('snapshots',[99,'reserves'])) && !(await read('outbox',[99,'legacy-reserve'])) && !('categoria' in (await read('snapshots',[99,'finances:2026-01'])).data.lancamentos[0])})()"), true)
+    console.log("PWA: upgrade IndexedDB v2→v3 remove reservas e categorias e preserva os demais snapshots OK")
     await navigate("/objetivos")
     await visible("Objetivo 1")
     await navigate("/financas")
@@ -489,30 +486,31 @@ async function main() {
 
     await setConnectivity(false)
     await navigate("/financas")
-    await visible("Nova reserva")
+    await visible("Movimento")
     const callsBeforeFinance = syncCalls
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Movimento'))?.click()")
     await visible("Salvar movimento")
     await evaluate("[...document.querySelectorAll('[role=radio]')].find(button => button.textContent.includes('Entrada'))?.click()")
     await evaluate("document.querySelectorAll('[role=dialog] input')[0]?.focus()")
-    await cdp.send("Input.insertText", { text: "12,34" })
+    await cdp.send("Input.insertText", { text: "1234" })
     await evaluate("document.querySelectorAll('[role=dialog] input')[1]?.focus()")
     await cdp.send("Input.insertText", { text: "Receita local" })
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Salvar movimento')?.click()")
     await visible("Receita local")
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Nova reserva')?.click()")
-    await visible("Salvar reserva")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Movimento'))?.click()")
+    await visible("Salvar movimento")
+    await evaluate("[...document.querySelectorAll('[role=radio]')].find(button => button.textContent.includes('Saída'))?.click()")
     await evaluate("document.querySelectorAll('[role=dialog] input')[0]?.focus()")
-    await cdp.send("Input.insertText", { text: "Reserva local" })
+    await cdp.send("Input.insertText", { text: "100" })
+    assert.equal(await evaluate("document.querySelectorAll('[role=dialog] input')[0].value"), "1,00")
     await evaluate("document.querySelectorAll('[role=dialog] input')[1]?.focus()")
-    await cdp.send("Input.insertText", { text: "5,00" })
-    await evaluate("[...document.querySelectorAll('[role=dialog] select option')].find(option => option.textContent === 'Meta local').selected = true; document.querySelector('[role=dialog] select').dispatchEvent(new Event('change',{bubbles:true}))")
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Salvar reserva')?.click()")
-    await visible("Reserva local")
+    await cdp.send("Input.insertText", { text: "Despesa local" })
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Salvar movimento')?.click()")
+    await visible("Despesa local")
+    assert.equal(await evaluate("document.querySelector('.finance-result').textContent.includes('11,34')"), true)
     assert.equal(syncCalls, callsBeforeFinance)
     await navigate("/financas")
     await visible("Receita local")
-    await visible("Reserva local")
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeFinance = refreshCount
     await setConnectivity(true)
@@ -520,9 +518,17 @@ async function main() {
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "finanças sincronizadas")
     assert.equal(refreshCount - refreshesBeforeFinance, 1)
     assert.equal(entriesByOwner.get(2).filter((item) => item.titulo === "Receita local").length, 1)
-    assert.equal(reservesByOwner.get(2).filter((item) => item.titulo === "Reserva local").length, 1)
-    assert.equal(reservesByOwner.get(2).find((item) => item.titulo === "Reserva local").objetivo_id, linkedGoal.id)
-    console.log("PWA: lançamento e reserva persistem offline, projetam centavos e sincronizam uma vez OK")
+    assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Receita local").tipo, "receita")
+    assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Receita local").valor_centavos, 1234)
+    assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").tipo, "despesa")
+    assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").valor_centavos, 100)
+    await until(() => evaluate("document.querySelector('.finance-result').textContent.includes('13,34')"), "saldo oficial após entrada e saída")
+    assert.equal(await evaluate("document.querySelector('.finance-chart svg').querySelectorAll('path').length"), 3)
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true)
+    assert.equal(await evaluate("document.querySelector('.finance-toolbar').getBoundingClientRect().bottom <= document.querySelector('.finance-state').getBoundingClientRect().top"), true)
+    await cdp.send("Emulation.clearDeviceMetricsOverride")
+    console.log("PWA: entrada e saída preservam tipo e centavos offline, após recarga e sincronização OK")
 
     await setConnectivity(false)
     await navigate("/tarefas")

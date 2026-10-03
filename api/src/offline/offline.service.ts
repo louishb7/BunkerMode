@@ -16,7 +16,7 @@ import { FinancesService } from "../finances/finances.service";
 
 type Operation = {
   operationId: string;
-  domain: "task" | "goal" | "tracker" | "occurrence" | "entry" | "reserve";
+  domain: "task" | "goal" | "tracker" | "occurrence" | "entry";
   action: string;
   target?: number;
   parentId?: number;
@@ -41,7 +41,6 @@ const allowed: Record<Operation["domain"], string[]> = {
   tracker: ["create", "update", "delete"],
   occurrence: ["create", "delete"],
   entry: ["create"],
-  reserve: ["create"],
 };
 const payloadFields: Record<Operation["domain"], string[]> = {
   task: [
@@ -59,8 +58,7 @@ const payloadFields: Record<Operation["domain"], string[]> = {
   goal: ["titulo", "descricao", "data_alvo", "status"],
   tracker: ["titulo", "descricao", "objetivo_id"],
   occurrence: [],
-  entry: ["titulo", "tipo", "categoria", "valor_centavos", "data"],
-  reserve: ["titulo", "objetivo_id", "valor_centavos", "alvo_centavos"],
+  entry: ["titulo", "tipo", "valor_centavos", "data"],
 };
 
 function parseOperation(raw: unknown): Operation {
@@ -100,8 +98,11 @@ function parseOperation(raw: unknown): Operation {
   )
     throw new BadRequestException("Operação inválida.");
   const operation = value as Operation;
+  // Lançamentos selecionam somente os campos ativos no serviço; o payload original
+  // mantém a identidade das operações enviadas antes da remoção de campos históricos.
   if (
     operation.payload &&
+    operation.domain !== "entry" &&
     Object.keys(operation.payload).some(
       (key) => !payloadFields[operation.domain].includes(key),
     )
@@ -274,7 +275,6 @@ export class OfflineService {
       await this.trackers.deleteOccurrence(user, op.parentId!, id);
       return { deleted: true };
     }
-    if (op.domain === "entry") return this.finances.createEntry(user, p);
-    return this.finances.saveReserve(user, p);
+    return this.finances.createEntry(user, p);
   }
 }

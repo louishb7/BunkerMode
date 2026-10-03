@@ -20,7 +20,6 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
   const entry = {
     titulo: "Saldo inicial",
     tipo: "ajuste_entrada",
-    categoria: "Ajuste",
     valor_centavos: 100000,
     data: "2026-01-01",
   };
@@ -83,11 +82,106 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
   });
   const auth = () => ({ Authorization: `Bearer ${token}` });
 
+  it("persiste Entrada/Saída e recalcula saldo, resumo, histórico e gráfico ao mudar o tipo", async () => {
+    const income = await request(app.getHttpServer())
+      .post(`${base}/financas/lancamentos`)
+      .set(auth())
+      .send({
+        titulo: "Trabalho",
+        tipo: "receita",
+        valor_centavos: 1250,
+        data: "2026-09-01",
+      })
+      .expect(201);
+    const expense = await request(app.getHttpServer())
+      .post(`${base}/financas/lancamentos`)
+      .set(auth())
+      .send({
+        titulo: "Compra",
+        tipo: "despesa",
+        valor_centavos: 100,
+        data: "2026-09-02",
+      })
+      .expect(201);
+    expect(
+      await prisma.lancamentos_financeiros.findMany({
+        where: { usuario_id: owner.usuario_id },
+        orderBy: { id: "asc" },
+      }),
+    ).toMatchObject([
+      { tipo: "receita", valor_centavos: 1250 },
+      { tipo: "despesa", valor_centavos: 100 },
+    ]);
+    let overview = (
+      await request(app.getHttpServer())
+        .get(`${base}/financas?mes=2026-09`)
+        .set(auth())
+        .expect(200)
+    ).body;
+    expect(overview).toMatchObject({
+      saldo_centavos: 1150,
+      resultado_centavos: 1150,
+      receitas_centavos: 1250,
+      despesas_centavos: 100,
+    });
+    expect(overview.serie_diaria.at(-1)).toMatchObject({
+      resultado_centavos: 1150,
+      receitas_centavos: 1250,
+      despesas_centavos: 100,
+    });
+    expect(overview.lancamentos.map((item: { id: number }) => item.id)).toEqual(
+      [expense.body.id, income.body.id],
+    );
+    expect(overview.lancamentos[0]).not.toHaveProperty("categoria");
+    await request(app.getHttpServer())
+      .patch(`${base}/financas/lancamentos/${expense.body.id}`)
+      .set(auth())
+      .send({ tipo: "receita" })
+      .expect(200);
+    overview = await service.overview(owner, "2026-09");
+    expect(overview).toMatchObject({
+      saldo_centavos: 1350,
+      resultado_centavos: 1350,
+      receitas_centavos: 1350,
+      despesas_centavos: 0,
+    });
+    expect(overview.serie_diaria.at(-1)).toMatchObject({
+      resultado_centavos: 1350,
+      receitas_centavos: 1350,
+      despesas_centavos: 0,
+    });
+    await request(app.getHttpServer())
+      .delete(`${base}/financas/lancamentos/${income.body.id}`)
+      .set(auth())
+      .expect(204);
+    expect(await service.registeredBalance(owner)).toBe(100);
+  });
+
+  it("remove reservas e categorias do schema e encerra as rotas da feature", async () => {
+    const tables = await prisma.$queryRaw<
+      { table_name: string }[]
+    >`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'reservas_financeiras'`;
+    const columns = await prisma.$queryRaw<
+      { column_name: string }[]
+    >`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'lancamentos_financeiros' AND column_name = 'categoria'`;
+    expect(tables).toEqual([]);
+    expect(columns).toEqual([]);
+    await request(app.getHttpServer())
+      .get(`${base}/financas/reservas`)
+      .set(auth())
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`${base}/financas/reservas`)
+      .set(auth())
+      .send({})
+      .expect(404);
+  });
+
   it("401 protege todas as novas leituras e escritas", async () => {
     await request(app.getHttpServer()).get(`${base}/financas`).expect(401);
     await request(app.getHttpServer()).get(`${base}/orientacao`).expect(401);
     await request(app.getHttpServer())
-      .post(`${base}/financas/reservas`)
+      .post(`${base}/financas/lancamentos`)
       .send({})
       .expect(401);
     await request(app.getHttpServer())
@@ -95,7 +189,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .send({})
       .expect(401);
   });
-  it("cria, lista por mês, edita e exclui valores exatos, distinguindo saldo, fluxo e reserva", async () => {
+  it("cria, lista por mês, edita e exclui valores exatos, distinguindo saldo, fluxo", async () => {
     const initial = await request(app.getHttpServer())
       .post(`${base}/financas/lancamentos`)
       .set(auth())
@@ -112,11 +206,6 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       tipo: "despesa",
       valor_centavos: 10,
       data: "2026-02-01",
-    });
-    const reserve = await service.saveReserve(owner, {
-      titulo: "Emergência",
-      valor_centavos: 42000,
-      alvo_centavos: 100000,
     });
     let overview = await service.overview(owner, "2026-02");
     expect(overview).toMatchObject({
@@ -136,16 +225,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .send({ valor_centavos: 20 })
       .expect(200);
     await request(app.getHttpServer())
-      .patch(`${base}/financas/reservas/${reserve.id}`)
-      .set(auth())
-      .send({ titulo: "Reserva atualizada", alvo_centavos: null })
-      .expect(200);
-    await request(app.getHttpServer())
       .delete(`${base}/financas/lancamentos/${expense.id}`)
-      .set(auth())
-      .expect(204);
-    await request(app.getHttpServer())
-      .delete(`${base}/financas/reservas/${reserve.id}`)
       .set(auth())
       .expect(204);
     overview = await service.overview(owner, "2026-01");
@@ -157,14 +237,13 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     });
     expect(overview.lancamentos.map((x) => x.id)).toEqual([initial.body.id]);
   });
-  it("aceita movimento simples e limita a lista sem truncar resumo ou série diária", async () => {
+  it("aceita movimento simples e retorna o histórico mensal completo sem truncar resumo ou série diária", async () => {
     const created = await request(app.getHttpServer())
       .post(`${base}/financas/lancamentos`)
       .set(auth())
       .send({ titulo: "Entrada rápida", tipo: "receita", valor_centavos: 123 })
       .expect(201);
     expect(created.body).toMatchObject({
-      categoria: "Outros",
       valor_centavos: 123,
     });
     const month = created.body.data.slice(0, 7);
@@ -173,13 +252,12 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
         usuario_id: owner.usuario_id,
         titulo: `Saída ${index}`,
         tipo: "despesa",
-        categoria: "Outros",
         valor_centavos: 100,
         data: new Date(`${month}-01T00:00:00Z`),
       })),
     });
     const overview = await service.overview(owner, month);
-    expect(overview.lancamentos).toHaveLength(20);
+    expect(overview.lancamentos).toHaveLength(26);
     expect(overview.receitas_centavos).toBe(123);
     expect(overview.despesas_centavos).toBe(2500);
     expect(overview.resultado_centavos).toBe(-2377);
@@ -191,11 +269,6 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     const goal = await prisma.objetivos.create({
       data: { usuario_id: owner.usuario_id, titulo: "Direção privada" },
     });
-    const reserve = await service.saveReserve(owner, {
-      titulo: "Segredo financeiro",
-      valor_centavos: 500,
-      objetivo_id: goal.id,
-    });
     const foreignHeaders = { Authorization: `Bearer ${otherToken}` };
     expect(
       (
@@ -205,7 +278,7 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
           .expect(200)
       ).body.lancamentos,
     ).toEqual([]);
-    for (const path of [`lancamentos/${row.id}`, `reservas/${reserve.id}`]) {
+    for (const path of [`lancamentos/${row.id}`]) {
       await request(app.getHttpServer())
         .patch(`${base}/financas/${path}`)
         .set(foreignHeaders)
@@ -216,19 +289,9 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
         .set(foreignHeaders)
         .expect(404);
     }
-    await request(app.getHttpServer())
-      .post(`${base}/financas/reservas`)
-      .set(foreignHeaders)
-      .send({ titulo: "Inválida", objetivo_id: goal.id })
-      .expect(404);
     const foreignGoal = await prisma.objetivos.create({
       data: { usuario_id: other.usuario_id, titulo: "Alheio" },
     });
-    await request(app.getHttpServer())
-      .patch(`${base}/financas/reservas/${reserve.id}`)
-      .set(auth())
-      .send({ objetivo_id: foreignGoal.id })
-      .expect(404);
     const tracker = await app
       .get(TrackersService)
       .create(owner, { objetivo_id: goal.id, titulo: "Ocorrência" });
@@ -254,7 +317,6 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       { data: "2099-01-01" },
       { data: "2026-02-30" },
       { tipo: "transferencia" },
-      { categoria: "inventada" },
       { titulo: "" },
     ])
       await request(app.getHttpServer())
@@ -266,39 +328,15 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .get(`${base}/financas?mes=2026-13`)
       .set(auth())
       .expect(400);
-    await request(app.getHttpServer())
-      .post(`${base}/financas/reservas`)
-      .set(auth())
-      .send({ titulo: "Reserva", valor_centavos: -1 })
-      .expect(400);
-    await request(app.getHttpServer())
-      .post(`${base}/financas/reservas`)
-      .set(auth())
-      .send({ titulo: "Reserva", alvo_centavos: 0 })
-      .expect(400);
-    await request(app.getHttpServer())
-      .post(`${base}/financas/reservas`)
-      .set(auth())
-      .send({ titulo: "Reserva", objetivo_id: 2147483647 })
-      .expect(404);
   });
-  it("impede sobrealocação concorrente, mas registra despesa real e mostra déficit", async () => {
+  it("registra entradas e saídas e sinaliza apenas saldo negativo na Home", async () => {
     await service.createEntry(owner, { ...entry, valor_centavos: 100 });
-    const results = await Promise.allSettled([
-      service.saveReserve(owner, { titulo: "A", valor_centavos: 80 }),
-      service.saveReserve(owner, { titulo: "B", valor_centavos: 80 }),
-    ]);
-    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     await service.createEntry(owner, {
       ...entry,
       tipo: "despesa",
       valor_centavos: 50,
     });
-    expect(await service.totals(owner)).toMatchObject({
-      saldo_centavos: 50,
-      reservado_centavos: 80,
-      livre_centavos: -30,
-    });
+    expect(await service.registeredBalance(owner)).toBe(50);
     const home = await request(app.getHttpServer())
       .get(`${base}/orientacao`)
       .set(auth())
@@ -315,37 +353,22 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       .expect(200);
     expect(negative.body.financeiro).toEqual({ saldo_centavos: -50 });
   });
-  it("desvincula e exclui objetivo preservando reservas, acompanhamentos e ocorrências", async () => {
+  it("desvincula e exclui objetivo preservando acompanhamentos e ocorrências", async () => {
     const goal = await prisma.objetivos.create({
       data: { usuario_id: owner.usuario_id, titulo: "Direção" },
     });
     await service.createEntry(owner, entry);
-    const reserve = await service.saveReserve(owner, {
-      titulo: "Recursos",
-      valor_centavos: 42000,
-      objetivo_id: goal.id,
-    });
     const trackers = app.get(TrackersService);
     const tracker = await trackers.create(owner, {
       titulo: "Condição",
       objetivo_id: goal.id,
     });
     await trackers.recordOccurrence(owner, tracker.id);
-    await service.saveReserve(owner, { objetivo_id: null }, reserve.id);
     await trackers.update(owner, tracker.id, { objetivo_id: null });
     expect((await trackers.list(owner))[0]).toMatchObject({
       objetivo_id: null,
       ocorrencias: [expect.any(Object)],
     });
-    expect(
-      await prisma.reservas_financeiras.findFirst({
-        where: { usuario_id: owner.usuario_id },
-      }),
-    ).toMatchObject({
-      objetivo_id: null,
-      valor_centavos: 42000,
-    });
-    await service.saveReserve(owner, { objetivo_id: goal.id }, reserve.id);
     await trackers.update(owner, tracker.id, { objetivo_id: goal.id });
     await request(app.getHttpServer())
       .delete(`${base}/objetivos/${goal.id}`)
@@ -355,25 +378,12 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
       objetivo_id: null,
       ocorrencias: [expect.any(Object)],
     });
-    expect(
-      await prisma.reservas_financeiras.findFirst({
-        where: { usuario_id: owner.usuario_id },
-      }),
-    ).toMatchObject({
-      objetivo_id: null,
-      valor_centavos: 42000,
-    });
   });
   it("preferência remove sinais da Home sem apagar dados e mantém módulos independentes", async () => {
     const goal = await prisma.objetivos.create({
       data: { usuario_id: owner.usuario_id, titulo: "Direção" },
     });
     await service.createEntry(owner, entry);
-    await service.saveReserve(owner, {
-      titulo: "Reserva privada",
-      valor_centavos: 42000,
-      objetivo_id: goal.id,
-    });
     let home = (
       await request(app.getHttpServer())
         .get(`${base}/orientacao`)
@@ -398,12 +408,6 @@ dbSuite("Finanças, vínculos e orientação no PostgreSQL real", () => {
     expect(home.financeiro).toBeNull();
     expect(JSON.stringify(home)).not.toContain("42000");
     expect(JSON.stringify(home)).not.toContain("Reserva privada");
-    // Preferência não substitui autenticação/ownership: acesso próprio direto permanece.
-    expect(
-      await prisma.reservas_financeiras.count({
-        where: { usuario_id: owner.usuario_id },
-      }),
-    ).toBe(1);
     await request(app.getHttpServer())
       .patch(`${base}/objetivos/${goal.id}/status`)
       .set(auth())

@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "../../../services/bunkermodeApi"
 import { getErrorMessage } from "../../../api/httpClient"
-import type { FinanceOverview, Reserve } from "../../../types/financeContract"
+import {
+  financeEntryTypes,
+  type FinanceOverview,
+  type FinanceEntryPayload,
+} from "../../../types/financeContract"
 import { getFinanceSnapshot, setFinanceSnapshot } from "../../../state/financeCache"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
 import { readSnapshot, saveSnapshot } from "../../../offline/snapshots"
 import type { OutboxOperation } from "../../../offline/snapshots"
-import {
-  enqueueOperation,
-  projectFinances,
-  projectReserves,
-  subscribeOutbox,
-} from "../../../offline/outbox"
+import { enqueueOperation, projectFinances, subscribeOutbox } from "../../../offline/outbox"
 
 const validFinance = (data: unknown): data is FinanceOverview => {
   const item = data as FinanceOverview
@@ -35,22 +34,12 @@ const validFinance = (data: unknown): data is FinanceOverview => {
         !!entry &&
         Number.isSafeInteger(entry.id) &&
         typeof entry.titulo === "string" &&
-        typeof entry.tipo === "string" &&
+        financeEntryTypes.includes(entry.tipo) &&
         typeof entry.data === "string" &&
         Number.isSafeInteger(entry.valor_centavos)
     )
   )
 }
-const validReserves = (data: unknown): data is Reserve[] =>
-  Array.isArray(data) &&
-  data.every(
-    (item) =>
-      item &&
-      Number.isSafeInteger(item.id) &&
-      typeof item.titulo === "string" &&
-      Number.isSafeInteger(item.valor_centavos)
-  )
-
 export function useFinances({ token, ownerId, onUnauthorized, enabled = true, month = undefined }) {
   const key = `${ownerId}:${month ?? "current"}`
   const durableKey = `finances:${month ?? "current"}`
@@ -59,48 +48,7 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
     return data ? { key, data } : null
   })
   const [operations, setOperations] = useState<OutboxOperation[]>([])
-  const [reserves, setReserves] = useState<Reserve[]>([])
   useEffect(() => (ownerId ? subscribeOutbox(ownerId, setOperations) : undefined), [ownerId])
-  useEffect(() => {
-    const update = (event: Event) => {
-      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
-      if (detail?.ownerId !== ownerId || detail.key !== durableKey) return
-      void readSnapshot(ownerId, durableKey, validFinance).then((entry) => {
-        if (entry) {
-          setFinanceSnapshot(key, entry.data)
-          setSnapshot({ key, data: entry.data })
-        }
-      })
-    }
-    window.addEventListener("bunkermode-official-change", update)
-    return () => window.removeEventListener("bunkermode-official-change", update)
-  }, [ownerId, durableKey, key])
-  useEffect(() => {
-    let alive = true
-    void readSnapshot(ownerId, "reserves", validReserves).then((entry) => {
-      if (alive && entry) setReserves(entry.data)
-    })
-    if (enabled && getApiAvailability() !== "unavailable") {
-      void api.listReserves(token).then(async (result) => {
-        if (alive && result.ok && validReserves(result.data)) {
-          setReserves(result.data)
-          await saveSnapshot(ownerId, "reserves", result.data)
-        }
-      })
-    }
-    const update = (event: Event) => {
-      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
-      if (detail?.ownerId === ownerId && detail.key === "reserves")
-        void readSnapshot(ownerId, "reserves", validReserves).then((entry) => {
-          if (alive && entry) setReserves(entry.data)
-        })
-    }
-    window.addEventListener("bunkermode-official-change", update)
-    return () => {
-      alive = false
-      window.removeEventListener("bunkermode-official-change", update)
-    }
-  }, [ownerId, token, enabled])
   const [loading, setLoading] = useState(enabled)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -130,6 +78,24 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
     setError("")
     return true
   }, [enabled, token, month, key, durableKey, ownerId, onUnauthorized])
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId: number; key: string }>).detail
+      if (!enabled || detail?.ownerId !== ownerId || !detail.key.startsWith("finances:")) return
+      if (detail.key !== durableKey) {
+        void refresh()
+        return
+      }
+      void readSnapshot(ownerId, durableKey, validFinance).then((entry) => {
+        if (entry) {
+          setFinanceSnapshot(key, entry.data)
+          setSnapshot({ key, data: entry.data })
+        }
+      })
+    }
+    window.addEventListener("bunkermode-official-change", update)
+    return () => window.removeEventListener("bunkermode-official-change", update)
+  }, [ownerId, durableKey, key, enabled, refresh])
   useEffect(() => {
     setLastUpdated(null)
     version.current += 1
@@ -189,7 +155,7 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
     // A escrita confirmada não deve ser repetida se apenas a releitura falhar.
     return true
   }
-  async function saveEntry(payload, id?) {
+  async function saveEntry(payload: FinanceEntryPayload, id?: number | string) {
     if (id && typeof id === "number") {
       if (getApiAvailability() === "unavailable") {
         setError("Editar um lançamento confirmado exige conexão com a API.")
@@ -197,6 +163,9 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
       }
       return mutate(() => api.saveFinanceEntry(token, payload, id))
     }
+    if (!enabled || !token || mutation.current) return false
+    mutation.current = true
+    setBusy(true)
     try {
       await enqueueOperation(ownerId, "entry", id ? "update" : "create", payload, id)
       setError("")
@@ -204,6 +173,9 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
     } catch (error) {
       setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
       return false
+    } finally {
+      mutation.current = false
+      setBusy(false)
     }
   }
   async function deleteEntry(id) {
@@ -222,38 +194,6 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
       return false
     }
   }
-  async function saveReserve(payload, id?) {
-    if (id && typeof id === "number") {
-      if (getApiAvailability() === "unavailable") {
-        setError("Editar uma reserva confirmada exige conexão com a API.")
-        return false
-      }
-      return mutate(() => api.saveReserve(token, payload, id))
-    }
-    try {
-      await enqueueOperation(ownerId, "reserve", id ? "update" : "create", payload, id)
-      return true
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
-      return false
-    }
-  }
-  async function deleteReserve(id) {
-    if (typeof id === "number") {
-      if (getApiAvailability() === "unavailable") {
-        setError("Excluir uma reserva confirmada exige conexão com a API.")
-        return false
-      }
-      return mutate(() => api.deleteReserve(token, id))
-    }
-    try {
-      await enqueueOperation(ownerId, "reserve", "delete", {}, id)
-      return true
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Não foi possível remover localmente.")
-      return false
-    }
-  }
   return {
     lastUpdated,
     data: enabled
@@ -264,14 +204,11 @@ export function useFinances({ token, ownerId, onUnauthorized, enabled = true, mo
         )
       : null,
     hasOfficialSnapshot: Boolean(snapshot?.key === key ? snapshot.data : getFinanceSnapshot(key)),
-    reserves: enabled ? projectReserves(reserves, operations) : [],
     loading,
     busy,
     error,
     refresh,
     saveEntry,
     deleteEntry,
-    saveReserve,
-    deleteReserve,
   }
 }

@@ -30,6 +30,24 @@ export class GoalsController {
     return this.goalsService.create(request.currentUser!, payload ?? {});
   }
 
+  @Get("objetivos/conquistas")
+  achievements(@Req() request: AuthenticatedRequest) {
+    return this.goalsService.listAchievements(request.currentUser!);
+  }
+
+  @Post("objetivos/:objetivoId/conquistar")
+  conquer(
+    @Req() request: AuthenticatedRequest,
+    @Param("objetivoId") objetivoId: string,
+    @Body() payload: { nota?: unknown },
+  ) {
+    return this.goalsService.conquer(
+      request.currentUser!,
+      Number(objetivoId),
+      payload ?? {},
+    );
+  }
+
   @Patch("objetivos/ordem")
   reorder(@Req() request: AuthenticatedRequest, @Body() payload: unknown) {
     return this.goalsService.reorder(request.currentUser!, payload ?? {});

@@ -1,7 +1,7 @@
 import ObjectiveOperationalPanel from "../components/ObjectiveOperationalPanel"
 import ObjectiveLinkComposer from "../components/ObjectiveLinkComposer"
 import { Plus } from "lucide-react"
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import Button from "../../../components/ui/Button"
@@ -18,9 +18,46 @@ import { useObjectives } from "../hooks/useObjectives"
 import { useObjectiveTasks } from "../hooks/useObjectiveTasks"
 import { useTrackers } from "../hooks/useTrackers"
 import TrackerForm from "../components/TrackerForm"
+import AchievementGallery from "../components/AchievementGallery"
+import AchievementDetails from "../components/AchievementDetails"
+import ConquerObjectiveDialog from "../components/ConquerObjectiveDialog"
+import { useAchievements } from "../hooks/useAchievements"
+import "../objectives.css"
 
 export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const objectives = useObjectives({ onUnauthorized, token, ownerId: user.id })
+  const achievements = useAchievements({ onUnauthorized, token, ownerId: user.id })
+  const [context, setContext] = useState(
+    window.location.hash.startsWith("#conquista") ? "achievements" : "active"
+  )
+  const [memoryId, setMemoryId] = useState(
+    Number(window.location.hash.match(/^#conquista-(\d+)$/)?.[1]) || null
+  )
+  const [conquerTarget, setConquerTarget] = useState(null)
+  const memory = achievements.achievements.find((item) => item.id === memoryId)
+  const conqueredIds = new Set(achievements.achievements.map((item) => item.objetivo_id))
+  const ongoing = objectives.objetivos.filter(
+    (item) => item.status !== "concluido" && !conqueredIds.has(item.id)
+  )
+  useEffect(() => {
+    const update = () => {
+      setContext(window.location.hash.startsWith("#conquista") ? "achievements" : "active")
+      setMemoryId(Number(window.location.hash.match(/^#conquista-(\d+)$/)?.[1]) || null)
+    }
+    window.addEventListener("hashchange", update)
+    return () => window.removeEventListener("hashchange", update)
+  }, [])
+  function selectContext(next) {
+    setContext(next)
+    setMemoryId(null)
+    window.history.replaceState(null, "", next === "achievements" ? "#conquistas" : "#em-andamento")
+  }
+  function openMemory(achievement) {
+    setConquerTarget(null)
+    setContext("achievements")
+    setMemoryId(achievement.id)
+    window.history.replaceState(null, "", `#conquista-${achievement.id}`)
+  }
   const tasksEnabled = getEnabledModules(user).some((module) => module.key === "tasks")
   const objectiveTasks = useObjectiveTasks({
     token,
@@ -29,6 +66,25 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     enabled: tasksEnabled,
   })
   const trackers = useTrackers({ token, ownerId: user.id, onUnauthorized })
+  const secondaryTrackerGroups = [
+    {
+      title: "Acompanhamentos sem objetivo",
+      copy: "Seus registros permanecem aqui. Você pode vinculá-los novamente ao adicionar a um objetivo.",
+      items: trackers.trackers.filter((item) => item.objetivo_id === null),
+    },
+    {
+      title: "Acompanhamentos de objetivos conquistados",
+      copy: "Os registros atuais continuam disponíveis. Novas ocorrências preservam a memória da conquista.",
+      items: trackers.trackers.filter(
+        (item) =>
+          item.objetivo_id !== null &&
+          (conqueredIds.has(item.objetivo_id) ||
+            objectives.objetivos.some(
+              (goal) => goal.id === item.objetivo_id && goal.status === "concluido"
+            ))
+      ),
+    },
+  ].filter((group) => group.items.length)
   const [addingTo, setAddingTo] = useState(null)
   const [linkType, setLinkType] = useState("task")
   const [linkSearch, setLinkSearch] = useState("")
@@ -87,10 +143,10 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   }
 
   return (
-    <section className="mx-auto grid max-w-[1080px] gap-5">
+    <section className="objectives-page mx-auto grid max-w-[1200px] gap-5">
       <PageHeader
         actions={
-          <Button disabled={busy} onClick={openCreateObjective}>
+          <Button variant="secondary" disabled={busy} onClick={openCreateObjective}>
             <Plus size={17} aria-hidden="true" />
             Novo objetivo
           </Button>
@@ -102,6 +158,23 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
 
       <StatusNotice status={objectives.status} />
       <StatusNotice status={trackers.status} />
+
+      <nav className="objective-contexts" aria-label="Contextos dos objetivos">
+        <button
+          type="button"
+          aria-pressed={context === "active"}
+          onClick={() => selectContext("active")}
+        >
+          Em andamento <span>{ongoing.length}</span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={context === "achievements"}
+          onClick={() => selectContext("achievements")}
+        >
+          Conquistas <span>{achievements.achievements.length}</span>
+        </button>
+      </nav>
 
       {formOpen && (
         <Dialog
@@ -118,50 +191,87 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         </Dialog>
       )}
 
-      <ObjetivoList
-        onAdd={(goal) => {
-          setLinkType(tasksEnabled && goal.status === "ativo" ? "task" : "tracker")
-          setLinkSearch("")
-          setAddingTo(goal)
-        }}
-        onUnlinkTracker={(tracker) => trackers.updateTracker(tracker, { objetivo_id: null })}
-        onCompleteTask={(task) => objectiveTasks.operateTask(task)}
-        tasksEnabled={tasksEnabled}
-        loading={busy}
-        objectivesLoading={objectives.loading}
-        objectivesError={objectives.status.type === "error" ? objectives.status.message : ""}
-        tasksByObjetivo={objectiveTasks.tasksByObjetivo}
-        tasksLoading={objectiveTasks.loading}
-        tasksError={objectiveTasks.error}
-        onRetryTasks={objectiveTasks.refresh}
-        objetivos={objectives.objetivos}
-        onCreate={openCreateObjective}
-        onDelete={setDeleteTarget}
-        onEdit={(objetivo) => {
-          setEditingObjetivo(objetivo)
-          setFormOpen(true)
-        }}
-        onMoveToTop={moveObjetivoToTop}
-        onUpdateStatus={objectives.updateObjetivoStatus}
-        onUnlinkTask={setUnlinkTarget}
-        unlinkingId={objectiveTasks.unlinkingId}
-        trackersByObjective={trackers.byObjective}
-        trackersLoading={trackers.loading}
-        trackersError={trackers.error}
-        trackersLoaded={trackers.loaded}
-        onRetryTrackers={trackers.refresh}
-        trackerBusyId={trackers.busyId}
-        onEditTracker={(tracker) =>
-          setTrackerForm({
-            objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id),
-            tracker,
-          })
-        }
-        onDeleteTracker={setDeleteTrackerTarget}
-        onRecordOccurrence={trackers.recordOccurrence}
-        onDeleteOccurrence={trackers.deleteOccurrence}
-        timezone={user?.timezone}
-      />
+      {context === "active" && (
+        <ObjetivoList
+          onAdd={(goal) => {
+            setLinkType(tasksEnabled && goal.status === "ativo" ? "task" : "tracker")
+            setLinkSearch("")
+            setAddingTo(goal)
+          }}
+          onUnlinkTracker={(tracker) => trackers.updateTracker(tracker, { objetivo_id: null })}
+          onCompleteTask={(task) => objectiveTasks.operateTask(task)}
+          tasksEnabled={tasksEnabled}
+          loading={busy}
+          objectivesLoading={objectives.loading}
+          objectivesError={objectives.status.type === "error" ? objectives.status.message : ""}
+          tasksByObjetivo={objectiveTasks.summaryTasksByObjetivo}
+          tasksLoading={objectiveTasks.loading}
+          tasksError={objectiveTasks.error}
+          onRetryTasks={objectiveTasks.refresh}
+          objetivos={ongoing}
+          onCreate={openCreateObjective}
+          onDelete={setDeleteTarget}
+          onEdit={(objetivo) => {
+            setEditingObjetivo(objetivo)
+            setFormOpen(true)
+          }}
+          onMoveToTop={moveObjetivoToTop}
+          onUpdateStatus={objectives.updateObjetivoStatus}
+          onConquer={(goal) => {
+            achievements.clearError()
+            setConquerTarget(goal)
+          }}
+          onUnlinkTask={setUnlinkTarget}
+          trackersByObjective={trackers.byObjective}
+          trackersLoading={trackers.loading}
+          trackersError={trackers.error}
+          trackersLoaded={trackers.loaded}
+          onRetryTrackers={trackers.refresh}
+          onEditTracker={(tracker) =>
+            setTrackerForm({
+              objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id),
+              tracker,
+            })
+          }
+          onDeleteTracker={setDeleteTrackerTarget}
+          onRecordOccurrence={trackers.recordOccurrence}
+          onDeleteOccurrence={trackers.deleteOccurrence}
+          timezone={user?.timezone}
+        />
+      )}
+      {context === "achievements" &&
+        (memory ? (
+          <AchievementDetails
+            key={memory.id}
+            achievement={memory}
+            onBack={() => selectContext("achievements")}
+          />
+        ) : (
+          <AchievementGallery
+            achievements={achievements.achievements}
+            onSelect={openMemory}
+            loading={achievements.loading}
+            error={achievements.error}
+            onRetry={achievements.refresh}
+            timezone={user?.timezone}
+          />
+        ))}
+
+      {conquerTarget && (
+        <ConquerObjectiveDialog
+          objetivo={conquerTarget}
+          timezone={user?.timezone}
+          saving={achievements.saving}
+          error={achievements.error}
+          onClose={() => setConquerTarget(null)}
+          onOpenMemory={openMemory}
+          onConquer={async (note) => {
+            const result = await achievements.conquer(conquerTarget.id, note)
+            if (result) await objectives.refresh()
+            return result
+          }}
+        />
+      )}
 
       {addingTo && (
         <Dialog title="Adicionar vínculo" onClose={() => setAddingTo(null)}>
@@ -194,28 +304,26 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           />
         </Dialog>
       )}
-      {trackers.trackers.some((item) => item.objetivo_id === null) && (
-        <section className="border-t border-border pt-6">
-          <h2 className="text-lg font-semibold">Acompanhamentos sem objetivo</h2>
-          <p className="text-sm text-text-secondary">
-            Seus registros permanecem aqui. Você pode vinculá-los novamente ao adicionar a um
-            objetivo.
-          </p>
-          <ObjectiveOperationalPanel
-            objetivo={{ titulo: "Acompanhamentos sem objetivo" }}
-            tasksEnabled={false}
-            trackers={trackers.trackers.filter((item) => item.objetivo_id === null)}
-            trackersLoaded={trackers.loaded}
-            trackersLoading={trackers.loading}
-            trackerBusyId={trackers.busyId}
-            onEditTracker={(tracker) => setTrackerForm({ objetivo: null, tracker })}
-            onDeleteTracker={setDeleteTrackerTarget}
-            onRecordOccurrence={trackers.recordOccurrence}
-            onDeleteOccurrence={trackers.deleteOccurrence}
-            timezone={user?.timezone}
-          />
-        </section>
-      )}
+      {context === "active" &&
+        secondaryTrackerGroups.map((group) => (
+          <section key={group.title} className="border-t border-border pt-6">
+            <h2 className="text-lg font-semibold">{group.title}</h2>
+            <p className="text-sm text-text-secondary">{group.copy}</p>
+            <ObjectiveOperationalPanel
+              objetivo={{ titulo: group.title }}
+              tasksEnabled={false}
+              trackers={group.items}
+              trackersLoaded={trackers.loaded}
+              trackersLoading={trackers.loading}
+              trackerBusyId={trackers.busyId}
+              onEditTracker={(tracker) => setTrackerForm({ objetivo: null, tracker })}
+              onDeleteTracker={setDeleteTrackerTarget}
+              onRecordOccurrence={trackers.recordOccurrence}
+              onDeleteOccurrence={trackers.deleteOccurrence}
+              timezone={user?.timezone}
+            />
+          </section>
+        ))}
 
       {trackerForm && (
         <Dialog

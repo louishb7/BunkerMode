@@ -176,6 +176,21 @@ export const api = {
   listObjetivos(token) {
     return request("/objetivos", { token })
   },
+  listAchievements(token) {
+    return request<import("../types/achievementContract").Achievement[]>("/objetivos/conquistas", {
+      token,
+    })
+  },
+  conquerObjective(token, id, nota: string | null) {
+    return request<import("../types/achievementContract").Achievement>(
+      `/objetivos/${id}/conquistar`,
+      {
+        token,
+        method: "POST",
+        body: { nota },
+      }
+    )
+  },
   createObjetivo(token, payload) {
     return request("/objetivos", { token, method: "POST", body: payload })
   },

@@ -599,6 +599,8 @@ describe("HTTP application", () => {
   });
 
   it("rejects protected endpoints without token", async () => {
+    await request(app.getHttpServer()).get("/api/v2/objetivos/conquistas").expect(401);
+    await request(app.getHttpServer()).post("/api/v2/objetivos/1/conquistar").expect(401);
     await request(app.getHttpServer()).get("/api/v2/usuarios/me").expect(401);
     await request(app.getHttpServer()).get("/api/v2/acompanhamentos").expect(401);
     await request(app.getHttpServer()).post("/api/v2/acompanhamentos/1/ocorrencias").expect(401);

@@ -1,0 +1,824 @@
+@layer components {
+  .objectives-page {
+    --objective-paper: light-dark(#f5f2eb, #0e1014);
+    --objective-ink: light-dark(#1d1b18, #ece9e3);
+    --objective-muted: light-dark(#61594f, #b4b0a8);
+    --objective-line: light-dark(#d4ccc0, #333740);
+    --objective-ember: light-dark(#b6471c, #ff9d64);
+    min-width: 0;
+  }
+  .objective-contexts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .objective-contexts button {
+    min-height: 48px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    padding: 8px 0;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .objective-contexts button[aria-pressed="true"] {
+    border-bottom-color: var(--color-accent);
+    color: var(--color-text-primary);
+    font-weight: 650;
+  }
+  .objective-contexts span {
+    margin-left: 8px;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+  }
+  .objective-layout {
+    grid-template-columns: minmax(155px, 195px) minmax(0, 1fr);
+    gap: 28px;
+  }
+  .objective-rail-item[aria-current="true"] {
+    background: transparent;
+  }
+  .objective-mobile-picker {
+    display: none;
+  }
+  .objective-workspace {
+    min-width: 0;
+    background: var(--objective-paper);
+    color: var(--objective-ink);
+    border-radius: 14px;
+    padding: 16px clamp(16px, 2vw, 28px) 30px;
+  }
+  .objective-workspace-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .objective-today {
+    margin: 8px 0 0;
+    padding: 14px 0 18px;
+    border-bottom: 1px solid var(--objective-line);
+  }
+  .today-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .today-heading h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .today-heading span {
+    font-size: 11px;
+    color: var(--objective-muted);
+  }
+  .objective-today ul {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .objective-today li {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    align-items: flex-start;
+  }
+  .today-check {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    min-height: 44px;
+    flex: none;
+    border: 0;
+    background: transparent;
+    color: var(--objective-ember);
+    cursor: pointer;
+  }
+  .today-check:disabled {
+    color: var(--objective-muted);
+    cursor: default;
+  }
+  .today-name {
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--objective-ink);
+    text-align: left;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .objective-canvas {
+    position: relative;
+    min-width: 0;
+    container: objective-map / inline-size;
+    isolation: isolate;
+    background-image: radial-gradient(
+      circle,
+      light-dark(#79705c0d, #ffffff07) 0.7px,
+      transparent 0.7px
+    );
+    background-size: 23px 23px;
+  }
+  .map-connections {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: -1;
+    overflow: visible;
+  }
+  .map-line {
+    fill: none;
+    stroke: var(--objective-line);
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .map-line.is-recent {
+    stroke: color-mix(in srgb, var(--objective-ember) 38%, var(--objective-line));
+  }
+  .map-event-pulse {
+    fill: none;
+    stroke: var(--objective-ember);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 0.12 0.88;
+    animation: map-event 850ms ease-out both;
+  }
+  .map-event-pulse.is-converging {
+    animation-direction: reverse;
+  }
+  .map-root {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 32px;
+    text-align: center;
+  }
+  .objective-crown {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    color: var(--objective-muted, var(--color-text-secondary));
+    fill: transparent;
+  }
+  .objective-crown.is-achieved {
+    color: var(--objective-ember, var(--color-accent));
+    fill: color-mix(in srgb, currentColor 18%, transparent);
+  }
+  .map-root h2 {
+    max-width: 26ch;
+    margin: 16px 0 0;
+    font-size: clamp(25px, 2.6vw, 32px);
+    line-height: 1.17;
+    font-weight: 550;
+    letter-spacing: -0.04em;
+    overflow-wrap: anywhere;
+  }
+  .map-purpose {
+    max-width: 52ch;
+    margin: 14px 0 0;
+    color: var(--objective-muted);
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .map-root-meta {
+    margin: 10px 0 -4px;
+    color: var(--objective-muted);
+    font-size: 11px;
+  }
+  .map-root-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 10px;
+    margin-top: 20px;
+  }
+  .map-root-actions button {
+    font-size: 11px;
+  }
+  .map-root-actions button:last-child {
+    color: var(--objective-ember);
+    border-color: var(--objective-line);
+  }
+  .map-root-anchor {
+    width: 9px;
+    height: 9px;
+    margin-top: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--objective-ember);
+    background: var(--objective-paper);
+  }
+  .map-groups {
+    display: grid;
+    grid-template-columns: repeat(var(--map-group-count), minmax(0, 1fr));
+    gap: 26px;
+    padding-top: 70px;
+  }
+  .map-group {
+    min-width: 0;
+  }
+  .map-group h3 {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 9px;
+    min-height: 44px;
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--objective-muted);
+  }
+  .map-group h3 small {
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .map-station {
+    width: 13px;
+    height: 13px;
+    border: 1.5px solid var(--objective-muted);
+    border-radius: 50%;
+    background: var(--objective-paper);
+  }
+  .map-node-list {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0 0 0 24px;
+    list-style: none;
+  }
+  .map-node-list li {
+    min-width: 0;
+  }
+  .map-node {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 62px;
+    width: 100%;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--objective-ink);
+    text-align: left;
+    cursor: pointer;
+  }
+  .map-node:hover {
+    background: light-dark(#1d1b1806, #ffffff06);
+  }
+  .map-node-anchor {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+  }
+  .map-task-mark {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 1.5px solid var(--objective-muted);
+    border-radius: 50%;
+    background: var(--objective-paper);
+    color: var(--objective-muted);
+  }
+  .map-task-mark.is-routine {
+    width: 26px;
+    height: 26px;
+    border-style: dashed;
+  }
+  .map-task-mark.is-complete {
+    border-style: solid;
+    border-color: var(--objective-ember);
+    color: var(--objective-ember);
+  }
+  .map-occurrence-mark {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--objective-line);
+    border-radius: 50%;
+    background: var(--objective-paper);
+  }
+  .map-occurrence-mark > span {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 1px;
+    width: 33px;
+    height: 33px;
+    line-height: 31px;
+    border: 1px solid var(--objective-muted);
+    border-radius: 50%;
+    color: var(--objective-ink);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .map-occurrence-mark small {
+    font-size: 9px;
+  }
+  .map-node-copy {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+  .map-node-copy strong {
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .map-node-copy > span {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--objective-muted);
+    overflow-wrap: anywhere;
+  }
+  .map-node-copy small {
+    font-size: 10px;
+    color: var(--objective-muted);
+  }
+  .map-expand {
+    min-height: 44px;
+    margin: 8px 0 0 24px;
+    padding: 7px 12px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--objective-muted);
+    text-align: left;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .map-expand:hover {
+    color: var(--objective-ink);
+    background: light-dark(#1d1b1806, #ffffff06);
+  }
+  .map-empty {
+    max-width: 42ch;
+    margin: 32px auto 0;
+    font-size: 13px;
+    color: var(--objective-muted);
+    line-height: 1.6;
+    text-align: center;
+  }
+  .objective-node-details {
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    bottom: 20px;
+    width: min(460px, calc(100% - 40px));
+    max-height: calc(100dvh - 40px);
+    align-content: start;
+  }
+  .node-detail-copy {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .node-detail-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+  .achievement-gallery {
+    min-width: 0;
+    padding: 8px 0 32px;
+  }
+  .achievement-intro {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+  }
+  .achievement-collection {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 32px 24px;
+    margin: 38px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .achievement-object {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    min-height: 190px;
+    padding: 16px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    text-align: center;
+    color: var(--color-text-primary);
+    cursor: pointer;
+  }
+  .achievement-object:hover {
+    background: var(--color-surface-subtle);
+  }
+  .achievement-object .objective-crown {
+    width: 78px;
+    height: 78px;
+    margin-bottom: 22px;
+  }
+  .achievement-object strong {
+    max-width: 24ch;
+    font-size: 14px;
+    line-height: 1.5;
+    font-weight: 550;
+    overflow-wrap: anywhere;
+  }
+  .achievement-object time {
+    margin-top: 7px;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+  }
+  .achievement-empty {
+    padding: 50px 0;
+    text-align: center;
+    color: var(--color-text-secondary);
+  }
+  .achievement-empty .objective-crown {
+    width: 50px;
+    height: 50px;
+  }
+  .achievement-empty h2 {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+  }
+  .achievement-empty p {
+    max-width: 42ch;
+    margin-inline: auto;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .conquer-dialog form {
+    display: grid;
+    gap: 22px;
+  }
+  .conquer-dialog h3 {
+    margin: 0;
+    text-align: center;
+    font-size: 23px;
+    font-weight: 550;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .conquer-symbol {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 100px;
+  }
+  .conquer-symbol .objective-crown {
+    width: 64px;
+    height: 64px;
+    position: relative;
+  }
+  .conquer-rays {
+    position: absolute;
+    width: 240px;
+    height: 100px;
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1;
+    stroke-dasharray: 0.12 0.88;
+    animation: crown-converge 800ms ease-out both;
+  }
+  .is-celebrating .objective-crown {
+    animation: crown-arrival 1400ms ease-out both;
+  }
+  .conquer-dates {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 14px;
+    padding-block: 16px;
+    margin: 0;
+    border-block: 1px solid var(--color-border);
+  }
+  .conquer-dates dt {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+  }
+  .conquer-dates dd {
+    margin: 5px 0 0;
+    font-size: 13px;
+  }
+  .conquer-note {
+    display: grid;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .conquer-note span {
+    color: var(--color-text-secondary);
+    font-size: 11px;
+  }
+  .conquer-note textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 90px;
+    padding: 12px;
+    border: 1px solid var(--color-control-border);
+    border-radius: 7px;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font-size: 14px;
+  }
+  .conquer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .conquer-actions button:last-child {
+    color: var(--color-accent);
+  }
+  .conquer-saved {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    text-align: center;
+    line-height: 1.6;
+  }
+  .achievement-memory {
+    min-width: 0;
+    padding: 16px clamp(16px, 4vw, 48px) 40px;
+    border-radius: 14px;
+    background: var(--objective-paper);
+    color: var(--objective-ink);
+  }
+  .memory-back {
+    margin-left: -12px;
+  }
+  .memory-heading {
+    max-width: 660px;
+    margin: 26px auto 36px;
+    text-align: center;
+  }
+  .memory-heading .objective-crown {
+    width: 86px;
+    height: 86px;
+    margin-bottom: 20px;
+  }
+  .memory-heading h2 {
+    margin: 8px 0 16px;
+    font-size: clamp(26px, 4vw, 40px);
+    line-height: 1.2;
+    font-weight: 550;
+    letter-spacing: -0.035em;
+    overflow-wrap: anywhere;
+  }
+  .memory-duration {
+    font-size: 13px;
+    color: var(--objective-muted);
+  }
+  .memory-dates {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--objective-muted);
+  }
+  .memory-heading blockquote {
+    margin: 32px auto 0;
+    max-width: 45ch;
+    font-size: 17px;
+    line-height: 1.8;
+    font-style: italic;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .memory-legacy {
+    max-width: 64ch;
+    margin: 26px auto;
+    font-size: 13px;
+    color: var(--objective-muted);
+    line-height: 1.7;
+  }
+  .memory-facts {
+    max-width: 720px;
+    margin: 0 auto 30px;
+    padding-top: 24px;
+    border-top: 1px solid var(--objective-line);
+  }
+  .memory-facts h3 {
+    font-size: 13px;
+    font-weight: 550;
+  }
+  .memory-facts ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 20px 36px;
+    margin: 24px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .memory-facts li {
+    min-width: 0;
+  }
+  .memory-facts li > span {
+    display: block;
+    font-size: 10px;
+    color: var(--objective-muted);
+    margin-bottom: 6px;
+  }
+  .memory-facts strong {
+    font-size: 13px;
+    font-weight: 550;
+    overflow-wrap: anywhere;
+  }
+  .memory-facts p {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--objective-muted);
+    line-height: 1.6;
+  }
+  .achievement-memory > button[aria-expanded] {
+    display: flex;
+    margin-inline: auto;
+  }
+  .memory-final-map {
+    margin-top: 30px;
+    border-top: 1px solid var(--objective-line);
+    padding-top: 22px;
+  }
+  @container objective-map (max-width: 600px) {
+    .map-root {
+      align-items: flex-start;
+      text-align: left;
+      padding-top: 28px;
+    }
+    .map-root h2 {
+      max-width: 30ch;
+      font-size: clamp(25px, 5cqi, 33px);
+    }
+    .map-root-actions {
+      justify-content: flex-start;
+      gap: 2px;
+    }
+    .map-root-anchor {
+      margin-left: 2px;
+    }
+    .map-groups {
+      grid-template-columns: minmax(0, 1fr);
+      padding-top: 38px;
+      gap: 34px;
+    }
+    .map-node-list {
+      padding-left: 26px;
+      gap: 8px;
+    }
+    .map-node {
+      grid-template-columns: 44px minmax(0, 1fr);
+      max-width: 100%;
+    }
+    .map-node-copy strong {
+      font-size: 14px;
+    }
+    .map-empty {
+      margin-left: 24px;
+      text-align: left;
+    }
+  }
+  @media (max-width: 850px) {
+    .objective-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+    }
+    .objective-rail-title,
+    .objective-rail-items {
+      display: none;
+    }
+    .objective-mobile-picker {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      font-size: 11px;
+      color: var(--color-text-secondary);
+    }
+    .objective-mobile-picker select {
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      border: 0;
+      border-bottom: 1px solid var(--color-border);
+      border-radius: 0;
+      background: transparent;
+      color: var(--color-text-primary);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      padding: 6px 26px 6px 0;
+    }
+  }
+  @media (max-width: 600px) {
+    .objective-today ul {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .objective-workspace {
+      padding-inline: 14px;
+      margin-inline: -4px;
+    }
+    .objective-contexts {
+      gap: 20px;
+    }
+    .objective-node-details {
+      top: auto;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      max-height: 85dvh;
+      border-radius: 18px 18px 0 0;
+      padding-bottom: max(20px, env(safe-area-inset-bottom));
+    }
+    .achievement-collection {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .achievement-object .objective-crown {
+      width: 62px;
+      height: 62px;
+    }
+    .achievement-object strong {
+      font-size: 13px;
+    }
+    .achievement-memory {
+      padding-inline: 16px;
+    }
+    .memory-heading .objective-crown {
+      width: 68px;
+      height: 68px;
+    }
+    .conquer-dialog {
+      max-height: calc(100dvh - 32px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .map-event-pulse,
+    .conquer-rays {
+      display: none;
+      animation: none;
+    }
+    .is-celebrating .objective-crown {
+      animation: none;
+    }
+  }
+}
+@keyframes map-event {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes crown-converge {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.7;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes crown-arrival {
+  0% {
+    fill: transparent;
+    transform: translateY(4px) scale(0.95);
+  }
+  60% {
+    fill: color-mix(in srgb, currentColor 28%, transparent);
+    transform: translateY(0) scale(1.04);
+  }
+  100% {
+    fill: color-mix(in srgb, currentColor 18%, transparent);
+    transform: scale(1);
+  }
+}

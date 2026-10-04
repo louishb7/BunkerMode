@@ -29,14 +29,13 @@ export default function ObjetivoList({
   onEdit,
   onMoveToTop,
   onUpdateStatus,
+  onConquer,
   onUnlinkTask,
-  unlinkingId,
   trackersByObjective = {},
   trackersLoading,
   trackersError,
   trackersLoaded,
   onRetryTrackers,
-  trackerBusyId,
   onEditTracker,
   onDeleteTracker,
   onRecordOccurrence,
@@ -76,6 +75,21 @@ export default function ObjetivoList({
   return (
     <div className="objective-layout">
       <nav className="objective-rail" aria-label="Selecionar objetivo">
+        <label className="objective-mobile-picker">
+          <span>Seu objetivo</span>
+          <select
+            value={selected.id}
+            onChange={(event) =>
+              select(ordered.find((item) => String(item.id) === event.target.value)?.id)
+            }
+          >
+            {ordered.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.titulo}
+              </option>
+            ))}
+          </select>
+        </label>
         <p className="objective-rail-title">
           Suas direções <span>{ordered.length}</span>
         </p>
@@ -117,11 +131,10 @@ export default function ObjetivoList({
         onEdit={() => onEdit(selected)}
         onMoveToTop={activeIndex > 0 ? () => onMoveToTop(selected.id) : null}
         onUpdateStatus={(status) => onUpdateStatus(selected.id, status)}
+        onConquer={() => onConquer(selected)}
         onUnlinkTask={onUnlinkTask}
-        unlinkingId={unlinkingId}
         onUnlinkTracker={onUnlinkTracker}
         onCompleteTask={onCompleteTask}
-        trackerBusyId={trackerBusyId}
         onEditTracker={onEditTracker}
         onDeleteTracker={onDeleteTracker}
         onRecordOccurrence={onRecordOccurrence}

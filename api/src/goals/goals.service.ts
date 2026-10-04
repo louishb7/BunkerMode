@@ -9,6 +9,8 @@ import {
 } from "../common/domain-helpers";
 import { PrismaService } from "../prisma/prisma.service";
 import { GOAL_STATUS, GoalResponse, toGoalResponse } from "./goals.types";
+import { Prisma } from "@prisma/client";
+import { captureAchievement } from "./achievement-snapshot";
 
 type CreateGoalPayload = {
   titulo?: unknown;
@@ -129,18 +131,118 @@ export class GoalsService {
     goalId: number,
     value: unknown,
   ): Promise<GoalResponse> {
-    const existing = await this.findOwned(user, goalId);
     const status = goalStatus(value);
-    const now = new Date();
-    const goal = await this.prisma.objetivos.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        concluded_at: status === GOAL_STATUS.concluded ? now : null,
-        updated_at: now,
+    if (status === GOAL_STATUS.concluded) {
+      await this.conquer(user, goalId, {});
+      return toGoalResponse(await this.findOwned(user, goalId));
+    }
+    const id = positiveInt(goalId, "Objetivo não encontrado.");
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM objetivos WHERE id = ${id} AND usuario_id = ${user.usuario_id} FOR UPDATE`;
+      const existing = await tx.objetivos.findFirst({
+        where: { id, usuario_id: user.usuario_id },
+      });
+      if (!existing)
+        throw new HttpException(
+          "Objetivo não encontrado.",
+          HttpStatus.BAD_REQUEST,
+        );
+      if (existing.status === GOAL_STATUS.concluded) {
+        throw new HttpException(
+          "Este objetivo já foi conquistado. Crie uma nova direção para continuar.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return toGoalResponse(
+        await tx.objetivos.update({
+          where: { id },
+          data: { status, concluded_at: null, updated_at: new Date() },
+        }),
+      );
+    });
+  }
+
+  listAchievements(user: UserRecord) {
+    return this.prisma.conquistas_objetivos.findMany({
+      where: { usuario_id: user.usuario_id },
+      orderBy: [
+        { conquistado_em: { sort: "desc", nulls: "last" } },
+        { id: "desc" },
+      ],
+      select: {
+        id: true,
+        objetivo_id: true,
+        conquistado_em: true,
+        nota: true,
+        snapshot: true,
       },
     });
-    return toGoalResponse(goal);
+  }
+
+  async conquer(user: UserRecord, goalId: number, payload: { nota?: unknown }) {
+    const id = positiveInt(goalId, "Objetivo não encontrado.");
+    const note = optionalText(payload.nota, "Nota da conquista inválida.");
+    if (note && note.length > 2000)
+      throw new HttpException(
+        "A nota deve ter até 2000 caracteres.",
+        HttpStatus.BAD_REQUEST,
+      );
+    // Row lock + repeatable snapshot prevent duplicate crowns and partial memories.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`SELECT id FROM objetivos WHERE id = ${id} AND usuario_id = ${user.usuario_id} FOR UPDATE`;
+            const goal = await tx.objetivos.findFirst({
+              where: { id, usuario_id: user.usuario_id },
+            });
+            if (!goal)
+              throw new HttpException(
+                "Objetivo não encontrado.",
+                HttpStatus.BAD_REQUEST,
+              );
+            const prior = await tx.conquistas_objetivos.findUnique({
+              where: { objetivo_id: id },
+            });
+            if (prior) return prior;
+            const now = new Date();
+            const snapshot = await captureAchievement(tx, id, user, now);
+            const achievement = await tx.conquistas_objetivos.create({
+              data: {
+                objetivo_id: id,
+                usuario_id: user.usuario_id,
+                conquistado_em: now,
+                nota: note,
+                snapshot,
+              },
+            });
+            await tx.objetivos.update({
+              where: { id },
+              data: {
+                status: GOAL_STATUS.concluded,
+                concluded_at: now,
+                updated_at: now,
+              },
+            });
+            return achievement;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+        );
+      } catch (error) {
+        const driverError =
+          error instanceof Prisma.PrismaClientKnownRequestError
+            ? (error.meta?.driverAdapterError as
+                { cause?: { originalCode?: string } } | undefined)
+            : undefined;
+        const serializationFailure =
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === "P2034" ||
+            (error.code === "P2010" &&
+              (error.meta?.code === "40001" ||
+                driverError?.cause?.originalCode === "40001")));
+        if (attempt >= 2 || !serializationFailure) throw error;
+      }
+    }
   }
 
   async reorder(

@@ -10,6 +10,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http:
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
+  HTMLElement: dom.window.HTMLElement,
   IS_REACT_ACT_ENVIRONMENT: true,
 })
 const vite = await createServer({
@@ -36,6 +37,7 @@ const [
   load("services/bunkermodeApi.ts"),
   load("state/overviewCache.ts"),
 ])
+api.listAchievements = async () => ({ ok: true, data: [] })
 after(() => vite.close())
 const objetivo = {
   id: 4,
@@ -131,18 +133,18 @@ test("sinais são fatos limitados a três; datas, ausência e última ocorrênci
 test("núcleo permanece dominante e relações distinguem erro, carregamento e vazio", async () => {
   for (const state of [
     { trackersError: "Falha na consulta", trackersLoaded: false, expected: /Falha na consulta/ },
-    { trackersLoading: true, trackersLoaded: false, expected: /Carregando relações/ },
-    { trackersLoaded: true, expected: /Nenhuma relação ainda/ },
+    { trackersLoading: true, trackersLoaded: false, expected: /Carregando vínculos/ },
+    { trackersLoaded: true, expected: /Esta direção começa com você/ },
   ]) {
     const view = await mount(Card, { ...cardProps, ...state })
     try {
       assert.match(view.container.textContent, state.expected)
       assert.match(
-        view.container.querySelector(".objective-nucleus").textContent,
+        view.container.querySelector(".map-root").textContent,
         /Cuidar da saúde|Reorganizar hábitos/
       )
       if (state.trackersError || state.trackersLoading)
-        assert.doesNotMatch(view.container.textContent, /Nenhuma relação ainda/)
+        assert.doesNotMatch(view.container.textContent, /Esta direção começa com você/)
     } finally {
       await view.close()
     }
@@ -164,10 +166,10 @@ test("Home e Objetivos exibem o mesmo fato do acompanhamento", async () => {
   const home = await mount(Home, { token: "shared", user, onUnauthorized: () => false })
   const page = await mount(ObjectivesPage, { token: "shared", user, onUnauthorized: () => false })
   try {
-    assert.match(home.container.textContent, /Não fumar|Última ocorrência/)
+    assert.match(home.container.textContent, /Não fumar|dias desde a ocorrência/)
     assert.match(
-      page.container.querySelector(".objective-branch-list").textContent,
-      /Não fumar|Última ocorrência/
+      page.container.querySelector(".map-node-list").textContent,
+      /Não fumar|dias desde a ocorrência/
     )
     assert.doesNotMatch(home.container.textContent, /Reorganizar hábitos/)
   } finally {
@@ -193,14 +195,14 @@ test("erro real do hook chega à página e retry recupera sem anunciar vazio inc
   })
   try {
     assert.match(view.container.textContent, /Consulta indisponível/)
-    assert.doesNotMatch(view.container.textContent, /Nenhuma relação ainda/)
+    assert.doesNotMatch(view.container.textContent, /Esta direção começa com você/)
     fail = false
     await act(async () =>
       [...view.container.querySelectorAll("button")]
         .find((b) => b.textContent === "Tentar novamente")
         .click()
     )
-    assert.match(view.container.textContent, /Última ocorrência/)
+    assert.match(view.container.textContent, /dias desde a ocorrência/)
     assert.doesNotMatch(view.container.textContent, /Consulta indisponível/)
   } finally {
     await view.close()
@@ -237,10 +239,10 @@ test("refresh preserva snapshot em loading e erro; 401 de leitura segue tratamen
   const view = await mount(Probe, {})
   try {
     assert.doesNotMatch(view.container.textContent, /Atualizando acompanhamentos|Dados anteriores/)
-    assert.match(view.container.textContent, /Última ocorrência/)
+    assert.match(view.container.textContent, /dias desde a ocorrência/)
     await act(async () => finish({ ok: false, status: 503, data: { message: "Falha temporária" } }))
     assert.doesNotMatch(view.container.textContent, /Exibindo dados anteriores/)
-    assert.match(view.container.textContent, /Última ocorrência/)
+    assert.match(view.container.textContent, /dias desde a ocorrência/)
     assert.doesNotMatch(view.container.textContent, /Uma direção pode começar sem vínculos/)
     await act(async () => {
       void current.refresh()
@@ -294,7 +296,7 @@ test("síntese enxerga a ocorrência de hoje mesmo quando a lista agrupa a séri
 test("árvore de vínculos expressa pertencimento e inspector fechado", async () => {
   const empty = await mount(Card, { ...cardProps, objetivo: { ...objetivo, descricao: null } })
   try {
-    assert.match(empty.container.textContent, /Nenhuma relação ainda/)
+    assert.match(empty.container.textContent, /Esta direção começa com você/)
   } finally {
     await empty.close()
   }
@@ -305,7 +307,7 @@ test("árvore de vínculos expressa pertencimento e inspector fechado", async ()
   })
   try {
     assert.match(failed.container.textContent, /Falha na leitura/)
-    assert.doesNotMatch(failed.container.textContent, /Nenhuma relação ainda/)
+    assert.doesNotMatch(failed.container.textContent, /Esta direção começa com você/)
   } finally {
     await failed.close()
   }
@@ -316,14 +318,12 @@ test("árvore de vínculos expressa pertencimento e inspector fechado", async ()
     tasks: [{ id: 1, titulo: "Caminhar", status_code: "PENDENTE" }],
   })
   try {
-    assert.match(populated.container.textContent, /Data-alvo · 30\/10\/2026/)
-    assert.equal(populated.container.querySelectorAll(".objective-branch").length, 2)
-    assert.equal(populated.container.querySelector(".objective-branch details").open, false)
-    populated.container.querySelector(".objective-branch summary").click()
-    assert.equal(populated.container.querySelector(".objective-branch details").open, true)
-    assert.ok(
-      populated.container.querySelector('[aria-label="Relações do objetivo Cuidar da saúde"]')
-    )
+    assert.match(populated.container.textContent, /Data-alvo · 30/)
+    assert.equal(populated.container.querySelectorAll(".map-node").length, 2)
+    assert.equal(document.querySelector(".objective-node-details"), null)
+    await act(async () => populated.container.querySelector(".map-node").click())
+    assert.ok(document.querySelector(".objective-node-details"))
+    assert.ok(populated.container.querySelector('[aria-label="Mapa do objetivo: Cuidar da saúde"]'))
   } finally {
     await populated.close()
   }
@@ -337,14 +337,11 @@ test("descrição longa permanece legível no núcleo sem abrir inspector", asyn
     trackers: [tracker],
   })
   try {
+    assert.match(view.container.querySelector(".map-purpose").textContent, /Reorganizar hábitos/)
+    assert.equal(document.querySelector(".objective-node-details"), null)
     assert.match(
-      view.container.querySelector(".objective-description").textContent,
-      /Reorganizar hábitos/
-    )
-    assert.equal(view.container.querySelector(".objective-branch details").open, false)
-    assert.match(
-      view.container.querySelector(".objective-branch-list").textContent,
-      /Última ocorrência/
+      view.container.querySelector(".map-node-list").textContent,
+      /dias desde a ocorrência/
     )
   } finally {
     await view.close()

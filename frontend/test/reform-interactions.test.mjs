@@ -229,7 +229,7 @@ test("concluídas ficam abaixo das abertas e preservam Reabrir sem ações proib
   await view.close()
 })
 
-test("objetivo permite pausar no menu e concluir pela ação principal", async () => {
+test("objetivo permite pausar no menu e abre conquista explícita pela ação principal", async () => {
   let status = "",
     created = 0
   const props = {
@@ -241,6 +241,7 @@ test("objetivo permite pausar no menu e concluir pela ação principal", async (
     tasksError: "",
     onAdd: () => created++,
     onUpdateStatus: (value) => (status = value),
+    onConquer: () => (status = "confirmar-conquista"),
     onEdit: () => {},
     onDelete: () => {},
   }
@@ -263,13 +264,12 @@ test("objetivo permite pausar no menu e concluir pela ação principal", async (
     )
   )
   assert.equal(status, "pausado")
-  await click(view.container.querySelector("[aria-haspopup=menu]"))
   await click(
-    [...document.querySelectorAll("[role=menuitem]")].find(
-      (b) => b.textContent === "Concluir objetivo"
+    [...view.container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Conquistar objetivo"
     )
   )
-  assert.equal(status, "concluido")
+  assert.equal(status, "confirmar-conquista")
   await view.close()
   const paused = await mount(ObjetivoCard, {
     ...props,
@@ -315,14 +315,14 @@ test("tarefa concluída no objetivo oferece desvincular sem exclusão", async ()
     onDelete: () => {},
     onEdit: () => {},
   })
-  await click(view.container.querySelector(".objective-branch summary"))
-  assert.match(view.container.querySelector(".objective-inspector").textContent, /Desvincular/)
+  await click(view.container.querySelector(".map-node"))
+  assert.match(document.querySelector(".objective-node-details").textContent, /Desvincular/)
   assert.doesNotMatch(
-    view.container.querySelector(".objective-inspector").textContent,
+    document.querySelector(".objective-node-details").textContent,
     /Excluir tarefa/
   )
   await click(
-    [...view.container.querySelectorAll(".objective-inspector button")].find(
+    [...document.querySelectorAll(".objective-node-details button")].find(
       (b) => b.textContent === "Desvincular"
     )
   )

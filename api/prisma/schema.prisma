@@ -83,6 +83,7 @@ model objetivos {
   missoes            missoes[]
   series_recorrencia series_recorrencia[]
   acompanhamentos   acompanhamentos[]
+  conquista         conquistas_objetivos?
   usuarios           usuarios             @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([usuario_id, status])
@@ -107,8 +108,23 @@ model usuarios {
   missoes_recebidas  missoes[]            @relation("missoes_responsavel")
   series_recorrencia series_recorrencia[] @relation("series_recorrencia_responsavel")
   objetivos          objetivos[]
+  conquistas         conquistas_objetivos[]
   acompanhamentos    acompanhamentos[]
   lancamentos        lancamentos_financeiros[]
+}
+
+// Uma memória por objetivo, independente dos vínculos e dos dados vivos.
+model conquistas_objetivos {
+  id             Int       @id @default(autoincrement())
+  objetivo_id    Int?      @unique
+  usuario_id     Int
+  conquistado_em DateTime? @db.Timestamp(6)
+  nota           String?  @db.VarChar(2000)
+  snapshot       Json
+  objetivo       objetivos? @relation(fields: [objetivo_id], references: [id], onDelete: SetNull)
+  usuario        usuarios   @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade)
+
+  @@index([usuario_id, conquistado_em])
 }
 
 model acompanhamentos {

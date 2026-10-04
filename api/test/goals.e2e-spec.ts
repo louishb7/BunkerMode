@@ -29,19 +29,33 @@ function setup() {
       findMany: jest
         .fn()
         .mockResolvedValue([goal(), goal({ id: 8, order_index: 2 })]),
-      update: jest
-        .fn()
-        .mockImplementation(async ({ where, data }) =>
-          goal({ id: where.id, ...data }),
-        ),
+      update: jest.fn().mockImplementation(async ({ where, data }) => {
+        const saved = goal({ id: where.id, ...data });
+        prisma.objetivos.findFirst.mockResolvedValue(saved);
+        return saved;
+      }),
       delete: jest.fn(),
     },
     series_recorrencia: { updateMany: jest.fn() },
+    conquistas_objetivos: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest
+        .fn()
+        .mockImplementation(async ({ data }) => ({ id: 1, ...data })),
+    },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation(async (operation) =>
     Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
   );
+  Object.assign(prisma.objetivos, {
+    findFirstOrThrow: jest
+      .fn()
+      .mockResolvedValue(
+        goal({ missoes: [], series_recorrencia: [], acompanhamentos: [] }),
+      ),
+  });
   return { prisma, service: new GoalsService(prisma as never) };
 }
 

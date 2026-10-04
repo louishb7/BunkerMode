@@ -44,6 +44,7 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
 function prismaMock() {
   return {
     $transaction: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([{ ativo: true }]),
     auditoria_eventos: {
       create: jest.fn(),
       createMany: jest.fn(),
@@ -54,6 +55,7 @@ function prismaMock() {
       create: jest.fn(),
       createManyAndReturn: jest.fn(),
       delete: jest.fn(),
+      deleteMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -265,6 +267,35 @@ describe("Tasks clean domain", () => {
     expect(prisma.missoes.findFirst).toHaveBeenLastCalledWith({ where: { missao_id: 10, responsavel_id: 99 } });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it("does not materialize a series deactivated after the recurrence window was selected", async () => {
+    const prisma = prismaMock();
+    prisma.series_recorrencia.findMany.mockResolvedValue([
+      {
+        recurrence_series_id: 31,
+        responsavel_id: 7,
+        objetivo_id: null,
+        objetivos: null,
+        titulo: "Série removida",
+        prioridade: 2,
+        instrucao: null,
+        ativo: true,
+        start_date: new Date("2026-01-01"),
+        end_date: null,
+        termination_policy: "sem_termino",
+        recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6],
+      },
+    ]);
+    prisma.$queryRaw.mockResolvedValue([{ ativo: false }]);
+    prisma.$transaction.mockImplementation(async (callback) =>
+      callback(prisma),
+    );
+    const service = new TasksService(prisma as never, calendar);
+    await service.materializeRecurrences(user());
+    expect(prisma.missoes.createManyAndReturn).not.toHaveBeenCalled();
+    expect(prisma.auditoria_eventos.createMany).not.toHaveBeenCalled();
+  });
+
 
   it("maps the task contract consumed by the web", () => {
     const response = toTaskResponse(task(), user(), new Date("2026-04-25T12:00:00Z"));
@@ -490,20 +521,22 @@ describe("Tasks clean domain", () => {
     });
   });
 
-  it("protects recurring occurrences from deletion and rescheduling while allowing other edits", async () => {
+  it("protects recurring occurrences from rescheduling while allowing deletion and other edits", async () => {
     const prisma = prismaMock();
     const occurrence = task({ recurrence_series_id: 21 });
     prisma.missoes.findFirst.mockResolvedValue(occurrence);
     prisma.missoes.update.mockResolvedValue(
       task({ recurrence_series_id: 21, titulo: "Instrução ajustada" }),
     );
-    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
+    prisma.$transaction.mockImplementation(async (callback) =>
+      callback(prisma),
+    );
     const service = new TasksService(
       prisma as unknown as PrismaService,
       calendar,
     );
 
-    await expect(service.delete(10, user())).rejects.toMatchObject({ status: 400 });
+    await expect(service.delete(10, user())).resolves.toBeUndefined();
     await expect(
       service.update(10, { prazo: "26-04-2026" }, user()),
     ).rejects.toMatchObject({ status: 400 });
@@ -513,7 +546,26 @@ describe("Tasks clean domain", () => {
 
     expect(prisma.missoes.delete).not.toHaveBeenCalled();
     expect(prisma.missoes.update).toHaveBeenCalledTimes(1);
-    expect(toTaskResponse(occurrence, user()).permissions.can_delete).toBe(false);
+    expect(prisma.series_recorrencia.update).toHaveBeenCalledWith({
+      where: { recurrence_series_id: 21, responsavel_id: 7 },
+      data: { ativo: false },
+    });
+    const pending = {
+      recurrence_series_id: 21,
+      responsavel_id: 7,
+      status: "PENDENTE",
+    };
+    expect(prisma.missoes.deleteMany).toHaveBeenCalledWith({ where: pending });
+    expect(prisma.auditoria_eventos.deleteMany).toHaveBeenCalledWith({
+      where: { missoes: pending },
+    });
+    expect(toTaskResponse(occurrence, user()).permissions.can_delete).toBe(
+      true,
+    );
+    expect(
+      toTaskResponse(occurrence, user({ usuario_id: 99 })).permissions
+        .can_delete,
+    ).toBe(false);
   });
 
   it("rejects updates to another user's task", async () => {
@@ -618,6 +670,7 @@ describe("Tasks clean domain", () => {
       callback({
         auditoria_eventos: prisma.auditoria_eventos,
         missoes: { createManyAndReturn: prisma.missoes.createManyAndReturn },
+        $queryRaw: prisma.$queryRaw,
         series_recorrencia: prisma.series_recorrencia,
       }),
     );

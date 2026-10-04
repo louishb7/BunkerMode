@@ -128,6 +128,100 @@ suite("offline operations on PostgreSQL", () => {
     ).toBe(1);
   });
 
+  it("deletes a linked recurring task through replay while retaining only completed occurrences and their audit", async () => {
+    const goal = await send(token, {
+      operationId: randomUUID(),
+      domain: "goal",
+      action: "create",
+      payload: { titulo: "Direção preservada" },
+    }).expect(201);
+    const created = await send(token, {
+      operationId: randomUUID(),
+      domain: "task",
+      action: "create",
+      payload: {
+        titulo: "Recorrência a excluir",
+        objetivo_id: goal.body.id,
+        recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6],
+        duration_type: "ate_objetivo",
+      },
+    }).expect(201);
+    const seriesId = created.body.recurrence.series_id;
+    expect(created.body.permissions.can_delete).toBe(true);
+    const board = await request(app.getHttpServer())
+      .get("/api/v2/tarefas")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+    expect(
+      board.body.filter(
+        (t: { recurrence: { series_id: number } | null }) =>
+          t.recurrence?.series_id === seriesId,
+      ).length,
+    ).toBeGreaterThan(1);
+    await send(token, {
+      operationId: randomUUID(),
+      domain: "task",
+      action: "complete",
+      target: created.body.id,
+      baseUpdatedAt: created.body.updated_at,
+      payload: {},
+    }).expect(201);
+    const history = await prisma.auditoria_eventos.findMany({
+      where: { missao_id: created.body.id },
+      orderBy: { evento_id: "asc" },
+    });
+    const pending = await prisma.missoes.findFirstOrThrow({
+      where: { recurrence_series_id: seriesId, status: "PENDENTE" },
+    });
+    const body = {
+      operationId: randomUUID(),
+      domain: "task",
+      action: "delete",
+      target: pending.missao_id,
+      baseUpdatedAt: pending.updated_at.toISOString(),
+      payload: {},
+    };
+    await send(otherToken, body).expect(404);
+    await send(token, body).expect(201);
+    await send(token, body).expect(201);
+    expect(
+      await prisma.missoes.findMany({
+        where: { recurrence_series_id: seriesId },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        missao_id: created.body.id,
+        status: "CONCLUIDA",
+      }),
+    ]);
+    expect(
+      await prisma.auditoria_eventos.findMany({
+        where: { missao_id: created.body.id },
+        orderBy: { evento_id: "asc" },
+      }),
+    ).toEqual(history);
+    expect(
+      await prisma.series_recorrencia.findUniqueOrThrow({
+        where: { recurrence_series_id: seriesId },
+      }),
+    ).toMatchObject({ ativo: false });
+    expect(
+      await prisma.objetivos.findUniqueOrThrow({ where: { id: goal.body.id } }),
+    ).toMatchObject({ status: "ativo" });
+    await request(app.getHttpServer())
+      .post("/api/v2/tarefas/recorrencias/materializar")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(204);
+    expect(
+      await prisma.missoes.count({ where: { recurrence_series_id: seriesId } }),
+    ).toBe(1);
+    expect(
+      await prisma.offlineOperation.count({
+        where: { userId, operationId: body.operationId },
+      }),
+    ).toBe(1);
+  });
+
   it("resolves goal, task, tracker and occurrence through official IDs with replay safety", async () => {
     const goalBody = {
       operationId: randomUUID(),

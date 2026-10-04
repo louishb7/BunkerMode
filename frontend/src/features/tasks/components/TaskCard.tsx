@@ -61,7 +61,7 @@ export default function TaskCard({
         ]
       : []),
     ...(permissions.can_delete && onDelete
-      ? [{ label: "Remover", onSelect: onDelete, danger: true }]
+      ? [{ label: "Excluir", onSelect: onDelete, danger: true }]
       : []),
   ]
   // O contexto de prazo continua disponível quando a tarefa aparece no dia da conclusão.

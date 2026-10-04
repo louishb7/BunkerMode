@@ -40,12 +40,11 @@ export function taskPermissions(
 ): TaskPermissions {
   const owned = task.responsavel_id === user.usuario_id;
   const pending = isPending(task);
-  const recurring = task.recurrence_series_id !== null;
 
   return {
     can_complete: owned && pending,
     can_edit: owned && pending,
-    can_delete: owned && pending && !recurring,
+    can_delete: owned && pending,
     can_pin: owned && pending,
     can_view_history: owned && isFinalized(task),
     can_reopen: canReopenTask(task, user),

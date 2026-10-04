@@ -8,19 +8,18 @@ import { operationalDateFor, taskBelongsToDate } from "../../calendar/calendarUt
 import { formatDateForApi } from "../../../utils/date"
 import { getActionTasks } from "../taskSelectors"
 import { getApiAvailability, subscribeApiAvailability } from "../../../offline/apiAvailability"
-import { readSnapshot, saveSnapshot, isTaskList } from "../../../offline/snapshots"
+import {
+  readSnapshot,
+  saveSnapshot,
+  isTaskList,
+  isDailyTaskSnapshot,
+} from "../../../offline/snapshots"
 import type { Task } from "../../../types/taskContract"
 import { enqueueOperation, projectTasks, subscribeOutbox } from "../../../offline/outbox"
 import type { OutboxOperation } from "../../../offline/snapshots"
 
 const allKey = "tasks:all"
 const dailyKey = "tasks:daily:last"
-type DailySnapshot = { date: string; tasks: Task[] }
-const isDailySnapshot = (data: unknown): data is DailySnapshot =>
-  !!data &&
-  typeof data === "object" &&
-  typeof (data as DailySnapshot).date === "string" &&
-  isTaskList((data as DailySnapshot).tasks)
 
 export function useTaskBoard({
   authenticated,
@@ -214,7 +213,7 @@ export function useTaskBoard({
     let cancelled = false
     void (async () => {
       if (boardMode === "focus") {
-        const entry = await readSnapshot(ownerId, dailyKey, isDailySnapshot)
+        const entry = await readSnapshot(ownerId, dailyKey, isDailyTaskSnapshot)
         if (cancelled) return
         const cached = getOverview(ownerId).daily
         if (entry && cached === null) {
@@ -268,7 +267,16 @@ export function useTaskBoard({
 
   async function queue(action: string, payload: Record<string, unknown> = {}, task?: Task) {
     try {
-      await enqueueOperation(ownerId, "task", action, payload, task?.id, task?.updated_at)
+      await enqueueOperation(
+        ownerId,
+        "task",
+        action,
+        payload,
+        task?.id,
+        task?.updated_at,
+        undefined,
+        action === "delete" ? task?.recurrence?.series_id : undefined
+      )
       setStatus(emptyStatus)
       return { persisted: true, synchronized: false }
     } catch (error) {

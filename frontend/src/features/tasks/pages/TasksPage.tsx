@@ -24,6 +24,7 @@ export default function TasksPage({ board, onStartFocus, user }) {
   const [formOpen, setFormOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const weekDays = useMemo(() => getWeekDays(selectedDate), [selectedDate])
   const weekLabel = formatWeekLabel(weekDays)
@@ -67,6 +68,7 @@ export default function TasksPage({ board, onStartFocus, user }) {
       setEditingTask(null)
       setFormOpen(false)
     }
+    return removed
   }
 
   return (
@@ -140,14 +142,31 @@ export default function TasksPage({ board, onStartFocus, user }) {
 
       {deleteTarget !== null && (
         <ConfirmDialog
-          title="Remover tarefa"
-          message={`"${deleteTarget?.titulo}" será removida das tarefas.`}
-          confirmLabel="Remover"
+          title={
+            deleteTarget?.recurrence || deleteTarget?.recurringIntent
+              ? "Excluir tarefa recorrente"
+              : "Excluir tarefa"
+          }
+          message={
+            deleteTarget?.recurrence || deleteTarget?.recurringIntent
+              ? `A recorrência de "${deleteTarget?.titulo}" será encerrada e todas as ocorrências pendentes serão excluídas. As concluídas serão preservadas.`
+              : `"${deleteTarget?.titulo}" será excluída das tarefas.`
+          }
+          confirmLabel="Excluir"
           variant="danger"
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => {
-            deleteTask(deleteTarget)
-            setDeleteTarget(null)
+          loading={deleting}
+          onCancel={() => {
+            if (!deleting) setDeleteTarget(null)
+          }}
+          onConfirm={async () => {
+            if (deleting) return
+            setDeleting(true)
+            try {
+              const removed = await deleteTask(deleteTarget)
+              if (removed?.persisted) setDeleteTarget(null)
+            } finally {
+              setDeleting(false)
+            }
           }}
         />
       )}

@@ -6,12 +6,15 @@ import {
   resolveOutboxCreate,
   saveOutboxOperation,
   saveSnapshot,
+  readSnapshot,
+  isDailyTaskSnapshot,
   type OutboxOperation,
 } from "./snapshots"
 import type { Task } from "../types/taskContract"
 import type { Tracker } from "../types/trackerContract"
 import { financeEntryTypes, type FinanceOverview } from "../types/financeContract"
 import { focusStorageKey } from "../features/tasks/focusSession"
+import { updateOverview } from "../state/overviewCache"
 
 type Domain = OutboxOperation["domain"]
 const fields: Record<Domain, string[]> = {
@@ -86,9 +89,18 @@ export async function enqueueOperation(
   payload: Record<string, unknown> = {},
   target?: number | string,
   baseUpdatedAt?: string,
-  parentId?: number | string
+  parentId?: number | string,
+  recurrenceSeriesId?: number
 ): Promise<string> {
   if (!Number.isSafeInteger(ownerId) || ownerId < 1) throw new Error("Usuário inválido.")
+  if (
+    recurrenceSeriesId !== undefined &&
+    (domain !== "task" ||
+      action !== "delete" ||
+      !Number.isSafeInteger(recurrenceSeriesId) ||
+      recurrenceSeriesId < 1)
+  )
+    throw new Error("Recorrência inválida para exclusão.")
   const normalized = Object.fromEntries(
     Object.entries(payload).filter(([key]) => fields[domain].includes(key))
   )
@@ -100,9 +112,9 @@ export async function enqueueOperation(
       (item) => `local:${item.operationId}` === target && item.action === "create"
     )
     if (!create) throw new Error("Registro local não encontrado.")
-    if (create.attemptedAt && action === "delete")
+    if (create.attemptedAt && action === "delete" && domain !== "task")
       throw new Error("A criação já foi enviada. Aguarde a reconciliação antes de remover.")
-    if (action === "delete") {
+    if (action === "delete" && !create.attemptedAt) {
       await removeOutboxOperation(ownerId, create.operationId)
       for (const item of current) {
         if (item.target === target || item.parentId === target)
@@ -152,6 +164,7 @@ export async function enqueueOperation(
     target,
     parentId,
     baseUpdatedAt,
+    ...(recurrenceSeriesId ? { recurrenceSeriesId } : {}),
     createdAt: new Date().toISOString(),
     status: "pending",
   }
@@ -180,6 +193,15 @@ async function refreshOfficial(ownerId: number, op: OutboxOperation) {
   const result = await request(endpoint)
   if (!result.ok) return false
   await saveSnapshot(ownerId, key, result.data)
+  if (op.domain === "task" && op.action === "delete") {
+    const daily = await readSnapshot(ownerId, "tasks:daily:last", isDailyTaskSnapshot)
+    if (daily) {
+      const official = new Map((result.data as Task[]).map((task) => [task.id, task]))
+      const tasks = daily.data.tasks.flatMap((task) => official.get(task.id) ?? [])
+      await saveSnapshot(ownerId, "tasks:daily:last", { date: daily.data.date, tasks })
+      updateOverview(ownerId, { daily: tasks, dailyDate: daily.data.date })
+    }
+  }
   if (op.domain === "entry") {
     const currentMonth = new Date().toISOString().slice(0, 7)
     if (key === `finances:${currentMonth}`)
@@ -478,7 +500,7 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
         permissions: {
           can_complete: true,
           can_edit: true,
-          can_delete: !op.attemptedAt,
+          can_delete: true,
           can_pin: true,
           can_view_history: false,
           can_reopen: false,
@@ -488,11 +510,19 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
       continue
     }
     const index = items.findIndex((item) => item.id === id)
-    if (index < 0) continue
     if (op.action === "delete") {
-      items.splice(index, 1)
+      const seriesId = op.recurrenceSeriesId ?? items[index]?.recurrence?.series_id
+      if (seriesId) {
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (items[i].recurrence?.series_id === seriesId && items[i].status === "PENDENTE")
+            items.splice(i, 1)
+        }
+        continue
+      }
+      if (index >= 0) items.splice(index, 1)
       continue
     }
+    if (index < 0) continue
     const item = items[index]
     if (op.action === "update") Object.assign(item, op.payload)
     if (op.action === "complete" || op.action === "reopen") {
@@ -507,7 +537,7 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
         can_reopen: completed,
         can_edit: !completed,
         can_pin: !completed,
-        can_delete: !completed && !item.recurrence,
+        can_delete: !completed,
       }
     }
     if (op.action === "pin") item.is_pinned = op.payload.is_pinned === true

@@ -718,12 +718,6 @@ export class TasksService {
 
   async delete(id: number, user: UserRecord): Promise<void> {
     const current = await this.getTaskForUser(id, user);
-    if (current.recurrence_series_id !== null) {
-      throw new HttpException(
-        "Esta tarefa pertence a uma série recorrente. Exclusão individual ainda não é suportada.",
-        HttpStatus.BAD_REQUEST,
-      );
-    }
     if (current.status !== TASK_STATUS.pending) {
       throw new HttpException(
         "Apenas tarefa pendente pode ser removida. Resultados ficam no histórico.",
@@ -731,6 +725,37 @@ export class TasksService {
       );
     }
     await this.prisma.$transaction(async (tx) => {
+      if (current.recurrence_series_id !== null) {
+        const seriesId = current.recurrence_series_id;
+        await tx.series_recorrencia.update({
+          where: {
+            recurrence_series_id: seriesId,
+            responsavel_id: user.usuario_id,
+          },
+          data: { ativo: false },
+        });
+        // Serializa a remoção com conclusões concorrentes antes de limpar a auditoria.
+        await tx.$queryRaw`SELECT missao_id FROM missoes
+          WHERE recurrence_series_id = ${seriesId}
+            AND responsavel_id = ${user.usuario_id} AND status = 'PENDENTE'
+          ORDER BY missao_id FOR UPDATE`;
+        const pending = {
+          recurrence_series_id: seriesId,
+          responsavel_id: user.usuario_id,
+          status: TASK_STATUS.pending,
+        };
+        await tx.auditoria_eventos.deleteMany({ where: { missoes: pending } });
+        await tx.missoes.deleteMany({ where: pending });
+        await tx.auditoria_eventos.create({
+          data: {
+            missao_id: null,
+            usuario_id: user.usuario_id,
+            acao: "tarefa_recorrencia_removida",
+            detalhes: `Recorrência '${current.titulo}' encerrada e ocorrências pendentes removidas.`,
+          },
+        });
+        return;
+      }
       await tx.auditoria_eventos.deleteMany({ where: { missao_id: id } });
       await tx.missoes.delete({ where: { missao_id: id } });
       await tx.auditoria_eventos.create({
@@ -864,6 +889,14 @@ export class TasksService {
     if (dates.length === 0) {
       return [];
     }
+
+    // A exclusão pode ter encerrado a série depois da seleção da janela.
+    // O lock também garante que uma materialização anterior termine antes da exclusão.
+    const active = await tx.$queryRaw<Array<{ ativo: boolean }>>`
+      SELECT ativo FROM series_recorrencia
+      WHERE recurrence_series_id = ${series.recurrence_series_id}
+        AND responsavel_id = ${series.responsavel_id} FOR UPDATE`;
+    if (!active[0]?.ativo) return [];
 
     const created = await tx.missoes.createManyAndReturn({
       data: dates.map((date) => ({

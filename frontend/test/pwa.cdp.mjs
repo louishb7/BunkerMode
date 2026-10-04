@@ -136,6 +136,14 @@ async function main() {
                 : null }
             tasksByOwner.get(id).push(created)
             processed.set(key, created)
+          } else if (operation.domain === "task" && operation.action === "delete") {
+            const current = tasksByOwner.get(id).find(item => item.id === operation.target)
+            if (!current || current.status !== "PENDENTE") { response.writeHead(400).end(JSON.stringify({ message: "Tarefa não pode ser excluída" })); return }
+            const series = current.recurrence?.series_id
+            tasksByOwner.set(id, tasksByOwner.get(id).filter(item => series
+              ? item.recurrence?.series_id !== series || item.status === "CONCLUIDA"
+              : item.id !== operation.target))
+            processed.set(key, { deleted: true })
           } else if (operation.domain === "task" && operation.action === "update") {
             const current = tasksByOwner.get(id).find((item) => item.id === operation.target)
             if (!current) { response.writeHead(404).end(JSON.stringify({ message: "Tarefa ausente" })); return }
@@ -522,6 +530,7 @@ async function main() {
     await visible("Registrar tarefa")
     await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
     await cdp.send("Input.insertText", { text: "Tarefa ligada" })
+    await evaluate("document.querySelector('select[name=\"repeat_type\"]').value='todos_dias'; document.querySelector('select[name=\"repeat_type\"]').dispatchEvent(new Event('change',{bubbles:true}))")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar tarefa')?.click()")
     await visible("Tarefa ligada")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Adicionar vínculo'))?.click()")
@@ -553,6 +562,73 @@ async function main() {
     assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").objetivo_id, linkedGoal.id)
     assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").ocorrencias.length, 1)
     console.log("PWA: objetivo, tarefa, acompanhamento e ocorrência dependentes sincronizam em ordem após refresh OK")
+
+    const linkedTask = tasksByOwner.get(2).find(item => item.titulo === "Tarefa ligada")
+    assert.ok(linkedTask.recurrence)
+    const completedLinked = { ...task(nextTaskId++, 2), titulo: "Resultado da recorrência", recurrence: linkedTask.recurrence,
+      objetivo_id: linkedGoal.id, status: "CONCLUIDA", status_code: "CONCLUIDA", status_label: "Concluída", completed_at: new Date().toISOString(),
+      permissions: { ...linkedTask.permissions, can_delete: false, can_edit: false, can_pin: false, can_complete: false } }
+    const tomorrow = new Date(`${todayParts.year}-${todayParts.month}-${todayParts.day}T12:00:00Z`)
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+    tasksByOwner.get(2).push(completedLinked, { ...task(nextTaskId++, 2), titulo: "Tarefa ligada",
+      recurrence: linkedTask.recurrence, objetivo_id: linkedGoal.id, prazo: tomorrow.toISOString().slice(0,10).split('-').reverse().join('-') })
+    await navigate("/tarefas/foco")
+    await visible("Tarefas de hoje")
+    await navigate("/tarefas")
+    await visible("Tarefa ligada")
+    assert.equal(await evaluate("[...document.querySelectorAll('h3')].filter(el => el.textContent.trim() === 'Tarefa ligada').length"), 1)
+    await setConnectivity(false)
+    await evaluate("document.querySelector('button[aria-label=\"Ações da tarefa: Tarefa ligada\"]')?.click()")
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.trim() === 'Excluir')?.click()")
+    await visible("todas as ocorrências pendentes")
+    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Excluir')?.click()")
+    await until(() => evaluate("![...document.querySelectorAll('h3')].some(el => el.textContent.trim() === 'Tarefa ligada')"), "pendentes removidas da projeção")
+    await visible("Resultado da recorrência")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.some(x=>x.action==='delete' && x.recurrenceSeriesId===" + linkedTask.recurrence.series_id + "))})})()"), "metadado de série durável")
+    await navigate("/tarefas/foco")
+    await visible("Tarefas de hoje")
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Mostrar mais tarefas'))?.click()")
+    assert.equal(await evaluate("document.body.innerText.includes('Tarefa ligada')"), false)
+    await setConnectivity(true)
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => tasksByOwner.get(2).filter(t => t.recurrence?.series_id === linkedTask.recurrence.series_id).length === 1, "exclusão da série sincronizada")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "exclusão reconciliada")
+    await setConnectivity(false)
+    await navigate("/tarefas/foco")
+    await visible("Tarefas de hoje")
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Mostrar mais tarefas'))?.click()")
+    assert.equal(await evaluate("document.body.innerText.includes('Tarefa ligada')"), false)
+    assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').get([2,'tasks:daily:last']);r.onsuccess=()=>ok(r.result?.data.tasks.some(t=>t.titulo==='Resultado da recorrência' && t.status==='CONCLUIDA') && !r.result.data.tasks.some(t=>t.titulo==='Tarefa ligada'))})})()"), true)
+    await navigate("/tarefas")
+    await visible("Resultado da recorrência")
+    assert.equal(await evaluate("document.body.innerText.includes('Tarefa ligada')"), false)
+    console.log("PWA: recorrência vinculada aparece em Tarefas; exclusão remove pendentes e preserva concluídas offline, após replay e reload OK")
+
+    const uncertainId = crypto.randomUUID()
+    const uncertainTask = { ...task(nextTaskId++, 2), titulo: "Criação enviada a excluir" }
+    tasksByOwner.get(2).push(uncertainTask)
+    processed.set(`2:${uncertainId}`, uncertainTask)
+    await putOutbox({ ownerId: 2, operationId: uncertainId, domain: "task", action: "create",
+      payload: { titulo: uncertainTask.titulo, prazo: today }, createdAt: new Date().toISOString(),
+      attemptedAt: new Date().toISOString(), status: "pending" })
+    await visible(uncertainTask.titulo)
+    await evaluate("document.querySelector('button[aria-label=\"Ações da tarefa: Criação enviada a excluir\"]')?.click()")
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(b => b.textContent.trim() === 'Excluir')?.click()")
+    await visible("Excluir tarefa")
+    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Excluir')?.click()")
+    await until(() => evaluate("!document.body.innerText.includes('Criação enviada a excluir')"), "criação enviada excluída da projeção")
+    assert.equal(await outboxStatus(uncertainId), "pending", "criação enviada permanece para reconciliação idempotente")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===2 && r.result.some(x=>x.action==='delete' && typeof x.target==='string'))})})()"), "exclusão depende da criação enviada")
+    await navigate("/tarefas")
+    assert.equal(await evaluate("document.body.innerText.includes('Criação enviada a excluir')"), false)
+    await setConnectivity(true)
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(() => !tasksByOwner.get(2).some(t => t.id === uncertainTask.id), "reconciliação seguida de exclusão")
+    await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"), "exclusão de criação enviada reconciliada")
+    assert.equal(tasksByOwner.get(2).filter(t => t.titulo === uncertainTask.titulo).length, 0)
+    console.log("PWA: criação enviada pode ser excluída com replay idempotente, sem descartar a operação original OK")
+
+
 
     await setConnectivity(false)
     await navigate("/financas")

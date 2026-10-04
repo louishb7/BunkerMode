@@ -391,14 +391,11 @@ describeWithDatabase("Recurrence series persistence", () => {
     expect(duplicatedDates).toEqual([]);
   });
 
-  it("preserves a recurring occurrence identity after rejected deletion and rescheduling", async () => {
+  it("preserves a recurring occurrence identity after rejected rescheduling", async () => {
     const firstOccurrence = await createRecurringTask();
     const seriesId = firstOccurrence.recurrence_series_id!;
     const originalDate = firstOccurrence.prazo!;
 
-    await expect(
-      tasksService.delete(firstOccurrence.missao_id, currentUser),
-    ).rejects.toMatchObject({ status: 400 });
     await expect(
       tasksService.update(
         firstOccurrence.missao_id,
@@ -420,6 +417,73 @@ describeWithDatabase("Recurrence series persistence", () => {
       }),
     ).resolves.toMatchObject({ prazo: originalDate, recurrence_series_id: seriesId });
   });
+
+  it("deletes all pending occurrences of a linked series, preserves completed history and never rematerializes it", async () => {
+    const goal = await createObjective();
+    const first = await createRecurringTask({
+      objetivo_id: goal.id,
+      duration_type: "ate_objetivo",
+      recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6],
+    });
+    const unrelated = await createRecurringTask({
+      titulo: "Outra recorrência",
+    });
+    await tasksService.complete(first.missao_id, currentUser);
+    const history = await tasksService.taskHistory(
+      first.missao_id,
+      currentUser,
+    );
+    const seriesId = first.recurrence_series_id!;
+    const linked = (await tasksService.listForTasksBoard(currentUser)).filter(
+      (t) => t.recurrence_series_id === seriesId,
+    );
+    expect(linked.length).toBeGreaterThan(2);
+    expect(linked.every((t) => t.objetivo_id === goal.id)).toBe(true);
+    const pending = linked.find((t) => t.status === "PENDENTE")!;
+    await expect(
+      tasksService.delete(pending.missao_id, {
+        ...currentUser,
+        usuario_id: userId + 1,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      tasksService.delete(first.missao_id, currentUser),
+    ).rejects.toMatchObject({ status: 400 });
+    currentDate = "2026-09-05";
+    await tasksService.delete(pending.missao_id, currentUser);
+    expect(
+      await prisma.missoes.findMany({
+        where: { recurrence_series_id: seriesId },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        missao_id: first.missao_id,
+        status: "CONCLUIDA",
+      }),
+    ]);
+    expect(
+      await tasksService.taskHistory(first.missao_id, currentUser),
+    ).toEqual(history);
+    expect(
+      await prisma.series_recorrencia.findUniqueOrThrow({
+        where: { recurrence_series_id: seriesId },
+      }),
+    ).toMatchObject({ ativo: false, objetivo_id: goal.id });
+    expect(
+      await prisma.objetivos.findUniqueOrThrow({ where: { id: goal.id } }),
+    ).toMatchObject({ status: "ativo" });
+    expect(
+      await prisma.missoes.count({
+        where: { recurrence_series_id: unrelated.recurrence_series_id },
+      }),
+    ).toBeGreaterThan(0);
+    currentDate = "2026-09-20";
+    await tasksService.materializeRecurrences(currentUser);
+    expect(
+      await prisma.missoes.count({ where: { recurrence_series_id: seriesId } }),
+    ).toBe(1);
+  });
+
 
   it("reads explicitly materialized recurrence and retains completed and pending outcomes", async () => {
     const firstOccurrence = await createRecurringTask();

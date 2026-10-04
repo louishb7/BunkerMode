@@ -1,5 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb"
-import { assertTaskListContract } from "../types/taskContract"
+import { assertTaskListContract, type Task } from "../types/taskContract"
+
+export type DailyTaskSnapshot = { date: string; tasks: Task[] }
 
 export type Snapshot<T> = {
   ownerId: number
@@ -18,6 +20,7 @@ export type OutboxOperation = {
   parentId?: number | string
   payload: Record<string, unknown>
   baseUpdatedAt?: string
+  recurrenceSeriesId?: number
   createdAt: string
   serverId?: number
   attemptedAt?: string
@@ -239,6 +242,12 @@ export async function resolveOutboxCreate(
 export const isRecordList = (data: unknown): data is { id: number; [key: string]: unknown }[] =>
   Array.isArray(data) &&
   data.every((item) => item && typeof item === "object" && Number.isSafeInteger(item.id))
+export const isDailyTaskSnapshot = (data: unknown): data is DailyTaskSnapshot =>
+  !!data &&
+  typeof data === "object" &&
+  typeof (data as DailyTaskSnapshot).date === "string" &&
+  isTaskList((data as DailyTaskSnapshot).tasks)
+
 export const isTaskList = (
   data: unknown
 ): data is { id: number; titulo: string; status: string }[] => {

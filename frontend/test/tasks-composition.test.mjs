@@ -219,3 +219,45 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
     Object.assign(api, original)
   }
 })
+
+test("tarefa vinculada a objetivo aparece no dia da recorrência e avulsa permite exclusão com confirmação", async () => {
+  const container = document.createElement("div")
+  document.body.append(container)
+  const root = createRoot(container)
+  const timezone = "America/Recife"
+  const prazo = formatDateForApi(operationalDateFor(timezone))
+  const permissions = { can_edit: true, can_pin: true, can_delete: true, can_complete: true }
+  const avulsa = { id: 81, titulo: "Tarefa avulsa", prazo, status: "PENDENTE", status_code: "PENDENTE", permissions }
+  const recorrente = { ...avulsa, id: 82, titulo: "Tarefa recorrente do objetivo", objetivo_id: 9,
+    recurrence: { series_id: 31, weekdays: [0, 1, 2, 3, 4, 5, 6], termination_policy: "ate_objetivo", end_date: null } }
+  const deleted = []
+  const board = { dailyTasks: [avulsa, recorrente], status: {}, formStatus: {}, setFormStatus() {},
+    async deleteTask(task) { deleted.push(task.id); return { persisted: true } } }
+  const click = async (element) => { assert.ok(element); await act(async () => element.click()) }
+  try {
+    await act(async () => root.render(React.createElement(TasksPage, {
+      board, user: { id: 1, timezone }, onStartFocus() {},
+    })))
+    assert.equal([...container.querySelectorAll("h3")].filter(el => el.textContent === recorrente.titulo).length, 1)
+    await click(container.querySelector('[aria-label="Ações da tarefa: Tarefa avulsa"]'))
+    await click([...document.querySelectorAll('[role="menuitem"]')].find(el => /Remover|Excluir/.test(el.textContent)))
+    assert.deepEqual(deleted, [])
+    const dialog = document.querySelector('[role="dialog"]')
+    assert.ok(dialog)
+    await click([...dialog.querySelectorAll("button")].find(el => /Remover|Excluir/.test(el.textContent)))
+    assert.deepEqual(deleted, [avulsa.id])
+    assert.equal(document.querySelector('[role="dialog"]'), null)
+    await click(container.querySelector('[aria-label="Ações da tarefa: Tarefa recorrente do objetivo"]'))
+    await click([...document.querySelectorAll('[role="menuitem"]')].find(el => el.textContent === "Excluir"))
+    const recurringDialog = document.querySelector('[role="dialog"]')
+    assert.match(recurringDialog.textContent, /todas as ocorrências pendentes/)
+    assert.match(recurringDialog.textContent, /concluídas serão preservadas/)
+    board.deleteTask = async () => false
+    await click([...recurringDialog.querySelectorAll("button")].find(el => el.textContent === "Excluir"))
+    assert.ok(document.querySelector('[role="dialog"]'), "falha de gravação não fecha a confirmação")
+    assert.deepEqual(deleted, [avulsa.id])
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+  }
+})

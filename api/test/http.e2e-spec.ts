@@ -548,7 +548,19 @@ class InMemoryPrisma {
     return operation(this);
   }
 
-  async $queryRaw(): Promise<Array<{ "?column?": number }>> {
+  async $queryRaw(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<Array<{ "?column?"?: number; ativo?: boolean }>> {
+    if (query.join("").includes("FROM series_recorrencia")) {
+      return this.recurrenceSeries
+        .filter(
+          (series) =>
+            series.recurrence_series_id === values[0] &&
+            series.responsavel_id === values[1],
+        )
+        .map((series) => ({ ativo: series.ativo }));
+    }
     return [{ "?column?": 1 }];
   }
 

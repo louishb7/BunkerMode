@@ -249,3 +249,14 @@ test("mutação local persistida antes da desmontagem não dispara unauthorized"
   assert.equal((await mutation).persisted, true)
   assert.equal(unauthorized, 0)
 })
+
+
+test("exclusão guarda a série como metadado local sem alterar o payload público", async () => {
+  const harness = boardHarness({})
+  await harness.render().deleteTask({ id: 81, titulo: "Recorrente", updated_at: "2026-09-09T00:00:00.000Z", recurrence: { series_id: 31 } })
+  assert.equal(harness.queued.length, 1)
+  assert.equal(harness.queued[0][2], "delete")
+  assert.equal(Object.keys(harness.queued[0][3]).length, 0)
+  assert.equal(harness.queued[0][4], 81)
+  assert.equal(harness.queued[0][7], 31)
+})

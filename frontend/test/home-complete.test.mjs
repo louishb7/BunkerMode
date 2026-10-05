@@ -88,13 +88,13 @@ test("Home não envia conclusão à API antes da gravação local", async () => 
   api.completeTask = () => { throw Error("Conclusão deve usar a outbox") }
   const view = await mount()
   try {
-    assert.deepEqual(calls, ["read"])
+    assert.deepEqual(calls, ["prepare", "read"])
     assert.doesNotMatch(view.container.textContent, /Não repetir na Home|Finanças/)
     await act(async () => view.container.querySelector('[aria-label="Concluir: Ler"]').click())
     assert.match(view.container.textContent, /Ler/)
     assert.equal(view.container.querySelector(".line-through"), null)
     assert.match(view.container.textContent, /Armazenamento local indisponível/)
-    assert.deepEqual(calls, ["read"])
+    assert.deepEqual(calls, ["prepare", "read"])
   } finally {
     await view.close()
     Object.assign(api, original)
@@ -159,6 +159,55 @@ test("foco temporário substitui lista de ações; carregar não vira copy de pr
     await act(async () => finish({ ok: true, data: snapshot() }))
     assert.match(view.container.textContent, /Escrever capítulo/)
     assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+
+test("Home exclui consulta de tarefas se preparação falhar e mantém direções", async () => {
+  const original = { ...api }
+  const calls = []
+  api.materializeTaskRecurrences = async () => {
+    calls.push("prepare")
+    return { ok: false, status: 503, data: { message: "Preparação indisponível" } }
+  }
+  api.getOrientation = async (_token, includeTasks) => {
+    calls.push(includeTasks)
+    return { ok: true, data: { ...snapshot(), tarefas: [] } }
+  }
+  const view = await mount({ user: { ...user, id: 72 } })
+  try {
+    assert.deepEqual(calls, ["prepare", false])
+    assert.match(view.container.textContent, /Preparação indisponível|Aprender/)
+    assert.equal(view.container.querySelector('[aria-label="Concluir: Ler"]'), null)
+  } finally {
+    await view.close()
+    Object.assign(api, original)
+  }
+})
+
+test("401 na preparação bloqueia leitura; Objetivos sem Tarefas não prepara", async () => {
+  const original = { ...api }
+  let prepares = 0, reads = 0, unauthorized = 0
+  api.materializeTaskRecurrences = async () => {
+    prepares++
+    return { ok: false, status: 401 }
+  }
+  api.getOrientation = async () => {
+    reads++
+    return { ok: true, data: { ...snapshot(), tarefas: [] } }
+  }
+  const view = await mount({ user: { ...user, id: 73 }, onUnauthorized: (result) => {
+    if (result.status === 401) { unauthorized++; return true }
+    return false
+  } })
+  try {
+    assert.equal(unauthorized, 1)
+    assert.equal(reads, 0)
+    await view.render({ user: { ...user, id: 74, enabled_modules: ["objectives"] } })
+    assert.equal(prepares, 1)
+    assert.equal(reads, 1)
   } finally {
     await view.close()
     Object.assign(api, original)

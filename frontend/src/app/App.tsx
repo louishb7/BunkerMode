@@ -181,7 +181,13 @@ function TasksRoute() {
   return (
     <AppShell onLogout={logout} user={auth.user}>
       <Suspense fallback={<div className="route-loading" aria-label="Carregando tarefas" />}>
-        <TasksPage board={board} onStartFocus={startFocus} user={auth.user} />
+        <TasksPage
+          board={board}
+          onStartFocus={startFocus}
+          user={auth.user}
+          token={auth.token}
+          onUnauthorized={auth.handleUnauthorized}
+        />
       </Suspense>
     </AppShell>
   )

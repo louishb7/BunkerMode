@@ -6,37 +6,47 @@ export function deriveSyncPresentation({
   online,
   availability,
   replaying,
+  now = Date.now(),
 }: {
   items: OutboxOperation[]
   online: boolean
   availability: ApiAvailability
   replaying: boolean
+  now?: number
 }) {
   const pendingCount = items.filter((item) => ["pending", "syncing"].includes(item.status)).length
   const conflictCount = items.filter((item) => item.status === "conflict").length
   const failedCount = items.filter((item) => item.status === "failed").length
+  const stalled =
+    online &&
+    !replaying &&
+    items.some(
+      (item) =>
+        ["pending", "syncing"].includes(item.status) &&
+        now - Date.parse(item.createdAt) > 15 * 60_000
+    )
   const state = conflictCount
     ? "conflict"
     : failedCount
       ? "failed"
-      : !pendingCount
-        ? "normal"
-        : !online
-          ? "offline"
+      : !online
+        ? "offline"
+        : stalled
+          ? "stalled"
           : availability === "unavailable"
             ? "unavailable"
-            : replaying
-              ? "syncing"
-              : "normal"
+            : "normal"
   const message =
     state === "conflict"
-      ? "Conflito de sincronização · revise as alterações"
+      ? "Há uma alteração em conflito. Revise em Configurações."
       : state === "failed"
-        ? "Não foi possível sincronizar · revise as alterações"
+        ? "Uma alteração não foi aceita. Revise em Configurações."
         : state === "unavailable"
-          ? `Não foi possível sincronizar · ${pendingCount} ${pendingCount === 1 ? "alteração pendente" : "alterações pendentes"}`
+          ? "Serviço temporariamente indisponível"
           : state === "offline"
-            ? "Aguardando sincronização"
-            : ""
+            ? "Sem conexão"
+            : state === "stalled"
+              ? "Há alterações sem confirmação há algum tempo. Revise em Configurações."
+              : ""
   return { state, message, pendingCount, conflictCount, failedCount }
 }

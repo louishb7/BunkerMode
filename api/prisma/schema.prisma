@@ -13,6 +13,7 @@ model auditoria_eventos {
   acao       String    @db.VarChar(80)
   detalhes   String
   criado_em  DateTime  @default(now()) @db.Timestamp(6)
+  occurred_at DateTime? @db.Timestamp(6)
   missoes    missoes?  @relation(fields: [missao_id], references: [missao_id], onDelete: SetNull, onUpdate: Cascade)
   usuarios   usuarios? @relation(fields: [usuario_id], references: [usuario_id], onDelete: SetNull, onUpdate: Cascade)
 
@@ -134,10 +135,13 @@ model acompanhamentos {
   usuario     usuarios                       @relation(fields: [usuario_id], references: [usuario_id], onDelete: Cascade)
   titulo      String                         @db.VarChar(200)
   descricao   String?
+  intent      String                         @default("registro_livre") @db.VarChar(20)
+  status      String                         @default("ativo") @db.VarChar(20)
   created_at  DateTime                       @default(now()) @db.Timestamp(6)
   updated_at  DateTime                       @updatedAt @db.Timestamp(6)
   objetivo    objetivos?                     @relation(fields: [objetivo_id], references: [id], onDelete: SetNull)
   ocorrencias ocorrencias_acompanhamento[]
+  planos      planos_pratica[]
 
   @@index([objetivo_id])
   @@index([usuario_id])
@@ -148,9 +152,34 @@ model ocorrencias_acompanhamento {
   acompanhamento_id Int
   occurred_at       DateTime        @default(now()) @db.Timestamp(6)
   created_at        DateTime        @default(now()) @db.Timestamp(6)
+  recorded_at       DateTime?       @db.Timestamp(6)
+  kind              String          @default("ocorrencia") @db.VarChar(20)
+  amount            Decimal?        @db.Decimal(14, 3)
+  unit              String?         @db.VarChar(40)
+  note              String?         @db.VarChar(2000)
   acompanhamento    acompanhamentos @relation(fields: [acompanhamento_id], references: [id], onDelete: Cascade)
 
   @@index([acompanhamento_id, occurred_at])
+}
+
+// Vigência é [effective_from, effective_until); pausas também preservam o plano.
+model planos_pratica {
+  id                Int             @id @default(autoincrement())
+  acompanhamento_id Int
+  effective_from    DateTime        @db.Date
+  effective_until   DateTime?       @db.Date
+  frequency         String          @db.VarChar(20)
+  weekdays          Int[]           @default([])
+  times_per_week    Int?
+  target_amount     Decimal?        @db.Decimal(14, 3)
+  unit              String?         @db.VarChar(40)
+  paused            Boolean         @default(false)
+  timezone          String          @db.VarChar(80)
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  acompanhamento    acompanhamentos @relation(fields: [acompanhamento_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([acompanhamento_id, effective_from])
+  @@index([acompanhamento_id, effective_until])
 }
 
 model PasswordReset {

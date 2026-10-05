@@ -268,7 +268,7 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
   assert.equal(result.rendered.match(/Não deve aparecer/g)?.length ?? 0, 0)
   assert.equal(
     result.calls.some((call) => call.endsWith("/tarefas/recorrencias/materializar")),
-    false
+    true
   )
   assert.equal(
     result.calls.some((call) => call.endsWith("/orientacao")),
@@ -282,7 +282,7 @@ test("Home revela recortes independentes dos módulos habilitados", async () => 
 
 test("Home consulta apenas os módulos habilitados e integra estados vazios", async () => {
   const tasksOnly = await navigate("/", users.tasks, { dailyTasks: [] })
-  assert.match(tasksOnly.rendered, /O dia está aberto/)
+  assert.match(tasksOnly.rendered, /Nada pede atenção agora/)
   assert.equal(
     tasksOnly.calls.some((call) => call.endsWith("/orientacao")),
     true
@@ -297,7 +297,7 @@ test("Home consulta apenas os módulos habilitados e integra estados vazios", as
   )
 
   const objectivesOnly = await navigate("/", users.objectives, { objectives: [] })
-  assert.match(objectivesOnly.rendered, /Nenhuma direção ativa/)
+  assert.match(objectivesOnly.rendered, /Nada pede atenção agora/)
   assert.equal(
     objectivesOnly.calls.some((call) => call.endsWith("/tarefas/dia-operacional")),
     false

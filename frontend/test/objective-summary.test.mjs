@@ -1,8 +1,5 @@
 import assert from "node:assert/strict"
 import { after, test } from "node:test"
-import React, { act } from "react"
-import { createRoot } from "react-dom/client"
-import { MemoryRouter } from "react-router-dom"
 import { JSDOM } from "jsdom"
 import { createServer } from "vite"
 
@@ -13,6 +10,9 @@ Object.assign(globalThis, {
   HTMLElement: dom.window.HTMLElement,
   IS_REACT_ACT_ENVIRONMENT: true,
 })
+const { default: React, act } = await import("react")
+const { createRoot } = await import("react-dom/client")
+const { MemoryRouter } = await import("react-router-dom")
 const vite = await createServer({
   appType: "custom",
   logLevel: "silent",
@@ -77,6 +77,29 @@ const cardProps = {
   onDelete() {},
   onUpdateStatus() {},
 }
+test("sinal compacto distingue prática registrada de período observado, sem inventar consistência", () => {
+  const now = new Date("2026-09-25T12:00:00Z")
+  assert.equal(
+    trackerOccurrenceLabel({ ...tracker, intent: "repetir" }, user.timezone, now),
+    "Última prática registrada há 8 dias"
+  )
+  assert.equal(
+    trackerOccurrenceLabel({ ...tracker, intent: "repetir", ocorrencias: [] }, user.timezone, now),
+    "Nenhuma prática registrada"
+  )
+  assert.equal(
+    trackerOccurrenceLabel(
+      {
+        ...tracker,
+        intent: "evitar",
+        ocorrencias: [{ occurred_at: "2026-09-24T12:00:00Z", kind: "confirmacao" }],
+      },
+      user.timezone,
+      now
+    ),
+    "Último período observado ontem"
+  )
+})
 
 test("sinais são fatos limitados a três; datas, ausência e última ocorrência respeitam calendário", () => {
   const now = new Date("2026-09-25T12:00:00Z")
@@ -348,41 +371,143 @@ test("descrição longa permanece legível no núcleo sem abrir inspector", asyn
   }
 })
 
-test("composer mostra um tipo por vez, pesquisa existentes e permite criar", async () => {
+test("composer escolhe o tipo antes de criar ou pesquisar um vínculo existente", async () => {
   const { default: Composer } = await load(
     "features/objectives/components/ObjectiveLinkComposer.tsx"
   )
   const chosen = []
+  let searchFor
+  function Probe() {
+    const [type, setType] = React.useState(null)
+    const [search, setSearch] = React.useState("")
+    searchFor = setSearch
+    return React.createElement(Composer, {
+      objetivo,
+      tasksEnabled: true,
+      tasks: [
+        { id: 1, titulo: "Ler livro", objetivo_id: null },
+        { id: 2, titulo: "Outra tarefa", objetivo_id: null },
+      ],
+      trackers: [{ id: 3, titulo: "Não fumar", objetivo_id: null }],
+      type,
+      search,
+      onType: (value) => {
+        setType(value)
+        chosen.push(value)
+      },
+      onSearch: setSearch,
+      onCreateTask: () => chosen.push("criar tarefa"),
+      onCreateTracker: () => chosen.push("criar acompanhamento"),
+      onLinkTask: (item) => chosen.push(item.titulo),
+      onLinkTracker: (item) => chosen.push(item.titulo),
+    })
+  }
+  const view = await mount(Probe)
+  const press = (label) =>
+    act(async () =>
+      [...view.container.querySelectorAll("button")]
+        .find(
+          (item) =>
+            item.textContent.trim() === label || item.querySelector("strong")?.textContent === label
+        )
+        .click()
+    )
+  try {
+    assert.equal(view.container.querySelector("input"), null)
+    await press("Tarefa")
+    assert.equal(view.container.querySelector("input"), null)
+    await press("Vincular tarefa existente")
+    assert.equal(view.container.querySelector(".composer-results"), null)
+    await act(async () => searchFor("Ler"))
+    assert.equal(view.container.querySelectorAll(".composer-results li").length, 1)
+    assert.match(view.container.textContent, /Ler livro/)
+    assert.doesNotMatch(view.container.textContent, /Não fumar|Outra tarefa/)
+    await act(async () => view.container.querySelector(".composer-results button").click())
+    await press("Voltar")
+    assert.equal(view.container.querySelector("input"), null)
+    await press("Criar tarefa")
+    await press("Voltar")
+    await press("Comportamento")
+    await press("Criar comportamento")
+    assert.deepEqual(chosen, [
+      "task",
+      "Ler livro",
+      "criar tarefa",
+      null,
+      "tracker",
+      "criar acompanhamento",
+    ])
+  } finally {
+    await view.close()
+  }
+})
+
+test("busca limita resultados, informa a série e não oferece itens já vinculados", async () => {
+  const { default: Composer } = await load(
+    "features/objectives/components/ObjectiveLinkComposer.tsx"
+  )
+  const tasks = [
+    { id: 1, titulo: "Ler diariamente", objetivo_id: null, recurrence: { series_id: 9 } },
+    { id: 2, titulo: "Ler diariamente", objetivo_id: null, recurrence: { series_id: 9 } },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      id: index + 3,
+      titulo: `Ler ${index}`,
+      objetivo_id: null,
+    })),
+    { id: 99, titulo: "Ler vinculado", objetivo_id: 4 },
+  ]
   const view = await mount(Composer, {
     objetivo,
     tasksEnabled: true,
-    tasks: [
-      { id: 1, titulo: "Ler livro", objetivo_id: null },
-      { id: 2, titulo: "Outra tarefa", objetivo_id: null },
-    ],
-    trackers: [{ id: 3, titulo: "Não fumar", objetivo_id: null }],
+    tasks,
+    trackers: [],
     type: "task",
     search: "Ler",
-    onType: (value) => chosen.push(value),
-    onSearch: () => {},
-    onCreateTask: () => chosen.push("criar tarefa"),
-    onCreateTracker: () => chosen.push("criar acompanhamento"),
-    onLinkTask: (item) => chosen.push(item.titulo),
-    onLinkTracker: (item) => chosen.push(item.titulo),
+    onType() {},
+    onSearch() {},
+    onCreateTask() {},
+    onCreateTracker() {},
+    onLinkTask() {},
+    onLinkTracker() {},
   })
   try {
-    assert.equal(view.container.querySelectorAll(".composer-options li").length, 1)
-    assert.match(view.container.textContent, /Ler livro/)
-    assert.doesNotMatch(view.container.textContent, /Não fumar|Outra tarefa/)
-    await act(async () => view.container.querySelector(".composer-options button").click())
-    await act(async () => view.container.querySelector(".composer-create button").click())
     await act(async () =>
-      [...view.container.querySelectorAll('[role="tab"]')]
-        .find((item) => item.textContent === "Acompanhamento")
+      [...view.container.querySelectorAll("button")]
+        .find((item) => item.textContent.trim() === "Vincular tarefa existente")
         .click()
     )
-    assert.deepEqual(chosen, ["Ler livro", "criar tarefa", "tracker"])
+    assert.equal(view.container.querySelectorAll(".composer-results li").length, 6)
+    assert.doesNotMatch(
+      view.container.querySelector(".composer-results").textContent,
+      /Ler vinculado/
+    )
+    // Uma pesquisa específica encontra somente um representante da série.
   } finally {
     await view.close()
+  }
+  const series = await mount(Composer, {
+    objetivo,
+    tasksEnabled: true,
+    tasks,
+    trackers: [],
+    type: "task",
+    search: "diariamente",
+    onType() {},
+    onSearch() {},
+    onCreateTask() {},
+    onCreateTracker() {},
+    onLinkTask() {},
+    onLinkTracker() {},
+  })
+  try {
+    await act(async () =>
+      [...series.container.querySelectorAll("button")]
+        .find((item) => item.textContent.trim() === "Vincular tarefa existente")
+        .click()
+    )
+    assert.equal(series.container.querySelectorAll(".composer-results li").length, 1)
+    assert.match(series.container.textContent, /Série recorrente.*todas as ocorrências/)
+  } finally {
+    await series.close()
   }
 })

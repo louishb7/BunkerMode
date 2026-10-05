@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Crown, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Button from "../../../components/ui/Button"
 import SyncLabel from "../../../components/system/SyncLabel"
-import ObjectiveStatus from "./ObjectiveStatus"
 import ObjectiveMap from "./ObjectiveMap"
-import TodayStrip from "./TodayStrip"
 import ObjectiveNodeDetails from "./ObjectiveNodeDetails"
 import { displayDate, liveMapNodes } from "../objectiveMapModel"
 
@@ -43,7 +41,6 @@ export default function ObjetivoCard({
     [visibleTasks, trackers, timezone]
   )
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [todayTaskId, setTodayTaskId] = useState<number | null>(null)
   const [pulse, setPulse] = useState(null)
   useEffect(() => {
     if (!pulse) return
@@ -52,12 +49,9 @@ export default function ObjetivoCard({
   }, [pulse])
   const closeDetails = useCallback(() => {
     setSelectedId(null)
-    setTodayTaskId(null)
   }, [])
   const selected = nodes.find((node) => node.id === selectedId)
-  const task = selected
-    ? visibleTasks.find((item) => item.id === (todayTaskId ?? selected.source_id))
-    : null
+  const task = selected ? visibleTasks.find((item) => item.id === selected.source_id) : null
   const tracker = selected ? trackers.find((item) => selected.id === `tracker-${item.id}`) : null
   async function complete(task) {
     if (await onCompleteTask(task)) {
@@ -68,8 +62,8 @@ export default function ObjetivoCard({
       setPulse({ id, key: Date.now() })
     }
   }
-  async function record(tracker) {
-    if (await onRecordOccurrence(tracker))
+  async function record(tracker, withDetails = false) {
+    if (await onRecordOccurrence(tracker, withDetails))
       setPulse({ id: `tracker-${tracker.id}`, key: Date.now() })
   }
   const menuItems = [
@@ -79,7 +73,16 @@ export default function ObjetivoCard({
       label: objetivo.status === "ativo" ? "Pausar objetivo" : "Retomar objetivo",
       onSelect: () => onUpdateStatus(objetivo.status === "ativo" ? "pausado" : "ativo"),
     },
-    { label: "Remover objetivo", onSelect: onDelete, danger: true },
+    ...(["ativo", "pausado"].includes(objetivo.status)
+      ? [
+          {
+            label: "Conquistar objetivo",
+            onSelect: onConquer,
+            disabled: Boolean(objetivo.syncStatus),
+          },
+        ]
+      : []),
+    { label: "Remover objetivo", onSelect: onDelete, danger: true, separatorBefore: true },
   ]
   return (
     <article
@@ -88,7 +91,7 @@ export default function ObjetivoCard({
       className="objective-workspace"
     >
       <div className="objective-workspace-toolbar">
-        <ObjectiveStatus status={objetivo.status} />
+        {objetivo.status === "pausado" && <span className="objective-paused">Pausado</span>}
         <ActionsMenu
           label={`Ações do objetivo: ${objetivo.titulo}`}
           disabled={loading}
@@ -96,21 +99,6 @@ export default function ObjetivoCard({
         />
       </div>
       <SyncLabel status={objetivo.syncStatus} />
-      {tasksEnabled && (
-        <TodayStrip
-          tasks={visibleTasks}
-          timezone={timezone}
-          onComplete={complete}
-          onSelect={(task) => {
-            setTodayTaskId(task.id)
-            setSelectedId(
-              task.recurrence || task.recurringIntent
-                ? `routine-${task.recurrence?.series_id ?? task.id}`
-                : `task-${task.id}`
-            )
-          }}
-        />
-      )}
       {tasksEnabled && tasksError && (
         <p role="status" className="text-danger text-sm">
           {tasksError}{" "}
@@ -136,7 +124,6 @@ export default function ObjetivoCard({
         nodes={nodes}
         timezone={timezone}
         onSelect={(node) => {
-          setTodayTaskId(null)
           setSelectedId(node.id)
         }}
         pulseId={pulse}
@@ -154,17 +141,6 @@ export default function ObjetivoCard({
               <Plus size={15} aria-hidden="true" />
               Adicionar vínculo
             </Button>
-            {(objetivo.status === "ativo" || objetivo.status === "pausado") && (
-              <Button
-                size="small"
-                variant="secondary"
-                disabled={loading || Boolean(objetivo.syncStatus)}
-                onClick={onConquer}
-              >
-                <Crown size={15} aria-hidden="true" />
-                Conquistar objetivo
-              </Button>
-            )}
           </div>
         }
       />

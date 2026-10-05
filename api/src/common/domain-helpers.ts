@@ -66,3 +66,19 @@ export function dateOnly(value: Date | null | undefined): string | null {
 export function dateTime(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null;
 }
+
+// Event time is supplied by offline clients; database defaults still record receipt.
+// Require a timezone so replay never interprets an event in the server's local zone.
+export function eventTimestamp(value: unknown, now = new Date()): Date {
+  if (value === undefined) return now;
+  const match = typeof value === "string"
+    ? /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value)
+    : null;
+  const message = "Data e hora da ocorrência inválidas.";
+  if (!match) throw new HttpException(message, HttpStatus.BAD_REQUEST);
+  parseIsoDate(match[1], message);
+  const date = new Date(value as string);
+  if (!Number.isFinite(date.getTime()) || date.getTime() > now.getTime() + 5 * 60_000)
+    throw new HttpException(message, HttpStatus.BAD_REQUEST);
+  return date;
+}

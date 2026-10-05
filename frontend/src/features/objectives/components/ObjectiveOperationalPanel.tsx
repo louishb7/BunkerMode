@@ -5,6 +5,30 @@ import ActionsMenu from "../../../components/ui/ActionsMenu"
 import Button from "../../../components/ui/Button"
 import LoadingLines from "../../../components/ui/LoadingLines"
 import { trackerOccurrenceLabel } from "../objectiveSummary"
+import PracticeHistory from "../../practices/components/PracticeHistory"
+import {
+  planOn,
+  practiceDate,
+  practiceFact,
+  practicePlanLabel,
+} from "../../practices/practiceDomain"
+
+function planSummary(tracker, timezone) {
+  const today = practiceDate(new Date(), tracker.planos?.[0]?.timezone ?? timezone)
+  const current = planOn(tracker.planos ?? [], today)
+  const next = tracker.planos?.at(-1)
+  return (
+    <>
+      {current && <p>{practicePlanLabel(current)}</p>}
+      {next?.effective_from > today && (
+        <p>
+          {next.paused ? "Pausa" : "Nova meta"} a partir de{" "}
+          {next.effective_from.split("-").reverse().join("/")}
+        </p>
+      )}
+    </>
+  )
+}
 
 export default function ObjectiveOperationalPanel({
   tasksEnabled,
@@ -25,6 +49,7 @@ export default function ObjectiveOperationalPanel({
   onUnlinkTracker = undefined,
   onRecordOccurrence,
   onDeleteOccurrence,
+  onPauseTracker = undefined,
   timezone,
 }) {
   return (
@@ -44,13 +69,25 @@ export default function ObjectiveOperationalPanel({
           <li className="objective-link" key={`tracker-${tracker.id}`}>
             <ListChecks size={18} className="mt-1 text-text-muted" aria-hidden="true" />
             <div className="min-w-0">
-              <span className="eyebrow">Acompanhamento</span>
+              <span className="eyebrow">
+                {!tracker.intent || tracker.intent === "registro_livre"
+                  ? "Registro livre"
+                  : tracker.intent === "repetir"
+                    ? "Hábito"
+                    : "Reduzir ou evitar"}
+              </span>
               <h4>{tracker.titulo}</h4>
               <SyncLabel status={tracker.syncStatus} />
-              <p>{trackerOccurrenceLabel(tracker, timezone)}</p>
+              <p>
+                {(tracker.intent && tracker.intent !== "registro_livre") ||
+                tracker.status === "pausado"
+                  ? practiceFact(tracker, new Date(), timezone)
+                  : trackerOccurrenceLabel(tracker, timezone)}
+              </p>
+              {planSummary(tracker, timezone)}
               <details className="mt-3 text-xs text-text-secondary">
                 <summary className="min-h-9 cursor-pointer">
-                  Registrar e consultar ocorrências
+                  Registrar e consultar histórico
                 </summary>
                 {tracker.descricao && <p className="whitespace-pre-line">{tracker.descricao}</p>}
                 <Button
@@ -59,44 +96,43 @@ export default function ObjectiveOperationalPanel({
                   disabled={trackerBusyId === tracker.id}
                   onClick={() => onRecordOccurrence(tracker)}
                 >
-                  Registrar ocorrência
+                  {tracker.intent === "repetir" ? "Registrar prática" : "Registrar ocorrência"}
                 </Button>
-                {tracker.ocorrencias?.length > 0 && (
-                  <ol className="m-0 list-none p-0">
-                    {tracker.ocorrencias.slice(0, 5).map((event) => (
-                      <li
-                        className="flex flex-wrap items-center justify-between gap-2"
-                        key={event.id}
-                      >
-                        <span>
-                          {new Date(event.occurred_at).toLocaleString("pt-BR", {
-                            timeZone: timezone,
-                          })}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="small"
-                          disabled={trackerBusyId === tracker.id}
-                          onClick={() => onDeleteOccurrence(tracker, event)}
-                        >
-                          Remover ocorrência
-                        </Button>
-                      </li>
-                    ))}
-                  </ol>
+                {(!tracker.intent || tracker.intent === "registro_livre") && (
+                  <Button
+                    size="small"
+                    variant="ghost"
+                    disabled={trackerBusyId === tracker.id}
+                    onClick={() => onRecordOccurrence(tracker, true)}
+                  >
+                    Registrar com detalhes
+                  </Button>
                 )}
+                <PracticeHistory
+                  tracker={tracker}
+                  timezone={timezone}
+                  onDeleteOccurrence={onDeleteOccurrence}
+                />
               </details>
             </div>
             <ActionsMenu
-              label={`Ações do acompanhamento: ${tracker.titulo}`}
+              label={`Ações do comportamento: ${tracker.titulo}`}
               disabled={trackerBusyId === tracker.id}
               items={[
-                { label: "Editar acompanhamento", onSelect: () => onEditTracker(tracker) },
-                ...(onUnlinkTracker
+                { label: "Editar comportamento", onSelect: () => onEditTracker(tracker) },
+                ...(onPauseTracker
+                  ? [
+                      {
+                        label: tracker.status === "pausado" ? "Retomar" : "Pausar",
+                        onSelect: () => onPauseTracker(tracker),
+                      },
+                    ]
+                  : []),
+                ...(onUnlinkTracker && tracker.objetivo_id != null
                   ? [{ label: "Desvincular do objetivo", onSelect: () => onUnlinkTracker(tracker) }]
                   : []),
                 {
-                  label: "Excluir acompanhamento",
+                  label: "Excluir comportamento",
                   onSelect: () => onDeleteTracker(tracker),
                   danger: true,
                 },

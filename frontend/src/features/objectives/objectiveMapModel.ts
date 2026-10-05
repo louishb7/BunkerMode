@@ -2,6 +2,7 @@ import type { ObjectiveMapNode } from "../../types/achievementContract"
 import type { Task } from "../../types/taskContract"
 import type { Tracker } from "../../types/trackerContract"
 import { operationalDateFor, taskBelongsToDate } from "../calendar/calendarUtils"
+import { practiceFact } from "../practices/practiceDomain"
 
 export function elapsedDays(from: string, to: Date, timezone?: string) {
   const date = new Date(from)
@@ -99,6 +100,8 @@ export function liveMapNodes(
       descricao: tracker.descricao,
       ultima_ocorrencia: last?.occurred_at ?? null,
       syncStatus: tracker.syncStatus,
+      practice_intent: tracker.intent,
+      practice_fact: tracker.intent && tracker.intent !== "registro_livre" ? practiceFact(tracker, new Date(), timezone) : undefined,
     })
   }
   return nodes
@@ -106,6 +109,7 @@ export function liveMapNodes(
 
 export function nodeFact(node: ObjectiveMapNode, timezone?: string, now = new Date()) {
   if (node.tipo === "acompanhamento") {
+    if (node.practice_fact) return node.practice_fact
     if (!node.ultima_ocorrencia) return "Nenhuma ocorrência registrada"
     const days = elapsedDays(node.ultima_ocorrencia, now, timezone)
     return days === null

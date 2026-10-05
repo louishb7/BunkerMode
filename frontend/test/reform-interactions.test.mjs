@@ -229,7 +229,7 @@ test("concluídas ficam abaixo das abertas e preservam Reabrir sem ações proib
   await view.close()
 })
 
-test("objetivo permite pausar no menu e abre conquista explícita pela ação principal", async () => {
+test("objetivo tem topo direto, pausa discreta e conquista explícita somente no menu", async () => {
   let status = "",
     created = 0
   const props = {
@@ -247,7 +247,9 @@ test("objetivo permite pausar no menu e abre conquista explícita pela ação pr
   }
   const view = await mount(ObjetivoCard, props)
   assert.equal(view.container.querySelector("select"), null)
-  assert.match(view.container.textContent, /Ativo/)
+  assert.doesNotMatch(view.container.textContent, /Ativo|Hoje|Nenhuma tarefa prevista/)
+  assert.equal(view.container.querySelector(".objective-today"), null)
+  assert.equal([...view.container.querySelectorAll("button")].some((b) => b.textContent === "Conquistar objetivo"), false)
   assert.doesNotMatch(view.container.textContent, /Nenhuma tarefa vinculada/)
   await click(
     [...view.container.querySelectorAll("button")].find((b) =>
@@ -264,8 +266,10 @@ test("objetivo permite pausar no menu e abre conquista explícita pela ação pr
     )
   )
   assert.equal(status, "pausado")
+  await click(view.container.querySelector("[aria-haspopup=menu]"))
+  assert.equal(document.querySelectorAll('[role="menu"] [role="separator"]').length, 1)
   await click(
-    [...view.container.querySelectorAll("button")].find(
+    [...document.querySelectorAll("[role=menuitem]")].find(
       (b) => b.textContent === "Conquistar objetivo"
     )
   )
@@ -275,6 +279,7 @@ test("objetivo permite pausar no menu e abre conquista explícita pela ação pr
     ...props,
     objetivo: { ...props.objetivo, status: "pausado" },
   })
+  assert.match(paused.container.querySelector(".objective-paused").textContent, /Pausado/)
   await click(paused.container.querySelector("[aria-haspopup=menu]"))
   assert.match(document.querySelector("[role=menu]").textContent, /Retomar objetivo/)
   await click(

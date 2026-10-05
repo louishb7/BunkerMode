@@ -21,7 +21,7 @@ import {
   subscribeApiSuccess,
 } from "../../../offline/apiAvailability"
 import { focusStorageKey, durationStorageKey } from "../../tasks/focusSession"
-import { activateOutbox, syncOutbox } from "../../../offline/outbox"
+import { activateOutbox, getReplayOwner, syncOutbox } from "../../../offline/outbox"
 
 const persistentStore = window.localStorage
 const sessionStore = window.sessionStorage
@@ -119,9 +119,11 @@ export function useAuthSession() {
       const revocation = revoke ? revokePersistentSession() : Promise.resolve()
       sessionRequestId.current += 1
       const ownerId = user?.id ?? readStoredUser()?.id
-      const cleanup = ownerId ? clearUserData(ownerId) : Promise.resolve()
       activateOutbox(null)
-      if (ownerId) {
+      // Expiração bloqueia a sessão, mas preserva as intenções locais por dono.
+      // Logout voluntário já possui confirmação explícita de descarte em App.
+      const cleanup = revoke && ownerId ? clearUserData(ownerId) : Promise.resolve()
+      if (revoke && ownerId) {
         persistentStore.removeItem(focusStorageKey(ownerId))
         persistentStore.removeItem(durationStorageKey(ownerId))
       }
@@ -177,7 +179,7 @@ export function useAuthSession() {
 
       const previousOwner = readStoredUser()?.id
       if (previousOwner && previousOwner !== result.data.id) {
-        void clearUserData(previousOwner)
+        activateOutbox(null)
         clearOverview()
         clearFinanceSnapshots()
         clearOrientationCache()
@@ -199,17 +201,29 @@ export function useAuthSession() {
       return
     }
     activateOutbox(user.id)
+    let live = true
+    let recovering = false
     const onAvailable = () => {
-      if (getApiAvailability() === "available") void syncOutbox(user.id)
+      // O próprio replay verifica /usuarios/me. Seu probe saudável não pode
+      // reenfileirar o replay e contornar o backoff de um comando indisponível.
+      if (getApiAvailability() === "available" && !recovering && getReplayOwner() !== user.id)
+        void syncOutbox(user.id)
     }
     const stop = subscribeApiAvailability(onAvailable)
-    const stopRetry = subscribeApiRetry(() => {
-      void api.getCurrentUser(persistentStore.getItem(TOKEN_KEY)).then((result) => {
-        if (result.status === 401) clearSession()
-        else if (result.ok) void syncOutbox(user.id)
-      })
+    const stopRetry = subscribeApiRetry(async () => {
+      if (recovering || getReplayOwner() === user.id) return
+      recovering = true
+      try {
+        const result = await api.getCurrentUser(persistentStore.getItem(TOKEN_KEY))
+        if (!live) return
+        if (result.status === 401) await clearSession()
+        else if (result.ok) await syncOutbox(user.id)
+      } finally {
+        recovering = false
+      }
     })
     return () => {
+      live = false
       stop()
       stopRetry()
       activateOutbox(null)
@@ -265,7 +279,7 @@ export function useAuthSession() {
     const retry = () => {
       if (getApiAvailability() === "unavailable" || revalidating.current) return
       const requestId = ++sessionRequestId.current
-      void restoreSession(token, requestId)
+      return restoreSession(token, requestId)
     }
     const onAvailability = () => {
       if (getApiAvailability() === "available") retry()

@@ -4,7 +4,7 @@ import {
   notifyApiSuccess,
   setApiAvailability,
 } from "../offline/apiAvailability"
-import { REFRESH_KEY, TOKEN_KEY } from "../constants/session"
+import { REFRESH_KEY, TOKEN_KEY, USER_KEY } from "../constants/session"
 
 const REQUEST_TIMEOUT_MS = 30000
 const pendingReads = new Map<string, Promise<ApiResult>>()
@@ -131,6 +131,21 @@ export type RequestOptions = {
   timeoutMs?: number
 }
 
+function currentSessionOwner(): number | null {
+  try {
+    const id = JSON.parse(window.localStorage.getItem(USER_KEY) || "null")?.id
+    return Number.isSafeInteger(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+const sessionChanged = (): ApiResult<never> => ({
+  ok: false,
+  status: 0,
+  data: { message: "A sessão mudou durante a operação." },
+})
+
 async function parseResponse<T>(response: Response): Promise<ApiResult<T>> {
   if (response.status === 204) {
     return { ok: true, status: 204, data: null }
@@ -169,7 +184,7 @@ export function request<T = any>(
   { token, method = "GET", body, timeoutMs }: RequestOptions = {}
 ): Promise<ApiResult<T>> {
   if (method !== "GET") return performRequest<T>(path, { token, method, body, timeoutMs })
-  const key = `${token ?? ""}:${path}`
+  const key = `${window.localStorage.getItem(TOKEN_KEY) || token || ""}:${path}`
   const pending = pendingReads.get(key)
   if (pending) return pending as Promise<ApiResult<T>>
   const result = performRequest<T>(path, { token, method, body, timeoutMs })
@@ -183,7 +198,8 @@ export function request<T = any>(
 async function performRequest<T>(
   path: string,
   { token, method = "GET", body, timeoutMs }: RequestOptions,
-  recover = true
+  recover = true,
+  expectedOwner = currentSessionOwner()
 ): Promise<ApiResult<T>> {
   const authenticationAction = [
     "/auth/login",
@@ -194,6 +210,7 @@ async function performRequest<T>(
     "/auth/refresh",
     "/auth/logout",
   ].includes(path)
+  if (!authenticationAction && expectedOwner !== currentSessionOwner()) return sessionChanged()
   if (method !== "GET" && !authenticationAction && getApiAvailability() === "unavailable") {
     return { ok: false, status: 0, data: { message: "Esta ação exige conexão com a API." } }
   }
@@ -233,6 +250,9 @@ async function performRequest<T>(
       signal: controller.signal,
       body: body === undefined ? undefined : JSON.stringify(body),
     })
+    // Uma resposta antiga não autoriza reenviar o corpo com a sessão que a
+    // substituiu, nem invalidar a conta atual ao receber um 401 da anterior.
+    if (!authenticationAction && expectedOwner !== currentSessionOwner()) return sessionChanged()
     setApiAvailability(response.status >= 500 ? "unavailable" : "available")
     if (response.ok && path !== "/usuarios/me") notifyApiSuccess()
     if (response.ok && recover && !authenticationAction && !hasRefreshSession()) {
@@ -241,14 +261,20 @@ async function performRequest<T>(
     if (response.status === 401 && recover && !authenticationAction && hasRefreshSession()) {
       const currentToken = window.localStorage.getItem(TOKEN_KEY)
       if (currentToken && currentToken !== effectiveToken) {
-        return performRequest<T>(path, { token: currentToken, method, body, timeoutMs }, false)
+        return performRequest<T>(path, { token: currentToken, method, body, timeoutMs }, false, expectedOwner)
       }
       const refreshed = await rotateSession()
+      if (expectedOwner !== currentSessionOwner()) return sessionChanged()
       if (refreshed.ok) {
+        // Um refresh compartilhado pode ter terminado após outra sessão entrar.
+        // Só a credencial ainda armazenada pode autorizar o próximo envio.
+        const refreshedToken = window.localStorage.getItem(TOKEN_KEY)
+        if (!refreshedToken) return sessionChanged()
         return performRequest<T>(
           path,
-          { token: refreshed.data.access_token, method, body, timeoutMs },
-          false
+          { token: refreshedToken, method, body, timeoutMs },
+          false,
+          expectedOwner
         )
       }
       if (refreshed.status === 0 || refreshed.status >= 500) return refreshed as ApiResult<T>

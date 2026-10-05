@@ -4,6 +4,7 @@ import Button from "../../../components/ui/Button"
 import Dialog from "../../../components/ui/Dialog"
 import SyncLabel from "../../../components/system/SyncLabel"
 import { displayDate, nodeFact } from "../objectiveMapModel"
+import PracticeHistory from "../../practices/components/PracticeHistory"
 
 export default function ObjectiveNodeDetails({
   node,
@@ -30,7 +31,9 @@ export default function ObjectiveNodeDetails({
             ? "Tarefa recorrente"
             : node.tipo === "tarefa"
               ? "Tarefa"
-              : "Acompanhamento"}
+              : node.practice_intent && node.practice_intent !== "registro_livre"
+                ? "Hábitos e mudanças"
+                : "Registro livre"}
           {readOnly ? " · Memória da conquista" : ""}
         </p>
         <p>{nodeFact(node, timezone, now)}</p>
@@ -65,10 +68,12 @@ export default function ObjectiveNodeDetails({
         )}
         {node.tipo === "acompanhamento" && (
           <>
-            <p>
-              Ocorrências são registros manuais. O intervalo desde o último registro não confirma
-              dias de abstinência.
-            </p>
+            {(!node.practice_intent || node.practice_intent === "registro_livre") && (
+              <p>
+                Ocorrências são registros manuais. O intervalo desde o último registro não confirma
+                dias de abstinência.
+              </p>
+            )}
             {node.ocorrencias_total !== undefined && (
               <p>{node.ocorrencias_total} ocorrências registradas até a conquista.</p>
             )}
@@ -83,11 +88,7 @@ export default function ObjectiveNodeDetails({
       {!readOnly && task && (
         <div className="node-detail-actions">
           {task.permissions?.can_complete && (
-            <Button
-              variant="secondary"
-              disabled={Boolean(task.syncStatus)}
-              onClick={() => onCompleteTask(task)}
-            >
+            <Button variant="secondary" onClick={() => onCompleteTask(task)}>
               Concluir tarefa
             </Button>
           )}
@@ -96,7 +97,6 @@ export default function ObjectiveNodeDetails({
           </Link>
           <Button
             variant="ghost"
-            disabled={Boolean(task.syncStatus)}
             onClick={() => {
               onClose()
               onUnlinkTask(task)
@@ -109,13 +109,14 @@ export default function ObjectiveNodeDetails({
       {!readOnly && tracker && (
         <>
           <div className="node-detail-actions">
-            <Button
-              variant="secondary"
-              disabled={Boolean(tracker.syncStatus)}
-              onClick={() => onRecordOccurrence(tracker)}
-            >
-              Registrar ocorrência
+            <Button variant="secondary" onClick={() => onRecordOccurrence(tracker)}>
+              {tracker.intent === "repetir" ? "Registrar prática" : "Registrar ocorrência"}
             </Button>
+            {(!tracker.intent || tracker.intent === "registro_livre") && (
+              <Button variant="ghost" onClick={() => onRecordOccurrence(tracker, true)}>
+                Registrar com detalhes
+              </Button>
+            )}
             <Button
               variant="ghost"
               onClick={() => {
@@ -127,7 +128,6 @@ export default function ObjectiveNodeDetails({
             </Button>
             <Button
               variant="ghost"
-              disabled={Boolean(tracker.syncStatus)}
               onClick={async () => {
                 if (await onUnlinkTracker(tracker)) onClose()
               }}
@@ -144,28 +144,11 @@ export default function ObjectiveNodeDetails({
               Excluir
             </Button>
           </div>
-          {tracker.ocorrencias?.length > 0 && (
-            <section aria-label="Ocorrências recentes">
-              <h3 className="text-sm">Últimas ocorrências</h3>
-              <ol className="objective-occurrences">
-                {tracker.ocorrencias.slice(0, 5).map((event) => (
-                  <li key={event.id}>
-                    <span>
-                      {new Date(event.occurred_at).toLocaleString("pt-BR", { timeZone: timezone })}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="small"
-                      disabled={Boolean(tracker.syncStatus)}
-                      onClick={() => onDeleteOccurrence(tracker, event)}
-                    >
-                      Remover ocorrência
-                    </Button>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
+          <PracticeHistory
+            tracker={tracker}
+            timezone={timezone}
+            onDeleteOccurrence={onDeleteOccurrence}
+          />
         </>
       )}
       <Button variant="secondary" onClick={onClose}>

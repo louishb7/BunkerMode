@@ -50,6 +50,8 @@ const icons = { X: () => null, CircleAlert: () => null, RefreshCw: () => null }
 const { default: SyncLabel } = load("../src/components/system/SyncLabel.tsx", { react: React, "lucide-react": icons })
 const { default: OutboxNotice } = load("../src/components/system/OutboxNotice.tsx", {
   react: React, "lucide-react": icons, "../../context/AuthContext": auth,
+  "react-router-dom": { Link: ({to, ...props}) => React.createElement("a", {...props, href: to}) },
+  "../../services/bunkermodeApi": { api: { getCurrentUser: async () => ({ok: true}) } },
   "../../context/SyncStatusContext": context,
   "../../offline/useApiAvailability": availabilityHook,
   "../../offline/outbox": outbox, "./SyncLabel": { __esModule: true, default: SyncLabel },
@@ -58,6 +60,7 @@ const { default: PwaBanners } = load("../src/components/system/PwaBanners.tsx", 
   react: React, "lucide-react": icons,
   "virtual:pwa-register": { registerSW: () => async () => {} },
   "../../context/SyncStatusContext": context,
+  "../../pwa/installPolicy": load("../src/pwa/installPolicy.ts", {}),
 })
 const client = load("../src/api/httpClient.ts", {
   "./config": { API_URL: "http://localhost/api/v2", API_CONFIG_ERROR: "" },
@@ -97,26 +100,25 @@ test("A/B: criação e mutações online permanecem sem texto durante a outbox e
       assertNeutral(view)
       await view.update(() => { items = [{ ...op("syncing"), action }]; replayOwner = 1 })
       assertNeutral(view)
-      assert.equal(view.container.querySelector('summary').getAttribute('aria-label'), "Sincronizando")
-      assert.equal(view.container.querySelector('details').open, false)
+      assert.equal(view.container.querySelector('summary'), null)
       await view.update(() => { items = []; replayOwner = null })
       assertNeutral(view)
       assert.equal(view.container.querySelector('summary'), null)
     }
   } finally { await view.close() }
 })
-test("C/G: offline só avisa com pendências e concentra quantidade nos detalhes", async () => {
+test("C/G: offline usa indicador discreto e não mostra contagens técnicas", async () => {
   setOnline(false)
   apiAvailability.setApiAvailability("unavailable")
   const view = await mount()
   try {
-    assertNeutral(view)
+    assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Sem conexão")
     for (const count of [1, 4]) {
       await view.update(() => { items = Array.from({ length: count }, (_, i) => op("pending", i)) })
       assert.equal(view.container.querySelectorAll('[data-sync-status]').length, 1)
-      assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Aguardando sincronização")
-      assert.equal(view.container.querySelector('summary').textContent, "")
-      assert.match(view.container.querySelector('details').textContent, new RegExp(`${count} altera`))
+      assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Sem conexão")
+      assert.equal(view.container.querySelector('summary'), null)
+      assert.doesNotMatch(view.container.textContent, /alteração|alterações|pendente/)
       assert.doesNotMatch(view.container.textContent, /API indisponível|Alteração salva|alterações? locais/)
     }
   } finally { await view.close() }
@@ -155,7 +157,7 @@ test("E: network error, timeout e 5xx geram uma superfície; 4xx permitem resolu
       assert.equal(result.status, typeof failure === "number" ? failure : 0)
       assert.equal(apiAvailability.getApiAvailability(), "unavailable")
       assert.equal(view.container.querySelectorAll('[data-sync-status]').length, 1)
-      assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Não foi possível sincronizar · 2 alterações pendentes")
+      assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Serviço temporariamente indisponível")
       assert.equal(items.every(item => item.status === "pending"), true)
       assert.doesNotMatch(view.container.textContent, /Aguardando sincronização|API indisponível|Alteração salva|alterações? locais/)
     }
@@ -195,6 +197,18 @@ test("troca de usuário não apresenta pendências de outro dono", async () => {
   const view = await mount()
   try {
     await view.update(() => { ownerId = 2 })
-    assertNeutral(view)
+    assert.equal(view.container.querySelector('[data-sync-status]').textContent, "Sem conexão")
+    assert.equal(view.container.querySelector('[aria-label="Revisar alterações locais"]'), null)
   } finally { await view.close() }
+})
+
+
+test("fila antiga pede ação sem confundir replay normal, offline ou falha", () => {
+  const now = Date.parse("2026-10-05T18:00:00Z")
+  const input = {items: [{...op(), createdAt: "2026-10-05T17:40:00Z"}], online: true, availability: "available", replaying: false, now}
+  assert.equal(presentation.deriveSyncPresentation(input).state, "stalled")
+  assert.equal(presentation.deriveSyncPresentation({...input, replaying: true}).state, "normal")
+  assert.equal(presentation.deriveSyncPresentation({...input, online: false}).state, "offline")
+  assert.equal(presentation.deriveSyncPresentation({...input, availability: "unavailable"}).state, "stalled")
+  assert.equal(presentation.deriveSyncPresentation({...input, items: [op("failed")]}).state, "failed")
 })

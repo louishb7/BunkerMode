@@ -5,6 +5,7 @@ import { GOAL_STATUS } from "../goals/goals.types";
 import { UserRecord } from "../auth/auth.types";
 import { OperationalCalendarService } from "../calendar/operational-calendar.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { eventTimestamp } from "../common/domain-helpers";
 import {
   DEFAULT_PRIORITY,
   canReopenTask,
@@ -544,7 +545,7 @@ export class TasksService {
     });
   }
 
-  async complete(id: number, user: UserRecord): Promise<TaskRecord> {
+  async complete(id: number, user: UserRecord, occurredAt?: unknown): Promise<TaskRecord> {
     const current = await this.getTaskForUser(id, user);
     if (
       current.status !== TASK_STATUS.pending ||
@@ -555,14 +556,15 @@ export class TasksService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const now = new Date();
+    const occurred = eventTimestamp(occurredAt);
     return this.updateExecutionState(id, user, {
       data: {
         status: TASK_STATUS.completed,
-        completed_at: now,
+        completed_at: occurred,
       },
       action: "tarefa_concluida",
       details: `Tarefa '${current.titulo}' concluída.`,
+      occurredAt: occurred,
     });
   }
 
@@ -572,11 +574,6 @@ export class TasksService {
     if (goalId === null)
       throw new HttpException("Informe um objetivo.", HttpStatus.BAD_REQUEST);
     await this.ensureActiveGoal(user, goalId);
-    if (current.objetivo_id !== null && current.objetivo_id !== goalId)
-      throw new HttpException(
-        "Desvincule a tarefa do objetivo atual antes de vinculá-la a outro.",
-        HttpStatus.CONFLICT,
-      );
     await this.prisma.$transaction(async (tx) => {
       if (current.recurrence_series_id !== null) {
         const series = await tx.series_recorrencia.findFirst({
@@ -771,10 +768,14 @@ export class TasksService {
 
   async taskHistory(id: number, user: UserRecord) {
     await this.getTaskForUser(id, user);
-    return this.prisma.auditoria_eventos.findMany({
+    const events = await this.prisma.auditoria_eventos.findMany({
       where: { missao_id: id },
       orderBy: [{ criado_em: "asc" }, { evento_id: "asc" }],
     });
+    return events.sort((left, right) =>
+      (left.occurred_at ?? left.criado_em).getTime() -
+      (right.occurred_at ?? right.criado_em).getTime() || left.evento_id - right.evento_id,
+    );
   }
 
   private async getTaskForUser(
@@ -965,6 +966,7 @@ export class TasksService {
       data: Prisma.missoesUpdateInput;
       action: string;
       details: string;
+      occurredAt?: Date;
     },
   ): Promise<TaskRecord> {
     return this.prisma.$transaction(async (tx) => {
@@ -979,6 +981,7 @@ export class TasksService {
           usuario_id: user.usuario_id,
           acao: options.action,
           detalhes: options.details,
+          ...(options.occurredAt ? { occurred_at: options.occurredAt } : {}),
         },
       });
       return task;

@@ -4,6 +4,7 @@
     --objective-ink: light-dark(#1d1b18, #ece9e3);
     --objective-muted: light-dark(#61594f, #b4b0a8);
     --objective-line: light-dark(#d4ccc0, #333740);
+    --objective-connector: light-dark(#8a8174, #717886);
     --objective-ember: light-dark(#b6471c, #ff9d64);
     min-width: 0;
   }
@@ -44,6 +45,7 @@
     display: none;
   }
   .objective-workspace {
+    position: relative;
     min-width: 0;
     background: var(--objective-paper);
     color: var(--objective-ink);
@@ -51,71 +53,115 @@
     padding: 16px clamp(16px, 2vw, 28px) 30px;
   }
   .objective-workspace-toolbar {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .objective-paused {
+    color: var(--objective-muted);
+    font-size: 12px;
+  }
+  .composer-choices,
+  .composer-actions,
+  .composer-existing {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+  }
+  .composer-choice {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 78px;
+    width: 100%;
+    padding: 14px;
+    border: 1px solid var(--color-control-border);
+    border-radius: 10px;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    text-align: left;
+    cursor: pointer;
+  }
+  .composer-choice:hover {
+    background: var(--color-surface-subtle);
+  }
+  .composer-choice svg,
+  .composer-results svg {
+    flex: none;
+  }
+  .composer-choice > span,
+  .composer-results button > span:first-child {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .composer-choice strong {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .composer-choice small,
+  .composer-hint,
+  .composer-results small {
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .composer-hint {
+    margin: 0;
+  }
+  .composer-step-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .composer-step-heading h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .composer-step-heading button {
+    min-height: 44px;
+  }
+  .composer-actions > button {
+    justify-content: flex-start;
+  }
+  .composer-search:focus-within {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+  .composer-results {
+    max-height: min(320px, 42dvh);
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .composer-results button {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-  }
-  .objective-today {
-    margin: 8px 0 0;
-    padding: 14px 0 18px;
-    border-bottom: 1px solid var(--objective-line);
-  }
-  .today-heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 12px;
-  }
-  .today-heading h3 {
-    margin: 0;
-    font-size: 12px;
-    font-weight: 650;
-  }
-  .today-heading span {
-    font-size: 11px;
-    color: var(--objective-muted);
-  }
-  .objective-today ul {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0;
-    margin: 8px 0 0;
-    padding: 0;
-    list-style: none;
-  }
-  .objective-today li {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    align-items: flex-start;
-  }
-  .today-check {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    min-height: 44px;
-    flex: none;
+    min-height: 68px;
+    width: 100%;
+    padding: 10px 8px;
     border: 0;
+    border-bottom: 1px solid var(--color-border);
     background: transparent;
-    color: var(--objective-ember);
-    cursor: pointer;
-  }
-  .today-check:disabled {
-    color: var(--objective-muted);
-    cursor: default;
-  }
-  .today-name {
-    min-width: 0;
-    min-height: 44px;
-    padding: 6px 4px;
-    border: 0;
-    background: transparent;
-    color: var(--objective-ink);
+    color: var(--color-text-primary);
     text-align: left;
-    font-size: 13px;
-    overflow-wrap: anywhere;
     cursor: pointer;
+  }
+  .composer-results button:hover {
+    background: var(--color-surface-subtle);
+  }
+  .composer-results strong {
+    font-size: 14px;
+    font-weight: 550;
   }
   .objective-canvas {
     position: relative;
@@ -140,13 +186,13 @@
   }
   .map-line {
     fill: none;
-    stroke: var(--objective-line);
+    stroke: var(--objective-connector);
     stroke-width: 1.25;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
   .map-line.is-recent {
-    stroke: color-mix(in srgb, var(--objective-ember) 38%, var(--objective-line));
+    stroke: color-mix(in srgb, var(--objective-ember) 38%, var(--objective-connector));
   }
   .map-event-pulse {
     fill: none;
@@ -164,7 +210,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 32px;
+    padding-top: 12px;
     text-align: center;
   }
   .objective-crown {
@@ -209,9 +255,8 @@
     margin-top: 20px;
   }
   .map-root-actions button {
+    min-height: 44px;
     font-size: 11px;
-  }
-  .map-root-actions button:last-child {
     color: var(--objective-ember);
     border-color: var(--objective-line);
   }
@@ -664,7 +709,7 @@
     .map-root {
       align-items: flex-start;
       text-align: left;
-      padding-top: 28px;
+      padding-top: 12px;
     }
     .map-root h2 {
       max-width: 30ch;
@@ -729,9 +774,6 @@
     }
   }
   @media (max-width: 600px) {
-    .objective-today ul {
-      grid-template-columns: minmax(0, 1fr);
-    }
     .objective-workspace {
       padding-inline: 14px;
       margin-inline: -4px;

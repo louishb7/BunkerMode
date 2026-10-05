@@ -59,6 +59,7 @@ export type TaskHistoryEvent = {
   acao: string
   detalhes: unknown
   criado_em: string
+  occurred_at?: string
 }
 
 function buildContractError(message: string): Error {

@@ -16,6 +16,7 @@ const emptyForm = {
   recurrence_weekdays: [],
   termination_policy: "sem_termino",
   recurrence_end_date: "",
+  objetivo_id: "",
 }
 
 const TASK_INSTRUCTION_MAX_LENGTH = 280
@@ -162,6 +163,10 @@ export default function TaskForm({
   onUpdate = undefined,
   status,
   timezone = undefined,
+  objectiveOptions = [],
+  objectivesAvailable = false,
+  objectivesLoading = false,
+  objectivesError = "",
 }) {
   const [form, setForm] = useState(() => formForNewTask(initialPrazo, timezone))
   const [recurrenceError, setRecurrenceError] = useState("")
@@ -256,7 +261,11 @@ export default function TaskForm({
           ? String(initialObjetivoId).startsWith("local:")
             ? String(initialObjetivoId)
             : Number(initialObjetivoId)
-          : null
+          : form.objetivo_id
+            ? String(form.objetivo_id).startsWith("local:")
+              ? form.objetivo_id
+              : Number(form.objetivo_id)
+            : null
 
     if (!isSeriesOccurrence) {
       payload.prazo = form.prazo ? form.prazo.trim() : null
@@ -332,6 +341,40 @@ export default function TaskForm({
 
       <details className="text-sm text-text-primary">
         <summary className="cursor-pointer font-medium">Detalhes opcionais</summary>
+        {objectivesAvailable && !lockObjetivo && !isEditing && (
+          <label className={`${labelClass} mt-3`}>
+            Objetivo (opcional)
+            <select
+              className={fieldClass}
+              name="objetivo_id"
+              value={form.objetivo_id}
+              onChange={updateField}
+              disabled={objectivesLoading}
+            >
+              <option value="">Nenhum</option>
+              {objectiveOptions
+                .filter((goal) => goal.status === "ativo")
+                .map((goal) => (
+                  <option key={goal.id} value={goal.id}>
+                    {goal.titulo}
+                  </option>
+                ))}
+            </select>
+            {objectivesLoading && (
+              <span className="text-xs text-text-secondary">Carregando objetivos…</span>
+            )}
+            {objectivesError && (
+              <span role="status" className="text-xs text-danger">
+                {objectivesError}
+              </span>
+            )}
+            {isRecurring && form.objetivo_id && (
+              <span className="text-xs text-text-secondary">
+                O vínculo será aplicado à série inteira.
+              </span>
+            )}
+          </label>
+        )}
         <label className={`${labelClass} mt-3`}>
           Instrução
           <textarea

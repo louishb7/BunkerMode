@@ -8,6 +8,7 @@ import StatusNotice from "../../../components/ui/StatusNotice"
 import { emptyStatus } from "../../../constants/uiState"
 import { getEnabledModules, MODULE_CATALOG } from "../../../modules/moduleCatalog"
 import { api } from "../../../services/bunkermodeApi"
+import OutboxNotice from "../../../components/system/OutboxNotice"
 
 export default function SettingsPage({ onUnauthorized, onUpdateUser, token, user }) {
   const [theme, setTheme] = useState(getThemePreference)
@@ -121,6 +122,7 @@ export default function SettingsPage({ onUnauthorized, onUpdateUser, token, user
           })}
         </div>
       </section>
+      <OutboxNotice diagnostic />
     </section>
   )
 }

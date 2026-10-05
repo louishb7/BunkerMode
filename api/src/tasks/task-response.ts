@@ -101,5 +101,6 @@ export function toTaskHistoryEventResponse(event: auditoria_eventos) {
     acao: event.acao,
     detalhes: event.detalhes,
     criado_em: event.criado_em.toISOString(),
+    occurred_at: (event.occurred_at ?? event.criado_em).toISOString(),
   };
 }

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { createServer } from "node:http"
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises"
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { once } from "node:events"
@@ -55,7 +55,7 @@ class CDP {
   }
   async evaluate(expression) {
     const response = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })
-    if (response.exceptionDetails) throw new Error(response.exceptionDetails.text || response.exceptionDetails.exception?.description)
+    if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text)
     return response.result.value
   }
   close() { this.socket.close() }
@@ -174,15 +174,37 @@ async function main() {
             }
             const created = { id: nextTrackerId++, usuario_id: id, titulo: operation.payload.titulo,
               descricao: operation.payload.descricao ?? null, objetivo_id: operation.payload.objetivo_id ?? null,
+              intent: operation.payload.intent ?? "registro_livre", status: "ativo",
+              planos: operation.payload.plan ? [{ ...operation.payload.plan, effective_until: null, paused: false }] : [],
               created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ocorrencias: [] }
             trackersByOwner.get(id).push(created)
             processed.set(key, created)
           } else if (operation.domain === "occurrence" && operation.action === "create") {
             const parent = trackersByOwner.get(id).find((item) => item.id === operation.parentId)
             if (!parent) { response.writeHead(400).end(JSON.stringify({ message: "Acompanhamento inválido" })); return }
-            const created = { id: nextOccurrenceId++, acompanhamento_id: parent.id, occurred_at: new Date().toISOString(), created_at: new Date().toISOString() }
+            const occurred = operation.payload.occurred_at ?? new Date().toISOString()
+            const day = occurred.slice(0,10)
+            const plan = [...(parent.planos ?? [])].reverse().find(item => item.effective_from <= day && (!item.effective_until || day < item.effective_until))
+            const created = { id: nextOccurrenceId++, acompanhamento_id: parent.id, occurred_at: occurred,
+              created_at: new Date().toISOString(), recorded_at: operation.payload.recorded_at ?? null,
+              kind: operation.payload.kind ?? (parent.intent === "repetir" ? "atividade" : "ocorrencia"),
+              amount: operation.payload.amount ?? null, unit: plan?.unit ?? null, note: operation.payload.note ?? null }
             parent.ocorrencias.push(created)
             processed.set(key, created)
+          } else if (operation.domain === "tracker" && operation.action === "update") {
+            const parent = trackersByOwner.get(id).find(item => item.id === operation.target)
+            if (!parent) { response.writeHead(404).end(JSON.stringify({message:"Comportamento ausente"})); return }
+            const { plan, effective_from, recorded_at, ...fields } = operation.payload
+            Object.assign(parent, fields)
+            if (plan || fields.status) {
+              const previous = parent.planos.at(-1)
+              const next = plan ? {...plan,paused:fields.status ? fields.status === "pausado" : previous.paused}
+                : {...previous,effective_from,paused:fields.status === "pausado"}
+              previous.effective_until = next.effective_from
+              parent.planos.push({...next,effective_until:null})
+            }
+            parent.updated_at = new Date().toISOString()
+            processed.set(key,parent)
           } else if (operation.domain === "entry" && operation.action === "create") {
             if (!Number.isSafeInteger(operation.payload.valor_centavos)) { response.writeHead(400).end(JSON.stringify({ message: "Centavos inválidos" })); return }
             const created = { id: nextEntryId++, usuario_id: id, ...operation.payload }
@@ -290,6 +312,22 @@ async function main() {
       try { await until(() => evaluate(`document.body.innerText.includes(${JSON.stringify(value)})`), value) }
       catch (error) { throw new Error(`${error.message}; tela: ${await evaluate("document.body.innerText.slice(0, 500)")}`) }
     }
+    const auditLayout = async (surface) => {
+      for (const theme of ["light", "dark"]) {
+        await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+        for (const width of [1440, 1024, 768, 390, 320]) {
+          await cdp.send("Emulation.setDeviceMetricsOverride", {width, height:900, deviceScaleFactor:1, mobile:width<=390})
+          await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
+          assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth"),true,`${surface} ${theme} ${width}px`)
+          if (process.env.BUNKER_AUDIT_DIR && [1440,390].includes(width)) {
+            const shot = await cdp.send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})
+            await writeFile(join(process.env.BUNKER_AUDIT_DIR,`${surface}-${theme}-${width}.png`),Buffer.from(shot.data,"base64"))
+          }
+        }
+      }
+      await cdp.send("Emulation.clearDeviceMetricsOverride")
+      await evaluate("document.documentElement.removeAttribute('data-theme')")
+    }
     const putOutbox = async (operation) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});const tx=db.transaction('outbox','readwrite');tx.objectStore('outbox').put(${JSON.stringify(operation)});await new Promise(ok=>tx.oncomplete=ok);window.dispatchEvent(new CustomEvent('bunkermode-outbox-change',{detail:2}))})()`)
     const outboxStatus = async (operationId) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').get([2,${JSON.stringify(operationId)}]);r.onsuccess=()=>ok(r.result?.status??null)})})()`)
     await until(() => evaluate("navigator.serviceWorker.ready.then(r => r.active?.state === 'activated')"), "service worker ativo", 30000)
@@ -307,6 +345,56 @@ async function main() {
     console.log("PWA: upgrade IndexedDB v2→v3 remove reservas e categorias e preserva os demais snapshots OK")
     await navigate("/objetivos")
     await visible("Objetivo 1")
+    const mapTasks = Array.from({ length: 6 }, (_, index) => ({ ...task(1000 + index, 1),
+      titulo: `Contribuição ${index + 1} com título longo para conferir a árvore`, objetivo_id: 1 }))
+    tasksByOwner.get(1).push(...mapTasks)
+    await navigate("/objetivos")
+    await until(() => evaluate("document.querySelectorAll('.map-line').length === 7"), "linhas na primeira montagem real")
+    assert.equal(await evaluate("document.querySelector('.objective-workspace').innerText.includes('Nenhuma tarefa prevista')"), false)
+    assert.equal(await evaluate("document.querySelector('.map-root').innerText.includes('Conquistar objetivo')"), false)
+    await evaluate("document.querySelector('.map-expand')?.click()")
+    await until(() => evaluate("document.querySelectorAll('.map-line').length === 9"), "expansão real da árvore")
+    await evaluate("document.querySelector('.map-expand')?.click()")
+    const desktopPath = await evaluate("document.querySelector('.map-line').getAttribute('d')")
+    for (const width of [1440, 980, 760, 390]) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width === 390 })
+      await until(() => evaluate("document.querySelectorAll('.map-line').length === 7"), "conexões após resize")
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, `árvore em ${width}px`)
+      if (width === 390) {
+        await until(() => evaluate("!document.querySelector('.map-line').getAttribute('d').includes(' C ')"), "árvore vertical mobile")
+        assert.notEqual(await evaluate("document.querySelector('.map-line').getAttribute('d')"), desktopPath)
+      }
+    }
+    await evaluate("document.querySelector('.objective-canvas').style.display='none'")
+    await until(() => evaluate("document.querySelectorAll('.map-line').length === 0"), "árvore oculta")
+    await evaluate("document.querySelector('.objective-canvas').style.display=''")
+    await until(() => evaluate("document.querySelectorAll('.map-line').length === 7"), "árvore reexibida")
+    await evaluate("document.querySelector('[aria-label=\"Ações do objetivo: Objetivo 1\"]').click()")
+    assert.equal(await evaluate("[...document.querySelectorAll('[role=menuitem]')].some(x=>x.innerText==='Conquistar objetivo')"), true)
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" })
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.innerText.trim()==='Adicionar vínculo').focus()")
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.innerText.trim()==='Adicionar vínculo').click()")
+    assert.equal(await evaluate("document.querySelector('[role=dialog] input')"), null)
+    await evaluate("[...document.querySelectorAll('.composer-choice')].find(x=>x.innerText.includes('Tarefa')).click()")
+    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(x=>x.innerText==='Vincular tarefa existente').click()")
+    assert.equal(await evaluate("document.querySelector('.composer-results')"), null)
+    await evaluate("document.querySelector('[aria-label=\"Pesquisar tarefas\"]').focus()")
+    for (const character of ['T', 'a', 'r']) {
+      await cdp.send("Input.insertText", { text: character })
+      assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), "Pesquisar tarefas")
+    }
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Pesquisar tarefas\"]').value"), "Tar")
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" })
+    await until(() => evaluate("!document.querySelector('[role=dialog]')"), "saída do seletor mobile")
+    assert.equal(await evaluate("document.activeElement.innerText"), "Adicionar vínculo")
+    if (process.env.BUNKER_AUDIT_DIR) {
+      const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false })
+      await writeFile(join(process.env.BUNKER_AUDIT_DIR, "objectives-mobile.png"), Buffer.from(shot.data, "base64"))
+    }
+    await cdp.send("Emulation.clearDeviceMetricsOverride")
+    tasksByOwner.set(1, tasksByOwner.get(1).filter(x => x.id < 1000))
+    console.log("Produto Gate 2: árvore inicial, expansão, resize, ocultação, menu de conquista, busca/foco e saída mobile OK")
+    if (process.env.BUNKER_GATE === "2") return
     await navigate("/financas")
     await visible("1,00")
     await evaluate("document.querySelector('button[aria-label=\"Mês anterior\"]')?.click()")
@@ -314,6 +402,8 @@ async function main() {
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1 && x.key.startsWith('finances:')).length>=2)})})()"), "snapshots de dois meses")
     await navigate("/")
     await visible("Tarefa do usuário 1")
+    await auditLayout("home")
+    console.log("Auditoria integrada: Home compacta, 320–1440px, light/dark e transição da navegação OK")
     const stored = await evaluate("(async () => { const db = await new Promise((ok,no) => { const r=indexedDB.open('bunkermode-offline'); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error) }); return await new Promise((ok,no) => { const r=db.transaction('snapshots').objectStore('snapshots').getAll(); r.onsuccess=()=>ok(r.result.map(x=>({ownerId:x.ownerId,key:x.key,updatedAt:x.updatedAt}))); r.onerror=()=>no(r.error) }) })()")
     assert(stored.some((item) => item.ownerId === 1 && item.key === "tasks:all" && item.updatedAt))
     assert(stored.every((item) => Number.isSafeInteger(item.ownerId) && !item.key.includes("one")))
@@ -323,12 +413,12 @@ async function main() {
     console.log("PWA: snapshots por usuário e domínio OK")
 
     await setConnectivity(false)
-    assert.equal(await evaluate("document.querySelector('[data-sync-status]')"), null)
+    await visible("Sem conexão")
     assert.equal(await evaluate("navigator.onLine"), false)
     for (const path of ["/", "/tarefas", "/tarefas/foco", "/objetivos", "/financas", "/configuracoes"]) {
       await navigate(path)
       await visible("Bunker")
-      assert.equal(await evaluate("document.querySelector('[data-sync-status]')"), null)
+      assert.equal(await evaluate("document.querySelector('[data-sync-status]').dataset.syncStatus"), "offline")
     }
     await navigate("/tarefas")
     await visible("Tarefa do usuário 1")
@@ -396,12 +486,11 @@ async function main() {
 
     await navigate("/tarefas")
     await visible("Tarefa do usuário 2")
-    await until(() => evaluate("document.body.innerText.includes('Instale o BunkerMode')"), "convite de instalação")
-    await evaluate("document.querySelector('button[aria-label=" + JSON.stringify("Fechar convite de instalação") + "]')?.click()")
+    assert.equal(await evaluate("document.body.innerText.includes('Instale o BunkerMode')"), false, "desktop não recebe CTA próprio")
     await evaluate("document.querySelector('a[href=\"/configuracoes\"]')?.click()")
     await until(() => evaluate("location.pathname === '/configuracoes'"), "navegação interna")
     assert.equal(await evaluate("document.body.innerText.includes('Instale o BunkerMode')"), false)
-    console.log("PWA: convite dispensado não reaparece ao navegar OK")
+    console.log("PWA: desktop preserva instalação nativa sem convite próprio em navegação OK")
 
     await navigate("/configuracoes")
     await visible("Nova versão disponível")
@@ -423,7 +512,7 @@ async function main() {
     await evaluate("document.querySelector('input[name=\"titulo\"]').focus()")
     await cdp.send("Input.insertText", { text: "Teste offline" })
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Registrar tarefa')?.click()")
-    await visible("Aguardando sincronização")
+    await visible("Sem conexão")
     assert.equal(domainMutations, mutationsBefore)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.length===1 && r.result[0].ownerId===2 && r.result[0].domain==='task')})})()"), true)
     assert.equal(await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(!/refresh-two|Bearer |Authorization|bunkermode_token/.test(JSON.stringify(r.result)))})})()"), true)
@@ -434,7 +523,7 @@ async function main() {
     await evaluate("localStorage.setItem('bunkermode_token','expired')")
     const refreshesBeforeReconnect = refreshCount
     await navigate("/tarefas")
-    await visible("Aguardando sincronização")
+    await visible("Sem conexão")
     await setConnectivity(true)
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => evaluate("localStorage.getItem('bunkermode_token') === 'two'"), "refresh na reconexão")
@@ -455,7 +544,7 @@ async function main() {
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Registrar tarefa')?.click()")
     await until(() => syncCalls >= callsBeforeLostResponse + 1, "primeiro envio da operação")
     await visible("Resposta perdida")
-    await visible("Não foi possível sincronizar · 1 alteração pendente")
+    await visible("Serviço temporariamente indisponível")
     assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
     backendFailure = null
     await evaluate("window.dispatchEvent(new Event('online'))")
@@ -523,8 +612,9 @@ async function main() {
     await evaluate("document.querySelector('form button[type=submit]')?.click()")
     await visible("Meta local")
     await evaluate("[...document.querySelectorAll('button.objective-rail-item')].find(button => button.textContent.includes('Meta local'))?.click()")
-    await visible("Aguardando sincronização")
+    await visible("Sem conexão")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Adicionar vínculo'))?.click()")
+    await evaluate("[...document.querySelectorAll('.composer-choice')].find(x=>x.innerText.includes('Tarefa')).click()")
     await visible("Criar tarefa")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Criar tarefa')?.click()")
     await visible("Registrar tarefa")
@@ -534,14 +624,15 @@ async function main() {
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar tarefa')?.click()")
     await visible("Tarefa ligada")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Adicionar vínculo'))?.click()")
-    await evaluate("[...document.querySelectorAll('[role=tab]')].find(button => button.textContent.includes('Acompanhamento'))?.click()")
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Criar acompanhamento'))?.click()")
-    await visible("Adicionar acompanhamento")
+    await evaluate("[...document.querySelectorAll('.composer-choice')].find(x=>x.innerText.includes('Comportamento')).click()")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Criar comportamento'))?.click()")
+    await visible("Adicionar comportamento")
+    await evaluate("document.querySelector('select[name=\"intent\"]').value='registro_livre'; document.querySelector('select[name=\"intent\"]').dispatchEvent(new Event('change',{bubbles:true}))")
     await evaluate("document.querySelector('[role=dialog] input')?.focus()")
     await cdp.send("Input.insertText", { text: "Tracker local" })
-    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Adicionar acompanhamento')?.click()")
+    await evaluate("document.querySelector('[role=dialog] form button[type=submit]')?.click()")
     await visible("Tracker local")
-    await evaluate("[...document.querySelectorAll('summary')].find(item => item.textContent.includes('Registrar e consultar ocorrências'))?.click()")
+    await evaluate("[...document.querySelectorAll('.map-node')].find(x=>x.innerText.includes('Tracker local')).click()")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Registrar ocorrência')?.click()")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===4)})})()"), "quatro operações dependentes")
     assert.equal(syncCalls, callsBeforeDependencies)
@@ -562,6 +653,75 @@ async function main() {
     assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").objetivo_id, linkedGoal.id)
     assert.equal(trackersByOwner.get(2).find((item) => item.titulo === "Tracker local").ocorrencias.length, 1)
     console.log("PWA: objetivo, tarefa, acompanhamento e ocorrência dependentes sincronizam em ordem após refresh OK")
+
+    await navigate("/objetivos#habitos")
+    await visible("Novo comportamento")
+    await setConnectivity(false)
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.innerText==='Novo comportamento').click()")
+    assert.equal(await evaluate("document.querySelector('select[name=objetivo_id]').value"), "")
+    await evaluate("document.querySelector('input[name=titulo]').focus()")
+    await cdp.send("Input.insertText", {text:"Ler 30 páginas"})
+    await evaluate("document.querySelector('input[type=checkbox]').click()")
+    await evaluate("document.querySelector('input[name=target_amount]').focus()")
+    await cdp.send("Input.insertText", {text:"30"})
+    await evaluate("document.querySelector('input[name=unit]').focus()")
+    await cdp.send("Input.insertText", {text:"páginas"})
+    await evaluate("document.querySelector('[role=dialog] form button[type=submit]').click()")
+    await visible("0/30 páginas")
+    const practiceRow = "[...document.querySelectorAll('.objective-link')].find(x=>x.innerText.includes('Ler 30 páginas'))"
+    await evaluate(`${practiceRow}.querySelector('details').open=true`)
+    await evaluate(`[...${practiceRow}.querySelectorAll('button')].find(x=>x.innerText==='Registrar prática').click()`)
+    await visible("Salvar registro")
+    await setConnectivity(true)
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(()=>trackersByOwner.get(2).some(item=>item.titulo==='Ler 30 páginas'),"prática independente confirmada")
+    const reading = trackersByOwner.get(2).find(item=>item.titulo==='Ler 30 páginas')
+    assert.equal(reading.objetivo_id,null)
+    await until(()=>evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"),"prática reconciliada")
+    assert.equal(await evaluate("Boolean(document.querySelector('[role=dialog] input[name=amount]'))"),true,"formulário permanece aberto após receber ID oficial")
+    await setConnectivity(false)
+    for (const amount of [20,10]) {
+      if (!await evaluate("Boolean(document.querySelector('[role=dialog] input[name=amount]'))")) {
+        await evaluate(`${practiceRow}.querySelector('details').open=true`)
+        await evaluate(`[...${practiceRow}.querySelectorAll('button')].find(x=>x.innerText==='Registrar prática').click()`)
+      }
+      await visible("Salvar registro")
+      await evaluate("document.querySelector('input[name=amount]').focus()")
+      await cdp.send("Input.insertText", {text:String(amount)})
+      await evaluate("document.querySelector('[role=dialog] form button[type=submit]').click()")
+      await visible(`${amount===20?20:30}/30 páginas`)
+    }
+    const recordCommands = await evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2 && x.domain==='occurrence'))})})()")
+    assert.equal(recordCommands.length,2)
+    assert.deepEqual(recordCommands.map(item=>item.payload.amount).sort((a,b)=>a-b),[10,20])
+    assert.ok(recordCommands.every(item=>item.parentId===reading.id),"formulário antigo resolve o vínculo da ocorrência ao ID oficial")
+    assert.ok(recordCommands.every(item=>item.payload.unit==='páginas' && item.payload.plan_effective_from))
+    await navigate("/objetivos#habitos")
+    await visible("30/30 páginas")
+    await auditLayout("practices")
+    await evaluate(`${practiceRow}.querySelector('details').open=true`)
+    await until(()=>evaluate("[...document.querySelectorAll('button')].some(x=>x.innerText.trim()==='Registrar prática')"),"ação de registro visível após expansão")
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.innerText.trim()==='Registrar prática').click()")
+    await visible("Registrar comportamento")
+    await auditLayout("practice-record")
+    await cdp.send("Input.dispatchKeyEvent", {type:"keyDown",key:"Escape",code:"Escape"})
+    await until(()=>evaluate("!document.querySelector('[role=dialog]')"),"saída do formulário de prática sem alteração")
+    await setConnectivity(true)
+    await evaluate("window.dispatchEvent(new Event('online'))")
+    await until(()=>reading.ocorrencias.length===2,"parciais sincronizadas")
+    assert.deepEqual(reading.ocorrencias.map(item=>item.occurred_at).sort(),recordCommands.map(item=>item.payload.occurred_at).sort())
+    assert.deepEqual(reading.ocorrencias.map(item=>item.amount).sort((a,b)=>a-b),[10,20])
+    await until(()=>evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===2).length===0)})})()"),"registros reconciliados")
+    await navigate("/objetivos#habitos")
+    await visible("30/30 páginas")
+    await evaluate(`document.querySelector('[aria-label="Ações do comportamento: Ler 30 páginas"]').click()`)
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(x=>x.innerText==='Pausar').click()")
+    await visible("Pausar comportamento")
+    await evaluate("document.querySelector('[role=dialog] form button[type=submit]').click()")
+    await until(()=>reading.planos.length===2,"pausa preserva plano anterior")
+    assert.equal(reading.planos[1].paused,true)
+    await visible("30/30 páginas")
+    console.log("Práticas PWA: criação offline independente, formulário preservado após receber ID oficial, 20+10, reload, timestamps, replay, pausa e 320–1440px nos dois temas OK")
 
     const linkedTask = tasksByOwner.get(2).find(item => item.titulo === "Tarefa ligada")
     assert.ok(linkedTask.recurrence)
@@ -669,15 +829,18 @@ async function main() {
     assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").tipo, "despesa")
     assert.equal(entriesByOwner.get(2).find((item) => item.titulo === "Despesa local").valor_centavos, 100)
     await until(() => evaluate("document.querySelector('.finance-result').textContent.includes('13,34')"), "saldo oficial após entrada e saída")
+    await auditLayout("finances")
+    await evaluate("document.querySelector('.finance-chart-reveal')?.setAttribute('open','')")
     assert.equal(await evaluate("document.querySelector('.finance-chart svg').querySelectorAll('path').length"), 1)
     assert.equal(await evaluate("document.querySelector('.finance-chart-total strong').textContent.replace(/\\s/g, '')"), "R$11,34")
     assert.equal(await evaluate("document.querySelector('.finance-chart-axis').textContent.includes('R$')"), true)
     assert.equal(await evaluate("document.querySelectorAll('.finance-chart-details dd').length"), 3)
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true)
-    assert.equal(await evaluate("document.querySelector('.finance-toolbar').getBoundingClientRect().bottom <= document.querySelector('.finance-state').getBoundingClientRect().top"), true)
+    assert.equal(await evaluate("document.querySelector('.finance-state').getBoundingClientRect().bottom <= document.querySelector('.finance-month-section').getBoundingClientRect().top"), true)
     await cdp.send("Emulation.clearDeviceMetricsOverride")
     console.log("PWA: entrada e saída preservam tipo e centavos offline, após recarga e sincronização OK")
+    console.log("Auditoria integrada: Finanças global/mensal e formulário de prática, 320–1440px nos dois temas OK")
 
     await setConnectivity(false)
     await navigate("/tarefas")
@@ -740,7 +903,7 @@ async function main() {
       createdAt: new Date().toISOString(), status: "pending" })
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => outboxStatus(conflictId).then((status) => status === "conflict"), "conflito preservado")
-    await evaluate("[...document.querySelectorAll('[aria-label=\"Sincronização\"] summary')].find(s => s.getBoundingClientRect().width > 0)?.click()")
+    await navigate("/configuracoes#sincronizacao")
     await visible("Usar versão do servidor")
     forcedStatuses.delete("Conflito simulado")
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Usar versão do servidor' && button.getBoundingClientRect().width > 0)?.click()")
@@ -764,10 +927,12 @@ async function main() {
     await evaluate("window.dispatchEvent(new Event('online'))")
     await until(() => syncCalls > callsBefore503, "503 recebido")
     await until(() => outboxStatus(serverErrorId).then(status => status === "pending"), "503 mantém pending")
-    await visible("Não foi possível sincronizar · 1 alteração pendente")
+    await visible("Serviço temporariamente indisponível")
     assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
+    await navigate("/tarefas")
     await visible("Servidor temporário")
     assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
+    await navigate("/tarefas")
     await navigate("/tarefas")
     await visible("Servidor temporário")
     assert.equal(await outboxStatus(serverErrorId), "pending")
@@ -775,8 +940,7 @@ async function main() {
     assert.equal(await evaluate("document.body.innerText.includes('Aguardando sincronização')"), false)
     forcedStatuses.delete("Servidor temporário")
     backendFailure = null
-    await evaluate("window.dispatchEvent(new Event('online'))")
-    await until(() => outboxStatus(serverErrorId).then((status) => status === null), "pendência após 503 sincronizada")
+    await until(() => outboxStatus(serverErrorId).then((status) => status === null), "recuperação autônoma após 503 sem nova mutação", 30000)
     assert.equal(tasksByOwner.get(2).filter((item) => item.titulo === "Servidor temporário").length, 1)
     console.log("PWA: 409 preserva conflito, 422 fica failed e 5xx mantém pending até nova oportunidade OK")
 

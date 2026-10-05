@@ -1,7 +1,7 @@
 import ObjectiveOperationalPanel from "../components/ObjectiveOperationalPanel"
 import ObjectiveLinkComposer from "../components/ObjectiveLinkComposer"
 import { Plus } from "lucide-react"
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 
 import ConfirmDialog from "../../../components/ui/ConfirmDialog"
 import Button from "../../../components/ui/Button"
@@ -18,6 +18,8 @@ import { useObjectives } from "../hooks/useObjectives"
 import { useObjectiveTasks } from "../hooks/useObjectiveTasks"
 import { useTrackers } from "../hooks/useTrackers"
 import TrackerForm from "../components/TrackerForm"
+import PracticeRecordForm from "../../practices/components/PracticeRecordForm"
+import PracticePauseForm from "../../practices/components/PracticePauseForm"
 import AchievementGallery from "../components/AchievementGallery"
 import AchievementDetails from "../components/AchievementDetails"
 import ConquerObjectiveDialog from "../components/ConquerObjectiveDialog"
@@ -28,7 +30,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const objectives = useObjectives({ onUnauthorized, token, ownerId: user.id })
   const achievements = useAchievements({ onUnauthorized, token, ownerId: user.id })
   const [context, setContext] = useState(
-    window.location.hash.startsWith("#conquista") ? "achievements" : "active"
+    window.location.hash.startsWith("#conquista")
+      ? "achievements"
+      : window.location.hash === "#habitos"
+        ? "practices"
+        : "active"
   )
   const [memoryId, setMemoryId] = useState(
     Number(window.location.hash.match(/^#conquista-(\d+)$/)?.[1]) || null
@@ -41,7 +47,13 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   )
   useEffect(() => {
     const update = () => {
-      setContext(window.location.hash.startsWith("#conquista") ? "achievements" : "active")
+      setContext(
+        window.location.hash.startsWith("#conquista")
+          ? "achievements"
+          : window.location.hash === "#habitos"
+            ? "practices"
+            : "active"
+      )
       setMemoryId(Number(window.location.hash.match(/^#conquista-(\d+)$/)?.[1]) || null)
     }
     window.addEventListener("hashchange", update)
@@ -50,7 +62,11 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   function selectContext(next) {
     setContext(next)
     setMemoryId(null)
-    window.history.replaceState(null, "", next === "achievements" ? "#conquistas" : "#em-andamento")
+    window.history.replaceState(
+      null,
+      "",
+      next === "achievements" ? "#conquistas" : next === "practices" ? "#habitos" : "#em-andamento"
+    )
   }
   function openMemory(achievement) {
     setConquerTarget(null)
@@ -66,27 +82,8 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     enabled: tasksEnabled,
   })
   const trackers = useTrackers({ token, ownerId: user.id, onUnauthorized })
-  const secondaryTrackerGroups = [
-    {
-      title: "Acompanhamentos sem objetivo",
-      copy: "Seus registros permanecem aqui. Você pode vinculá-los novamente ao adicionar a um objetivo.",
-      items: trackers.trackers.filter((item) => item.objetivo_id === null),
-    },
-    {
-      title: "Acompanhamentos de objetivos conquistados",
-      copy: "Os registros atuais continuam disponíveis. Novas ocorrências preservam a memória da conquista.",
-      items: trackers.trackers.filter(
-        (item) =>
-          item.objetivo_id !== null &&
-          (conqueredIds.has(item.objetivo_id) ||
-            objectives.objetivos.some(
-              (goal) => goal.id === item.objetivo_id && goal.status === "concluido"
-            ))
-      ),
-    },
-  ].filter((group) => group.items.length)
   const [addingTo, setAddingTo] = useState(null)
-  const [linkType, setLinkType] = useState("task")
+  const [linkType, setLinkType] = useState<"task" | "tracker" | null>(null)
   const [linkSearch, setLinkSearch] = useState("")
   const [editingObjetivo, setEditingObjetivo] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
@@ -95,16 +92,52 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
   const [trackerForm, setTrackerForm] = useState(null)
   const [deleteTrackerTarget, setDeleteTrackerTarget] = useState(null)
   const [unlinkTarget, setUnlinkTarget] = useState(null)
+  const [recordTarget, setRecordTarget] = useState(null)
+  const [pauseTarget, setPauseTarget] = useState(null)
+  const recordDirty = useRef(false)
+  const pauseDirty = useRef(false)
+  const objectiveDirty = useRef(false)
+  const trackerDirty = useRef(false)
+  const taskDirty = useRef(false)
   const busy = objectives.loading || objectives.mutating
 
   function openCreateObjective() {
+    objectiveDirty.current = false
     setEditingObjetivo(null)
     setFormOpen(true)
   }
 
   function closeObjectiveForm() {
+    if (objectives.mutating) return
+    if (objectiveDirty.current && !window.confirm("Descartar as alterações deste objetivo?")) return
+    discardObjectiveForm()
+  }
+
+  function discardObjectiveForm() {
+    objectiveDirty.current = false
     setFormOpen(false)
     setEditingObjetivo(null)
+  }
+
+  function openTrackerForm(value) {
+    trackerDirty.current = false
+    setTrackerForm(value)
+  }
+
+  function closeTrackerForm() {
+    if (trackers.busyId != null) return
+    if (trackerDirty.current && !window.confirm("Descartar as alterações deste comportamento?"))
+      return
+    trackerDirty.current = false
+    setTrackerForm(null)
+  }
+
+  function closeTaskForm() {
+    if (objectiveTasks.formLoading) return
+    if (taskDirty.current && !window.confirm("Descartar as alterações desta tarefa?")) return
+    taskDirty.current = false
+    setTaskObjetivo(null)
+    objectiveTasks.setFormStatus(emptyStatus)
   }
 
   async function submitObjetivo(payload) {
@@ -112,13 +145,14 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       ? await objectives.updateObjetivo(editingObjetivo.id, payload)
       : await objectives.createObjetivo(payload)
     if (saved) {
-      closeObjectiveForm()
+      discardObjectiveForm()
     }
   }
 
   async function createTask(payload) {
     const saved = await objectiveTasks.createTask(payload)
     if (saved) {
+      taskDirty.current = false
       setTaskObjetivo(null)
     }
   }
@@ -127,8 +161,39 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     if (!trackerForm) return
     const saved = trackerForm.tracker
       ? await trackers.updateTracker(trackerForm.tracker, payload)
-      : await trackers.createTracker({ ...payload, objetivo_id: trackerForm.objetivo.id })
-    if (saved) setTrackerForm(null)
+      : await trackers.createTracker({
+          ...payload,
+          objetivo_id: trackerForm.objetivo?.id ?? payload.objetivo_id ?? null,
+        })
+    if (saved) {
+      trackerDirty.current = false
+      setTrackerForm(null)
+    }
+  }
+
+  function recordPractice(tracker, withDetails = false) {
+    if (!withDetails && (!tracker.intent || tracker.intent === "registro_livre"))
+      return trackers.recordOccurrence(tracker)
+    recordDirty.current = false
+    setRecordTarget(tracker)
+    return false
+  }
+
+  function closeRecordForm() {
+    if (recordDirty.current && !window.confirm("Descartar este registro?")) return
+    recordDirty.current = false
+    setRecordTarget(null)
+  }
+
+  function pausePractice(tracker) {
+    pauseDirty.current = false
+    setPauseTarget(tracker)
+  }
+
+  function closePauseForm() {
+    if (pauseDirty.current && !window.confirm("Descartar esta alteração de pausa?")) return
+    pauseDirty.current = false
+    setPauseTarget(null)
   }
 
   function moveObjetivoToTop(objetivoId) {
@@ -146,9 +211,17 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     <section className="objectives-page mx-auto grid max-w-[1200px] gap-5">
       <PageHeader
         actions={
-          <Button variant="secondary" disabled={busy} onClick={openCreateObjective}>
+          <Button
+            variant="secondary"
+            disabled={context === "practices" ? trackers.loading && !trackers.loaded : busy}
+            onClick={
+              context === "practices"
+                ? () => openTrackerForm({ objetivo: null, tracker: null })
+                : openCreateObjective
+            }
+          >
             <Plus size={17} aria-hidden="true" />
-            Novo objetivo
+            {context === "practices" ? "Novo comportamento" : "Novo objetivo"}
           </Button>
         }
         title="Objetivos"
@@ -174,6 +247,13 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
         >
           Conquistas <span>{achievements.achievements.length}</span>
         </button>
+        <button
+          type="button"
+          aria-pressed={context === "practices"}
+          onClick={() => selectContext("practices")}
+        >
+          Hábitos e mudanças <span>{trackers.trackers.length}</span>
+        </button>
       </nav>
 
       {formOpen && (
@@ -182,19 +262,28 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           onClose={closeObjectiveForm}
           title={editingObjetivo ? "Editar objetivo" : "Novo objetivo"}
         >
-          <ObjetivoForm
-            editingObjetivo={editingObjetivo}
-            loading={busy}
-            onCancel={closeObjectiveForm}
-            onSubmit={submitObjetivo}
-          />
+          <div
+            onInputCapture={() => {
+              objectiveDirty.current = true
+            }}
+            onChangeCapture={() => {
+              objectiveDirty.current = true
+            }}
+          >
+            <ObjetivoForm
+              editingObjetivo={editingObjetivo}
+              loading={busy}
+              onCancel={closeObjectiveForm}
+              onSubmit={submitObjetivo}
+            />
+          </div>
         </Dialog>
       )}
 
       {context === "active" && (
         <ObjetivoList
           onAdd={(goal) => {
-            setLinkType(tasksEnabled && goal.status === "ativo" ? "task" : "tracker")
+            setLinkType(null)
             setLinkSearch("")
             setAddingTo(goal)
           }}
@@ -212,6 +301,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           onCreate={openCreateObjective}
           onDelete={setDeleteTarget}
           onEdit={(objetivo) => {
+            objectiveDirty.current = false
             setEditingObjetivo(objetivo)
             setFormOpen(true)
           }}
@@ -228,13 +318,13 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
           trackersLoaded={trackers.loaded}
           onRetryTrackers={trackers.refresh}
           onEditTracker={(tracker) =>
-            setTrackerForm({
+            openTrackerForm({
               objetivo: objectives.objetivos.find((item) => item.id === tracker.objetivo_id),
               tracker,
             })
           }
           onDeleteTracker={setDeleteTrackerTarget}
-          onRecordOccurrence={trackers.recordOccurrence}
+          onRecordOccurrence={recordPractice}
           onDeleteOccurrence={trackers.deleteOccurrence}
           timezone={user?.timezone}
         />
@@ -274,7 +364,7 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       )}
 
       {addingTo && (
-        <Dialog title="Adicionar vínculo" onClose={() => setAddingTo(null)}>
+        <Dialog title="Adicionar vínculo" closeOnBackdrop onClose={() => setAddingTo(null)}>
           <ObjectiveLinkComposer
             objetivo={addingTo}
             tasksEnabled={tasksEnabled}
@@ -282,14 +372,16 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
             trackers={trackers.trackers}
             type={linkType}
             search={linkSearch}
+            timezone={user?.timezone}
             onType={setLinkType}
             onSearch={setLinkSearch}
             onCreateTask={() => {
+              taskDirty.current = false
               setTaskObjetivo(addingTo)
               setAddingTo(null)
             }}
             onCreateTracker={() => {
-              setTrackerForm({ objetivo: addingTo, tracker: null })
+              openTrackerForm({ objetivo: addingTo, tracker: null })
               setAddingTo(null)
             }}
             onLinkTask={async (item) => {
@@ -302,52 +394,143 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
             }}
             error={objectiveTasks.error || trackers.error}
           />
+          <Button variant="secondary" onClick={() => setAddingTo(null)}>
+            Fechar
+          </Button>
         </Dialog>
       )}
-      {context === "active" &&
-        secondaryTrackerGroups.map((group) => (
-          <section key={group.title} className="border-t border-border pt-6">
-            <h2 className="text-lg font-semibold">{group.title}</h2>
-            <p className="text-sm text-text-secondary">{group.copy}</p>
-            <ObjectiveOperationalPanel
-              objetivo={{ titulo: group.title }}
-              tasksEnabled={false}
-              trackers={group.items}
-              trackersLoaded={trackers.loaded}
-              trackersLoading={trackers.loading}
-              trackerBusyId={trackers.busyId}
-              onEditTracker={(tracker) => setTrackerForm({ objetivo: null, tracker })}
-              onDeleteTracker={setDeleteTrackerTarget}
-              onRecordOccurrence={trackers.recordOccurrence}
-              onDeleteOccurrence={trackers.deleteOccurrence}
+      {context === "practices" && (
+        <section className="practice-surface" aria-label="Hábitos e mudanças">
+          <p className="text-sm text-text-secondary">
+            Comportamentos têm registros e metas próprios. O vínculo com um objetivo é opcional.
+          </p>
+          {trackers.error && (
+            <p className="text-sm text-danger" role="alert">
+              {trackers.error}{" "}
+              <Button variant="ghost" onClick={trackers.refresh}>
+                Tentar novamente
+              </Button>
+            </p>
+          )}
+          {trackers.loaded && !trackers.trackers.length && !trackers.error && (
+            <p className="text-sm text-text-secondary">
+              Comece com algo que deseja repetir, reduzir, evitar ou apenas observar.
+            </p>
+          )}
+          <ObjectiveOperationalPanel
+            objetivo={{ titulo: "Hábitos e mudanças" }}
+            tasksEnabled={false}
+            trackers={trackers.trackers}
+            trackersLoaded={trackers.loaded}
+            trackersLoading={trackers.loading}
+            trackerBusyId={trackers.busyId}
+            onEditTracker={(tracker) => openTrackerForm({ objetivo: null, tracker })}
+            onDeleteTracker={setDeleteTrackerTarget}
+            onRecordOccurrence={recordPractice}
+            onDeleteOccurrence={trackers.deleteOccurrence}
+            onPauseTracker={pausePractice}
+            onUnlinkTracker={(tracker) => trackers.updateTracker(tracker, { objetivo_id: null })}
+            timezone={user?.timezone}
+          />
+        </section>
+      )}
+
+      {recordTarget && (
+        <Dialog title="Registrar comportamento" onClose={closeRecordForm}>
+          <StatusNotice status={trackers.status} />
+          <div
+            onInputCapture={() => {
+              recordDirty.current = true
+            }}
+            onChangeCapture={() => {
+              recordDirty.current = true
+            }}
+          >
+            <PracticeRecordForm
+              tracker={
+                trackers.trackers.find((item) => item.id === recordTarget.id) ?? recordTarget
+              }
               timezone={user?.timezone}
+              onCancel={closeRecordForm}
+              onSubmit={async (payload) => {
+                if (await trackers.recordOccurrence(recordTarget, payload)) {
+                  recordDirty.current = false
+                  setRecordTarget(null)
+                }
+              }}
             />
-          </section>
-        ))}
+          </div>
+        </Dialog>
+      )}
+      {pauseTarget && (
+        <Dialog
+          title={
+            pauseTarget.status === "pausado" ? "Retomar comportamento" : "Pausar comportamento"
+          }
+          onClose={closePauseForm}
+        >
+          <StatusNotice status={trackers.status} />
+          <div
+            onInputCapture={() => {
+              pauseDirty.current = true
+            }}
+            onChangeCapture={() => {
+              pauseDirty.current = true
+            }}
+          >
+            <PracticePauseForm
+              tracker={pauseTarget}
+              timezone={user?.timezone}
+              onCancel={closePauseForm}
+              onSubmit={async (payload) => {
+                if (await trackers.updateTracker(pauseTarget, payload)) {
+                  pauseDirty.current = false
+                  setPauseTarget(null)
+                }
+              }}
+            />
+          </div>
+        </Dialog>
+      )}
 
       {trackerForm && (
         <Dialog
           closeOnBackdrop={false}
-          onClose={() => setTrackerForm(null)}
-          title={trackerForm.tracker ? "Editar acompanhamento" : "Novo acompanhamento"}
+          onClose={closeTrackerForm}
+          title={trackerForm.tracker ? "Editar comportamento" : "Novo comportamento"}
         >
           <StatusNotice status={trackers.status} />
-          <TrackerForm
-            key={trackerForm.tracker?.id ?? `new-${trackerForm.objetivo?.id}`}
-            tracker={trackerForm.tracker}
-            objetivoTitulo={trackerForm.objetivo?.titulo ?? ""}
-            loading={trackers.busyId === trackerForm.tracker?.id}
-            onCancel={() => setTrackerForm(null)}
-            onSubmit={submitTracker}
-          />
+          <div
+            onInputCapture={() => {
+              trackerDirty.current = true
+            }}
+            onChangeCapture={() => {
+              trackerDirty.current = true
+            }}
+          >
+            <TrackerForm
+              key={trackerForm.tracker?.id ?? `new-${trackerForm.objetivo?.id}`}
+              tracker={trackerForm.tracker}
+              objetivoTitulo={trackerForm.objetivo?.titulo ?? ""}
+              lockObjetivo={Boolean(trackerForm.objetivo && !trackerForm.tracker)}
+              objectiveOptions={objectives.objetivos}
+              timezone={user?.timezone}
+              loading={trackers.busyId === trackerForm.tracker?.id}
+              onCancel={closeTrackerForm}
+              onDirty={() => {
+                trackerDirty.current = true
+              }}
+              onSubmit={submitTracker}
+            />
+          </div>
         </Dialog>
       )}
 
       {deleteTrackerTarget && (
         <ConfirmDialog
-          title="Excluir acompanhamento"
+          title="Excluir comportamento"
           message={`"${deleteTrackerTarget.titulo}" e suas ocorrências serão removidos. As tarefas do objetivo não serão alteradas.`}
-          confirmLabel="Excluir acompanhamento"
+          confirmLabel="Excluir comportamento"
           error={trackers.error}
           loading={trackers.busyId === deleteTrackerTarget.id}
           onCancel={() => setDeleteTrackerTarget(null)}
@@ -376,28 +559,27 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       )}
 
       {tasksEnabled && taskObjetivo && (
-        <Dialog
-          closeOnBackdrop={false}
-          onClose={() => {
-            setTaskObjetivo(null)
-            objectiveTasks.setFormStatus(emptyStatus)
-          }}
-          title="Nova tarefa"
-        >
-          <TaskForm
-            currentUser={user}
-            initialObjetivoId={taskObjetivo.id}
-            initialObjetivoTitulo={taskObjetivo.titulo}
-            lockObjetivo
-            loading={objectiveTasks.formLoading}
-            onCancel={() => {
-              setTaskObjetivo(null)
-              objectiveTasks.setFormStatus(emptyStatus)
+        <Dialog closeOnBackdrop={false} onClose={closeTaskForm} title="Nova tarefa">
+          <div
+            onInputCapture={() => {
+              taskDirty.current = true
             }}
-            onCreate={createTask}
-            status={objectiveTasks.formStatus}
-            timezone={user?.timezone}
-          />
+            onChangeCapture={() => {
+              taskDirty.current = true
+            }}
+          >
+            <TaskForm
+              currentUser={user}
+              initialObjetivoId={taskObjetivo.id}
+              initialObjetivoTitulo={taskObjetivo.titulo}
+              lockObjetivo
+              loading={objectiveTasks.formLoading}
+              onCancel={closeTaskForm}
+              onCreate={createTask}
+              status={objectiveTasks.formStatus}
+              timezone={user?.timezone}
+            />
+          </div>
         </Dialog>
       )}
 

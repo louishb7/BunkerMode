@@ -3,7 +3,13 @@ import { createPortal } from "react-dom"
 import { MoreHorizontal } from "lucide-react"
 import Button from "./Button"
 
-type MenuItem = { label: string; onSelect: () => void; danger?: boolean; disabled?: boolean }
+type MenuItem = {
+  label: string
+  onSelect: () => void
+  danger?: boolean
+  disabled?: boolean
+  separatorBefore?: boolean
+}
 export default function ActionsMenu({
   label,
   items,
@@ -25,7 +31,10 @@ export default function ActionsMenu({
   function show() {
     const rect = trigger.current?.getBoundingClientRect()
     if (!rect) return
-    const height = Math.min(items.length * 44 + 16, window.innerHeight - 24)
+    const height = Math.min(
+      items.length * 44 + items.filter((item) => item.separatorBefore).length * 9 + 16,
+      window.innerHeight - 24
+    )
     setPosition({
       left: Math.max(12, Math.min(rect.right - 240, window.innerWidth - 252)),
       top:
@@ -116,19 +125,23 @@ export default function ActionsMenu({
             }}
           >
             {items.map((item) => (
-              <button
-                key={item.label}
-                role="menuitem"
-                type="button"
-                disabled={item.disabled}
-                className={`flex min-h-11 w-full items-center rounded-control border-0 bg-transparent px-3 text-left text-sm disabled:opacity-50 ${item.danger ? "text-danger hover:bg-danger-soft" : "text-text-primary hover:bg-surface-subtle"}`}
-                onClick={() => {
-                  close(true)
-                  item.onSelect()
-                }}
-              >
-                {item.label}
-              </button>
+              <React.Fragment key={item.label}>
+                {item.separatorBefore && (
+                  <div role="separator" className="my-1 border-t border-border" />
+                )}
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={item.disabled}
+                  className={`flex min-h-11 w-full items-center rounded-control border-0 bg-transparent px-3 text-left text-sm disabled:opacity-50 ${item.danger ? "text-danger hover:bg-danger-soft" : "text-text-primary hover:bg-surface-subtle"}`}
+                  onClick={() => {
+                    close(true)
+                    item.onSelect()
+                  }}
+                >
+                  {item.label}
+                </button>
+              </React.Fragment>
             ))}
           </div>,
           document.body

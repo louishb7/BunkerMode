@@ -251,12 +251,10 @@ test("página financeira funciona sem Objetivos e tem formulários operáveis", 
     Object.assign(api, original)
   }
 })
-test("Home consulta somente orientação e preserva direções", async () => {
+test("Home prepara recorrências explicitamente antes da orientação e preserva direções", async () => {
   const original = { ...api }
   let reads = 0
-  api.materializeTaskRecurrences = () => {
-    throw Error("Home não materializa")
-  }
+  api.materializeTaskRecurrences = async () => ({ ok: true })
   api.getOrientation = async () => {
     reads++
     return {
@@ -696,11 +694,26 @@ test("histórico mostra até oito itens, ordena datas e navega por todas as pág
     await click("Anterior")
     assert.equal(rows().length, 8)
     await act(async () => view.container.querySelector('[aria-label="Mês anterior"]').click())
-    assert.match(view.container.textContent, /Página 1 de 3/)
-    assert.match(view.container.querySelector(".finance-toolbar").textContent, /Movimento/)
+    assert.match(view.container.textContent, /Página 2 de 3/)
+    assert.match(view.container.querySelector(".finance-state").textContent, /Movimento/)
+    assert.equal(view.container.querySelector(".finance-state .finance-month"), null)
     assert.doesNotMatch(view.container.textContent, /Reservas|Categoria/)
   } finally {
     await view.close()
     Object.assign(api, original)
   }
+})
+
+ test("poucos movimentos recolhem evolução, sem esconder fluxos que se compensam", async () => {
+  const points = [{data:"2026-09-01",receitas_centavos:1000,despesas_centavos:1000,resultado_centavos:0}]
+  const view = await mount(FinanceChart, {points, today:"2026-09-01", movementCount:2})
+  try {
+    assert.equal(view.container.querySelector('details').open, false)
+    assert.match(view.container.querySelector('summary').textContent, /2 movimentos/)
+    await act(async()=>{view.container.querySelector('details').open=true})
+    assert.ok(view.container.querySelector('svg'))
+    await view.render({points, today:"2026-09-01", movementCount:3})
+    assert.equal(view.container.querySelector('details'),null)
+    assert.ok(view.container.querySelector('svg'))
+  } finally {await view.close()}
 })

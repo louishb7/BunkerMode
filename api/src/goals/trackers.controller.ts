@@ -3,6 +3,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Req, UseGu
 import { AuthGuard } from "../auth/auth.guard";
 import { AuthenticatedRequest } from "../auth/auth.types";
 import { TrackersService } from "./trackers.service";
+import type { PracticeRecordPayload } from "./trackers.service";
 
 @Controller("api/v2/acompanhamentos")
 @UseGuards(AuthGuard)
@@ -31,8 +32,8 @@ export class TrackersController {
   }
 
   @Post(":id/ocorrencias")
-  recordOccurrence(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
-    return this.service.recordOccurrence(request.currentUser!, Number(id));
+  recordOccurrence(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() payload: PracticeRecordPayload) {
+    return this.service.recordOccurrence(request.currentUser!, Number(id), payload ?? {});
   }
 
   @Delete(":id/ocorrencias/:occurrenceId")

@@ -1,12 +1,12 @@
-import React, { useId, useLayoutEffect, useRef, useState } from "react"
-import { Check, Crown, Minus, Repeat2 } from "lucide-react"
+import React, { useId, useLayoutEffect, useState } from "react"
+import { Activity, Check, Crown, Minus, Repeat2 } from "lucide-react"
 import type { ObjectiveMapNode } from "../../../types/achievementContract"
 import { elapsedDays, nodeFact } from "../objectiveMapModel"
 
 const groups = [
   { tipo: "rotina", label: "Tarefas recorrentes" },
   { tipo: "tarefa", label: "Tarefas" },
-  { tipo: "acompanhamento", label: "Acompanhamentos" },
+  { tipo: "acompanhamento", label: "Hábitos e registros" },
 ] as const
 
 export function AchievementCrown({ achieved = false, className = "" }) {
@@ -21,6 +21,7 @@ export function AchievementCrown({ achieved = false, className = "" }) {
 
 function NodeMark({ node, timezone, now }) {
   if (node.tipo === "acompanhamento") {
+    if (node.practice_intent && node.practice_intent !== "registro_livre") return <span className="map-occurrence-mark" aria-hidden="true"><Activity size={18} /></span>
     const days = node.ultima_ocorrencia ? elapsedDays(node.ultima_ocorrencia, now, timezone) : null
     return (
       <span className="map-occurrence-mark" aria-hidden="true">
@@ -48,15 +49,25 @@ function NodeMark({ node, timezone, now }) {
 }
 
 type Connection = { id: string; path: string; active: boolean; descendants?: string[] }
-function ObjectiveConnections({ canvasRef, layoutKey, pulseId }) {
+function ObjectiveConnections({
+  canvas,
+  layoutKey,
+  pulseId,
+}: {
+  canvas: HTMLElement | null
+  layoutKey: string
+  pulseId: MapProps["pulseId"]
+}) {
   const [connections, setConnections] = useState<Connection[]>([])
   useLayoutEffect(() => {
-    const canvas = canvasRef.current as HTMLElement | null
     if (!canvas) return
     function measure() {
       const bounds = canvas!.getBoundingClientRect()
       const root = canvas!.querySelector<HTMLElement>("[data-map-root]")
-      if (!root || !bounds.width) return
+      if (!root || !bounds.width) {
+        setConnections([])
+        return
+      }
       const point = (element: HTMLElement) => {
         const rect = element.getBoundingClientRect()
         return {
@@ -104,7 +115,7 @@ function ObjectiveConnections({ canvasRef, layoutKey, pulseId }) {
       observer?.disconnect()
       window.removeEventListener("resize", measure)
     }
-  }, [canvasRef, layoutKey])
+  }, [canvas, layoutKey])
   return (
     <svg className="map-connections" aria-hidden="true" focusable="false">
       {connections.map((connection) => (
@@ -156,7 +167,7 @@ export default function ObjectiveMap({
   pulseId = null,
   emptyMessage = "Esta direção começa com você. Adicione vínculos quando fizer sentido.",
 }: MapProps) {
-  const canvasRef = useRef<HTMLDivElement>(null)
+  const [canvas, setCanvas] = useState<HTMLDivElement | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const id = useId()
   const populated = groups
@@ -173,19 +184,19 @@ export default function ObjectiveMap({
   return (
     <div
       className="objective-canvas"
-      ref={canvasRef}
+      ref={setCanvas}
       role="group"
       aria-label={`Mapa do objetivo: ${title}`}
     >
-      <ObjectiveConnections canvasRef={canvasRef} layoutKey={layoutKey} pulseId={pulseId} />
+      <ObjectiveConnections canvas={canvas} layoutKey={layoutKey} pulseId={pulseId} />
       <header className="map-root">
         <AchievementCrown achieved={achieved} />
         <span className="sr-only">
           {achieved ? "Coroa conquistada" : "Coroa ainda por conquistar"}
         </span>
-        {rootMeta}
         <h2>{title}</h2>
         {purpose && <p className="map-purpose">{purpose}</p>}
+        {rootMeta}
         {rootActions}
         <span className="map-root-anchor" data-map-root aria-hidden="true" />
       </header>
@@ -226,7 +237,6 @@ export default function ObjectiveMap({
                         <span className="map-node-copy">
                           <strong>{node.titulo}</strong>
                           <span>{fact}</span>
-                          {node.syncStatus && <small>Registro pendente de sincronização</small>}
                         </span>
                       </button>
                     </li>

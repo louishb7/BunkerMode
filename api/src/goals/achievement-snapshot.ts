@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { UserRecord } from "../auth/auth.types";
 import { dateOnly } from "../common/domain-helpers";
 import { toTaskResponse } from "../tasks/task-response";
+import { practiceFact, PracticeIntent } from "./practice-domain";
+import { practicePlanResponse } from "./practice-response";
 
 // Only facts needed by the final map; never copy full occurrence/task histories.
 export async function captureAchievement(
@@ -26,10 +28,10 @@ export async function captureAchievement(
         where: { usuario_id: user.usuario_id },
         orderBy: { id: "asc" },
         include: {
+          planos: { orderBy: { effective_from: "asc" } },
           _count: { select: { ocorrencias: true } },
           ocorrencias: {
             orderBy: [{ occurred_at: "desc" }, { id: "desc" }],
-            take: 1,
           },
         },
       },
@@ -79,6 +81,28 @@ export async function captureAchievement(
       ocorrencias_total: tracker._count.ocorrencias,
       ultima_ocorrencia:
         tracker.ocorrencias[0]?.occurred_at.toISOString() ?? null,
+      ...(tracker.intent !== "registro_livre"
+        ? {
+            practice_intent: tracker.intent,
+            practice_fact: practiceFact(
+              {
+                intent: tracker.intent as PracticeIntent,
+                planos: tracker.planos.map(practicePlanResponse),
+                ocorrencias: tracker.ocorrencias.map((record) => ({
+                  ...record,
+                  kind: record.kind as
+                    "atividade" | "ocorrencia" | "confirmacao",
+                  occurred_at: record.occurred_at.toISOString(),
+                  recorded_at: record.recorded_at?.toISOString(),
+                  created_at: record.created_at.toISOString(),
+                  amount: record.amount == null ? null : Number(record.amount),
+                })),
+              },
+              now,
+              user.timezone,
+            ),
+          }
+        : {}),
     });
   }
   return {

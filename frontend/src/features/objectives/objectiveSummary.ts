@@ -15,20 +15,29 @@ export function trackerOccurrenceLabel(tracker: Tracker, timezone?: string, now 
   const dates = tracker.ocorrencias
     .map((item) => new Date(item.occurred_at))
     .filter((date) => !Number.isNaN(date.getTime()))
+  const isPractice = tracker.intent === "repetir"
   if (!dates.length)
     return tracker.ocorrencias.length
       ? "Data da ocorrência indisponível"
-      : "Nenhuma ocorrência registrada"
+      : isPractice
+        ? "Nenhuma prática registrada"
+        : "Nenhuma ocorrência registrada"
   const last = new Date(Math.max(...dates.map((date) => date.getTime())))
+  const latest = tracker.ocorrencias.find((item) => Date.parse(item.occurred_at) === last.getTime())
+  const label = isPractice
+    ? "Última prática registrada"
+    : latest?.kind === "confirmacao"
+      ? "Último período observado"
+      : "Última ocorrência registrada"
   const calendarDay = (date: Date) => {
     const day = operationalDateFor(timezone, date)
     return Date.UTC(day.getFullYear(), day.getMonth(), day.getDate())
   }
   const days = Math.round((calendarDay(now) - calendarDay(last)) / 86400000)
-  if (days === 0) return "Última ocorrência registrada hoje"
-  if (days === 1) return "Última ocorrência registrada ontem"
-  if (days > 1) return `Última ocorrência registrada há ${days} dias`
-  return `Última ocorrência: ${last.toLocaleDateString("pt-BR", { timeZone: timezone })}`
+  if (days === 0) return `${label} hoje`
+  if (days === 1) return `${label} ontem`
+  if (days > 1) return `${label} há ${days} dias`
+  return `${label}: ${last.toLocaleDateString("pt-BR", { timeZone: timezone })}`
 }
 
 export function summarizeObjective({

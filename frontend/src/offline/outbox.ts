@@ -1,5 +1,5 @@
 import { request } from "../api/httpClient"
-import { getApiAvailability } from "./apiAvailability"
+import { getApiAvailability, setApiAvailability } from "./apiAvailability"
 import {
   listOutbox,
   removeOutboxOperation,
@@ -15,6 +15,12 @@ import type { Tracker } from "../types/trackerContract"
 import { financeEntryTypes, type FinanceOverview } from "../types/financeContract"
 import { focusStorageKey } from "../features/tasks/focusSession"
 import { updateOverview } from "../state/overviewCache"
+import {
+  planOn,
+  practiceDate,
+  practicePlanSignature,
+  type PracticePlan,
+} from "../features/practices/practiceDomain"
 
 type Domain = OutboxOperation["domain"]
 const fields: Record<Domain, string[]> = {
@@ -29,10 +35,29 @@ const fields: Record<Domain, string[]> = {
     "recurrence_end_date",
     "duration_type",
     "is_pinned",
+    "occurred_at",
   ],
   goal: ["titulo", "descricao", "data_alvo", "status"],
-  tracker: ["titulo", "descricao", "objetivo_id"],
-  occurrence: [],
+  tracker: [
+    "titulo",
+    "descricao",
+    "objetivo_id",
+    "intent",
+    "plan",
+    "status",
+    "effective_from",
+    "recorded_at",
+  ],
+  occurrence: [
+    "occurred_at",
+    "recorded_at",
+    "kind",
+    "amount",
+    "note",
+    "plan_effective_from",
+    "unit",
+    "plan_signature",
+  ],
   entry: ["titulo", "tipo", "valor_centavos", "data"],
 }
 
@@ -42,6 +67,9 @@ let generation = 0
 let queuedWhileRunning = false
 let replayOwner: number | null = null
 const replayListeners = new Set<() => void>()
+// Formulários abertos podem ainda carregar o ID local quando a criação termina.
+// Apenas referências recentes da sessão; pendências persistidas são remapeadas no IndexedDB.
+const resolvedCreates = new Map<string, { domain: Domain; serverId: number; version?: string }>()
 
 export function getReplayOwner() {
   return replayOwner
@@ -60,6 +88,7 @@ function setReplayOwner(ownerId: number | null) {
 }
 
 export function activateOutbox(ownerId: number | null) {
+  if (ownerId !== activeOwner) resolvedCreates.clear()
   activeOwner = ownerId
   generation++
   if (ownerId) void syncOutbox(ownerId)
@@ -96,17 +125,31 @@ export async function enqueueOperation(
   if (
     recurrenceSeriesId !== undefined &&
     (domain !== "task" ||
-      action !== "delete" ||
+      !["delete", "link", "unlink"].includes(action) ||
       !Number.isSafeInteger(recurrenceSeriesId) ||
       recurrenceSeriesId < 1)
   )
-    throw new Error("Recorrência inválida para exclusão.")
+    throw new Error("Recorrência inválida para a operação.")
   const normalized = Object.fromEntries(
     Object.entries(payload).filter(([key]) => fields[domain].includes(key))
   )
   if (Object.keys(normalized).length !== Object.keys(payload).length)
     throw new Error("Campos não permitidos na operação local.")
   const current = await listOutbox(ownerId)
+  const resolveRecent = (ref: number | string | undefined, expectedDomain: Domain) => {
+    if (typeof ref !== "string") return undefined
+    const resolved = resolvedCreates.get(`${ownerId}:${ref}`)
+    return resolved?.domain === expectedDomain ? resolved : undefined
+  }
+  const resolvedTarget = resolveRecent(target, domain)
+  if (resolvedTarget) {
+    target = resolvedTarget.serverId
+    baseUpdatedAt = resolvedTarget.version
+  }
+  const resolvedParent = resolveRecent(parentId, "tracker")
+  if (resolvedParent) parentId = resolvedParent.serverId
+  const resolvedGoal = resolveRecent(normalized.objetivo_id as number | string | undefined, "goal")
+  if (resolvedGoal) normalized.objetivo_id = resolvedGoal.serverId
   if (typeof target === "string" && target.startsWith("local:")) {
     const create = current.find(
       (item) => `local:${item.operationId}` === target && item.action === "create"
@@ -147,13 +190,26 @@ export async function enqueueOperation(
     if (
       action === "update" &&
       !create.attemptedAt &&
-      ["task", "goal", "tracker", "entry"].includes(domain)
+      ["task", "goal", "tracker", "entry"].includes(domain) &&
+      !(
+        domain === "tracker" &&
+        ["plan", "status", "effective_from"].some((key) => key in normalized)
+      )
     ) {
       await saveOutboxOperation({ ...create, payload: { ...create.payload, ...normalized } })
       if (activeOwner === ownerId) void syncOutbox(ownerId)
       return target
     }
   }
+  const createdAt = new Date().toISOString()
+  if (domain === "tracker" && action === "update" && (normalized.plan || normalized.status))
+    normalized.recorded_at ??= createdAt
+  if (
+    (domain === "task" && action === "complete") ||
+    (domain === "occurrence" && action === "create")
+  )
+    normalized.occurred_at ??= createdAt
+  if (domain === "occurrence" && action === "create") normalized.recorded_at ??= createdAt
   const operationId = crypto.randomUUID()
   const operation: OutboxOperation = {
     ownerId,
@@ -165,7 +221,7 @@ export async function enqueueOperation(
     parentId,
     baseUpdatedAt,
     ...(recurrenceSeriesId ? { recurrenceSeriesId } : {}),
-    createdAt: new Date().toISOString(),
+    createdAt,
     status: "pending",
   }
   await saveOutboxOperation(operation)
@@ -173,7 +229,7 @@ export async function enqueueOperation(
   return action === "create" ? `local:${operationId}` : operationId
 }
 
-async function refreshOfficial(ownerId: number, op: OutboxOperation) {
+async function refreshOfficial(ownerId: number, op: OutboxOperation, epoch = generation) {
   const endpoint =
     op.domain === "task"
       ? "/tarefas"
@@ -191,40 +247,53 @@ async function refreshOfficial(ownerId: number, op: OutboxOperation) {
           ? "trackers"
           : `finances:${String(op.payload.data ?? new Date().toISOString()).slice(0, 7)}`
   const result = await request(endpoint)
-  if (!result.ok) return false
-  await saveSnapshot(ownerId, key, result.data)
-  if (op.domain === "task" && op.action === "delete") {
+  if (!result.ok || activeOwner !== ownerId || epoch !== generation) return false
+  if (!(await saveSnapshot(ownerId, key, result.data))) return false
+  if (activeOwner !== ownerId || epoch !== generation) return false
+  if (op.domain === "task") {
     const daily = await readSnapshot(ownerId, "tasks:daily:last", isDailyTaskSnapshot)
+    if (activeOwner !== ownerId || epoch !== generation) return false
     if (daily) {
       const official = new Map((result.data as Task[]).map((task) => [task.id, task]))
       const tasks = daily.data.tasks.flatMap((task) => official.get(task.id) ?? [])
-      await saveSnapshot(ownerId, "tasks:daily:last", { date: daily.data.date, tasks })
+      if (!(await saveSnapshot(ownerId, "tasks:daily:last", { date: daily.data.date, tasks })))
+        return false
       updateOverview(ownerId, { daily: tasks, dailyDate: daily.data.date })
     }
   }
   if (op.domain === "entry") {
     const currentMonth = new Date().toISOString().slice(0, 7)
     if (key === `finances:${currentMonth}`)
-      await saveSnapshot(ownerId, "finances:current", result.data)
+      if (!(await saveSnapshot(ownerId, "finances:current", result.data))) return false
   }
+  if (
+    op.domain === "goal" &&
+    op.action === "delete" &&
+    !(await refreshSecondaryAfterGoalDelete(ownerId, epoch))
+  )
+    return false
   window.dispatchEvent(new CustomEvent("bunkermode-official-change", { detail: { ownerId, key } }))
   return true
 }
 
-async function refreshSecondaryAfterGoalDelete(ownerId: number) {
-  await Promise.allSettled(
+async function refreshSecondaryAfterGoalDelete(ownerId: number, epoch: number) {
+  const results = await Promise.allSettled(
     [
       ["tasks:all", "/tarefas"],
       ["trackers", "/acompanhamentos"],
     ].map(async ([key, endpoint]) => {
+      if (activeOwner !== ownerId || epoch !== generation) return false
       const result = await request(endpoint)
-      if (!result.ok || activeOwner !== ownerId) return
-      await saveSnapshot(ownerId, key, result.data)
+      if (!result.ok || activeOwner !== ownerId || epoch !== generation) return false
+      if (!(await saveSnapshot(ownerId, key, result.data))) return false
+      if (activeOwner !== ownerId || epoch !== generation) return false
       window.dispatchEvent(
         new CustomEvent("bunkermode-official-change", { detail: { ownerId, key } })
       )
+      return true
     })
   )
+  return results.every((result) => result.status === "fulfilled" && result.value)
 }
 
 function resolveRef(
@@ -241,17 +310,27 @@ function resolveRef(
 }
 
 async function run(ownerId: number, epoch: number): Promise<void> {
-  if (navigator.onLine === false || getApiAvailability() === "unavailable") return
+  if (navigator.onLine === false) return
+  const pending = await listOutbox(ownerId)
+  if (activeOwner !== ownerId || epoch !== generation) return
+  if (!pending.some((item) => item.status === "pending" || item.status === "syncing")) return
   const validated = await request("/usuarios/me")
+  if (activeOwner !== ownerId || epoch !== generation) return
   if (!validated.ok) {
     if (validated.status === 401) window.dispatchEvent(new Event("bunkermode-auth-invalid"))
+    else if (validated.status === 0 || validated.status >= 500) setApiAvailability("unavailable")
+    return
+  }
+  if (validated.data?.id !== ownerId) {
+    window.dispatchEvent(new Event("bunkermode-auth-invalid"))
     return
   }
   let items = await listOutbox(ownerId)
   let madeProgress = false
   let skipped = false
   for (const original of items) {
-    const op = (await listOutbox(ownerId)).find((item) => item.operationId === original.operationId)
+    items = await listOutbox(ownerId)
+    const op = items.find((item) => item.operationId === original.operationId)
     if (!op) continue
     if (activeOwner !== ownerId || epoch !== generation) return
     if (op.status === "failed" || op.status === "conflict") continue
@@ -267,7 +346,7 @@ async function run(ownerId: number, epoch: number): Promise<void> {
       // A prior create is still pending; failed/circular dependencies stop here.
       const dependsOn = items.some(
         (item) =>
-          item.status === "pending" &&
+          ["pending", "syncing"].includes(item.status) &&
           [`local:${item.operationId}`].some(
             (ref) => ref === op.target || ref === op.parentId || ref === goalRef
           )
@@ -285,6 +364,7 @@ async function run(ownerId: number, epoch: number): Promise<void> {
     }
     const attempted = { ...op, attemptedAt: op.attemptedAt ?? new Date().toISOString() }
     await saveOutboxOperation({ ...attempted, status: "syncing" })
+    if (activeOwner !== ownerId || epoch !== generation) return
     const payload = { ...op.payload }
     if (goalRef != null) payload.objetivo_id = goalId
     const result = await request("/offline/operations", {
@@ -299,9 +379,11 @@ async function run(ownerId: number, epoch: number): Promise<void> {
         ...(op.baseUpdatedAt ? { baseUpdatedAt: op.baseUpdatedAt } : {}),
       },
     })
+    if (activeOwner !== ownerId || epoch !== generation) return
     if (!result.ok) {
       if (result.status === 0 || result.status >= 500) {
         await saveOutboxOperation({ ...attempted, status: "pending" })
+        setApiAvailability("unavailable")
         return
       }
       if (result.status === 401) {
@@ -319,12 +401,13 @@ async function run(ownerId: number, epoch: number): Promise<void> {
       })
       continue
     }
-    if (op.domain === "entry" && op.action === "create" && Number.isSafeInteger(result.data?.id)) {
+    if (op.action === "create" && Number.isSafeInteger(result.data?.id)) {
       op.serverId = result.data.id
       attempted.serverId = op.serverId
       await saveOutboxOperation({ ...attempted, status: "syncing", serverId: op.serverId })
     }
-    if (!(await refreshOfficial(ownerId, op))) {
+    if (!(await refreshOfficial(ownerId, op, epoch))) {
+      if (activeOwner !== ownerId || epoch !== generation) return
       await saveOutboxOperation({ ...attempted, status: "pending" })
       return
     }
@@ -338,6 +421,12 @@ async function run(ownerId: number, epoch: number): Promise<void> {
         })
         return
       }
+      resolvedCreates.set(`${ownerId}:local:${op.operationId}`, {
+        domain: op.domain,
+        serverId,
+        version: result.data?.updated_at,
+      })
+      if (resolvedCreates.size > 512) resolvedCreates.delete(resolvedCreates.keys().next().value!)
       await resolveOutboxCreate(ownerId, op.operationId, serverId, result.data?.updated_at)
       if (op.domain === "task") {
         const key = focusStorageKey(ownerId)
@@ -357,17 +446,22 @@ async function run(ownerId: number, epoch: number): Promise<void> {
         }
       }
     } else await removeOutboxOperation(ownerId, op.operationId)
-    if (op.domain === "goal" && op.action === "delete")
-      void refreshSecondaryAfterGoalDelete(ownerId)
+    if (activeOwner !== ownerId || epoch !== generation) return
     const version = result.data?.updated_at
     if (typeof version === "string" && target !== undefined) {
       for (const next of await listOutbox(ownerId)) {
+        if (activeOwner !== ownerId || epoch !== generation) return
         if (next.domain === op.domain && next.target === target && next.status === "pending")
           await saveOutboxOperation({ ...next, baseUpdatedAt: version })
       }
     }
     items = await listOutbox(ownerId)
     madeProgress = true
+    try {
+      window.localStorage.setItem(`bunkermode_last_sync:${ownerId}`, new Date().toISOString())
+    } catch {
+      /* Metadado de diagnóstico opcional. */
+    }
   }
   if (skipped && activeOwner === ownerId) {
     if (madeProgress) return run(ownerId, epoch)
@@ -391,7 +485,7 @@ export function syncOutbox(ownerId: number): Promise<void> {
   const epoch = generation
   running = (async () => {
     const work = async () => {
-      if (navigator.onLine === false || getApiAvailability() === "unavailable") return
+      if (navigator.onLine === false) return
       setReplayOwner(ownerId)
       try {
         await run(ownerId, epoch)
@@ -405,12 +499,7 @@ export function syncOutbox(ownerId: number): Promise<void> {
     running = null
     if (queuedWhileRunning) {
       queuedWhileRunning = false
-      if (
-        activeOwner === ownerId &&
-        navigator.onLine !== false &&
-        getApiAvailability() !== "unavailable"
-      )
-        void syncOutbox(ownerId)
+      if (activeOwner !== null && navigator.onLine !== false) void syncOutbox(activeOwner)
     }
   })
   return running
@@ -463,17 +552,45 @@ export async function applyMyVersion(ownerId: number, operationId: string) {
 
 export async function retryOperation(ownerId: number, operationId: string) {
   const item = (await listOutbox(ownerId)).find((op) => op.operationId === operationId)
-  if (!item) return
+  if (!item || activeOwner !== ownerId) return
   await saveOutboxOperation({ ...item, status: "pending", error: undefined })
   await syncOutbox(ownerId)
 }
 
+// Somente intenções válidas pendentes participam da projeção. Falhas e conflitos
+// permanecem na outbox para diagnóstico/resolução e não alteram os fatos oficiais.
+function pendingProjection(operations: OutboxOperation[]) {
+  const blocked = new Set(
+    operations
+      .filter((op) => op.status === "failed" || op.status === "conflict")
+      .map((op) => `local:${op.operationId}`)
+  )
+  let pending = operations.filter((op) => op.status === "pending" || op.status === "syncing")
+  let changed = true
+  while (changed) {
+    changed = false
+    pending = pending.filter((op) => {
+      if (
+        [op.target, op.parentId, op.payload.objetivo_id].some((ref) => blocked.has(String(ref)))
+      ) {
+        blocked.add(`local:${op.operationId}`)
+        changed = true
+        return false
+      }
+      return true
+    })
+  }
+  return pending
+}
+
 export function projectTasks(official: Task[], operations: OutboxOperation[]): Task[] {
+  operations = pendingProjection(operations)
   const items = official.map((item) => ({ ...item })) as Array<Task & { syncStatus?: string }>
   for (const op of operations) {
     if (op.domain !== "task") continue
     const id = op.action === "create" ? `local:${op.operationId}` : op.target
     if (op.action === "create") {
+      if (op.serverId && items.some((item) => item.id === op.serverId)) continue
       const now = op.createdAt
       items.push({
         id: id as unknown as number,
@@ -509,7 +626,9 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
       })
       continue
     }
-    const index = items.findIndex((item) => item.id === id)
+    let index = items.findIndex((item) => item.id === id)
+    if (index < 0 && ["link", "unlink"].includes(op.action) && op.recurrenceSeriesId)
+      index = items.findIndex((item) => item.recurrence?.series_id === op.recurrenceSeriesId)
     if (op.action === "delete") {
       const seriesId = op.recurrenceSeriesId ?? items[index]?.recurrence?.series_id
       if (seriesId) {
@@ -530,7 +649,7 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
       item.status = completed ? "CONCLUIDA" : "PENDENTE"
       item.status_code = item.status
       item.status_label = completed ? "Concluída" : "Pendente"
-      item.completed_at = completed ? op.createdAt : null
+      item.completed_at = completed ? String(op.payload.occurred_at ?? op.createdAt) : null
       item.permissions = {
         ...item.permissions,
         can_complete: !completed,
@@ -541,8 +660,16 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
       }
     }
     if (op.action === "pin") item.is_pinned = op.payload.is_pinned === true
-    if (op.action === "link") item.objetivo_id = op.payload.objetivo_id as number
-    if (op.action === "unlink") item.objetivo_id = null
+    if (op.action === "link" || op.action === "unlink") {
+      const seriesId = op.recurrenceSeriesId ?? item.recurrence?.series_id
+      for (const linked of items) {
+        if (linked !== item && (!seriesId || linked.recurrence?.series_id !== seriesId)) continue
+        linked.objetivo_id = op.action === "link" ? (op.payload.objetivo_id as number) : null
+        if (op.action === "unlink" && linked.recurrence?.termination_policy === "ate_objetivo")
+          linked.recurrence = { ...linked.recurrence, termination_policy: "sem_termino" }
+        linked.syncStatus = op.status
+      }
+    }
     item.syncStatus = op.status
   }
   const deletedGoals = new Set(
@@ -558,11 +685,13 @@ export function projectTasks(official: Task[], operations: OutboxOperation[]): T
 }
 
 export function projectGoals(official: any[], operations: OutboxOperation[]) {
+  operations = pendingProjection(operations)
   const items = official.map((item) => ({ ...item }))
   for (const op of operations) {
     if (op.domain !== "goal") continue
     const id = op.action === "create" ? `local:${op.operationId}` : op.target
     if (op.action === "create") {
+      if (op.serverId && items.some((item) => item.id === op.serverId)) continue
       items.push({
         id,
         usuario_id: op.ownerId,
@@ -592,43 +721,119 @@ export function projectGoals(official: any[], operations: OutboxOperation[]) {
 }
 
 export function projectTrackers(official: Tracker[], operations: OutboxOperation[]): Tracker[] {
-  const items = official.map((item) => ({ ...item, ocorrencias: [...item.ocorrencias] })) as Array<
-    Tracker & { syncStatus?: string }
-  >
+  operations = pendingProjection(operations)
+  const items = official.map((item) => ({
+    ...item,
+    ...(item.planos ? { planos: [...item.planos] } : {}),
+    ocorrencias: [...item.ocorrencias],
+  })) as Array<Tracker & { syncStatus?: string }>
   for (const op of operations) {
     if (op.domain === "tracker") {
       const id = op.action === "create" ? `local:${op.operationId}` : op.target
-      if (op.action === "create")
+      if (op.action === "create") {
+        if (op.serverId && items.some((item) => item.id === op.serverId)) continue
         items.push({
           id: id as unknown as number,
           objetivo_id: (op.payload.objetivo_id as number) ?? null,
           titulo: String(op.payload.titulo ?? ""),
           descricao: (op.payload.descricao as string) ?? null,
+          intent: (op.payload.intent as Tracker["intent"]) ?? "registro_livre",
+          status: "ativo",
+          planos: op.payload.plan ? [{ ...(op.payload.plan as PracticePlan), paused: false }] : [],
           created_at: op.createdAt,
           updated_at: op.createdAt,
           ocorrencias: [],
           syncStatus: op.status,
         })
-      else {
+      } else {
         const index = items.findIndex((item) => item.id === id)
         if (index < 0) continue
         if (op.action === "delete") items.splice(index, 1)
         else {
-          Object.assign(items[index], op.payload)
+          const item = items[index]
+          const { plan, effective_from, ...fields } = op.payload
+          delete fields.recorded_at
+          Object.assign(item, fields)
+          const plans = item.planos ?? []
+          const last = plans.at(-1)
+          const next = plan
+            ? {
+                ...(plan as PracticePlan),
+                paused: fields.status ? fields.status === "pausado" : (last?.paused ?? false),
+              }
+            : fields.status && last
+              ? {
+                  ...last,
+                  effective_from: String(
+                    effective_from ?? practiceDate(op.createdAt, last.timezone)
+                  ),
+                  paused: fields.status === "pausado",
+                  effective_until: null,
+                }
+              : null
+          if (next) {
+            item.planos = [
+              ...plans
+                .filter((existing) => existing.effective_from !== next.effective_from)
+                .map((existing) =>
+                  !existing.effective_until
+                    ? { ...existing, effective_until: next.effective_from }
+                    : existing
+                ),
+              next,
+            ]
+            const current = planOn(item.planos, practiceDate(new Date(), item.planos[0]?.timezone))
+            item.status = current?.paused ? "pausado" : "ativo"
+          }
           items[index].syncStatus = op.status
         }
       }
     } else if (op.domain === "occurrence") {
-      const tracker = items.find((item) => item.id === op.parentId)
+      const parentCreate = operations.find((item) => `local:${item.operationId}` === op.parentId)
+      const tracker = items.find(
+        (item) => item.id === op.parentId || item.id === parentCreate?.serverId
+      )
       if (!tracker) continue
-      if (op.action === "create")
+      if (op.action === "create") {
+        if (op.serverId && tracker.ocorrencias.some((record) => record.id === op.serverId)) continue
+        const plan = planOn(
+          tracker.planos ?? [],
+          practiceDate(
+            String(op.payload.occurred_at ?? op.createdAt),
+            tracker.planos?.[0]?.timezone
+          )
+        )
+        if (
+          op.payload.plan_effective_from !== undefined &&
+          op.payload.plan_effective_from !== plan?.effective_from
+        )
+          continue
+        if (
+          tracker.intent &&
+          tracker.intent !== "registro_livre" &&
+          op.payload.unit !== undefined &&
+          op.payload.unit !== (plan?.unit ?? null)
+        )
+          continue
+        if (
+          op.payload.plan_signature !== undefined &&
+          (!plan || op.payload.plan_signature !== practicePlanSignature(plan))
+        )
+          continue
         tracker.ocorrencias.unshift({
           id: `local:${op.operationId}` as unknown as number,
           acompanhamento_id: tracker.id,
-          occurred_at: op.createdAt,
+          occurred_at: String(op.payload.occurred_at ?? op.createdAt),
           created_at: op.createdAt,
+          recorded_at: String(op.payload.recorded_at ?? op.createdAt),
+          kind:
+            (op.payload.kind as Tracker["ocorrencias"][number]["kind"]) ??
+            (tracker.intent === "repetir" ? "atividade" : "ocorrencia"),
+          amount: (op.payload.amount as number) ?? null,
+          unit: plan?.unit ?? (op.payload.unit as string) ?? null,
+          note: (op.payload.note as string) ?? null,
         })
-      else tracker.ocorrencias = tracker.ocorrencias.filter((item) => item.id !== op.target)
+      } else tracker.ocorrencias = tracker.ocorrencias.filter((item) => item.id !== op.target)
       tracker.syncStatus = op.status
     }
   }
@@ -650,10 +855,7 @@ export function projectFinances(
   month?: string
 ): FinanceOverview | null {
   const localMonth = month ?? new Date().toISOString().slice(0, 7)
-  if (
-    !official &&
-    !operations.some((item) => item.domain === "entry" && item.action === "create")
-  )
+  if (!official && !operations.some((item) => item.domain === "entry" && item.action === "create"))
     return null
   const baseline: FinanceOverview = official ?? {
     mes: localMonth,

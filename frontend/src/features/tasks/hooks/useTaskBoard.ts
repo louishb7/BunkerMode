@@ -275,7 +275,7 @@ export function useTaskBoard({
         task?.id,
         task?.updated_at,
         undefined,
-        action === "delete" ? task?.recurrence?.series_id : undefined
+        ["delete", "link", "unlink"].includes(action) ? task?.recurrence?.series_id : undefined
       )
       setStatus(emptyStatus)
       return { persisted: true, synchronized: false }
@@ -347,6 +347,12 @@ export function useTaskBoard({
     completeLoadingId,
     completeTask,
     createTask,
+    setTaskObjective: (task: Task, objectiveId: number | string | null) =>
+      queue(
+        objectiveId == null ? "unlink" : "link",
+        objectiveId == null ? {} : { objetivo_id: objectiveId },
+        task
+      ),
     dailyTasks,
     deleteTask,
     formLoading,

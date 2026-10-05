@@ -36,8 +36,8 @@ describe("Acompanhamentos", () => {
         include: {
           ocorrencias: {
             orderBy: [{ occurred_at: "desc" }, { id: "desc" }],
-            take: 5,
           },
+          planos: { orderBy: { effective_from: "asc" } },
         },
       }),
     );
@@ -87,7 +87,7 @@ describe("Acompanhamentos", () => {
     expect((await service.recordOccurrence(user, 11)).id).toBe(2);
     expect(prisma.ocorrencias_acompanhamento.create).toHaveBeenCalledTimes(2);
     expect(prisma.ocorrencias_acompanhamento.create).toHaveBeenCalledWith({
-      data: { acompanhamento_id: 11 },
+      data: { acompanhamento_id: 11, occurred_at: expect.any(Date) },
     });
     expect(prisma.missoes.create).not.toHaveBeenCalled();
   });

@@ -218,10 +218,11 @@ export const api = {
   deleteTracker(token, id) {
     return request(`/acompanhamentos/${id}`, { token, method: "DELETE" })
   },
-  recordTrackerOccurrence(token, id) {
+  recordTrackerOccurrence(token, id, payload = {}) {
     return request<TrackerOccurrence>(`/acompanhamentos/${id}/ocorrencias`, {
       token,
       method: "POST",
+      body: payload,
     })
   },
   deleteTrackerOccurrence(token, id, occurrenceId) {

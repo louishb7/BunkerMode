@@ -25,6 +25,7 @@ const [{ default: Map }, { default: Conquer }, { default: Memory }, model] = awa
   vite.ssrLoadModule("/src/features/objectives/components/AchievementDetails.tsx"),
   vite.ssrLoadModule("/src/features/objectives/objectiveMapModel.ts"),
 ])
+const { default: Details } = await vite.ssrLoadModule("/src/features/objectives/components/ObjectiveNodeDetails.tsx")
 after(() => vite.close())
 async function mount(Component, props) {
   const container = document.createElement("div")
@@ -35,6 +36,9 @@ async function mount(Component, props) {
   )
   return {
     container,
+    render: async (nextProps) => act(async () =>
+      root.render(React.createElement(MemoryRouter, null, React.createElement(Component, nextProps)))
+    ),
     close: async () => {
       await act(async () => root.unmount())
       container.remove()
@@ -42,6 +46,24 @@ async function mount(Component, props) {
   }
 }
 const click = (button) => act(async () => button.click())
+test("inspector aceita ocorrências e conclusões dependentes de criações locais ainda pendentes", async () => {
+  let records = 0, completions = 0
+  const tracker = { id: "local:tracker", titulo: "Registro livre", syncStatus: "pending", ocorrencias: [] }
+  const view = await mount(Details, { node: { id: "tracker-local", tipo: "acompanhamento", titulo: tracker.titulo }, tracker,
+    onClose() {}, onRecordOccurrence: () => { records++ } })
+  try {
+    const record = [...document.querySelectorAll("button")].find(item => item.textContent === "Registrar ocorrência")
+    assert.equal(record.disabled, false)
+    await click(record)
+    assert.equal(records, 1)
+    const task = { id: "local:task", titulo: "Ler", syncStatus: "pending", permissions: { can_complete: true } }
+    await view.render({ node: { id: "task-local", tipo: "tarefa", titulo: task.titulo }, task, onClose() {}, onCompleteTask: () => { completions++ } })
+    const complete = [...document.querySelectorAll("button")].find(item => item.textContent === "Concluir tarefa")
+    assert.equal(complete.disabled, false)
+    await click(complete)
+    assert.equal(completions, 1)
+  } finally { await view.close() }
+})
 const snapshot = {
   version: 1,
   titulo: "Primeira vaga",
@@ -65,6 +87,61 @@ const achievement = {
   nota: "Eu consegui.",
   snapshot,
 }
+
+test("conexões existem na montagem e acompanham objetivo, expansão, conteúdo, breakpoint e visibilidade", async () => {
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+  const originalObserver = globalThis.ResizeObserver
+  let width = 900, rootY = 180
+  const observers = []
+  globalThis.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; this.elements = new Set(); observers.push(this) }
+    observe(element) { this.elements.add(element) }
+    disconnect() { this.disconnected = true; this.elements.clear() }
+  }
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    const canvas = this.classList.contains("objective-canvas")
+    const root = this.hasAttribute("data-map-root")
+    const top = canvas ? 0 : root ? rootY : this.hasAttribute("data-map-group-anchor") ? 300 : 360
+    const left = canvas ? 0 : root ? width / 2 : 70
+    return { left, top, width: canvas ? width : 20, height: 20, right: left + width, bottom: top + 20 }
+  }
+  const nodes = Array.from({ length: 6 }, (_, index) => ({ id: `task-${index}`, tipo: "tarefa", titulo: `Tarefa ${index}`, estado: "PENDENTE" }))
+  const props = { title: "Primeiro objetivo", nodes, now: new Date("2026-10-05T12:00:00Z") }
+  const view = await mount(Map, props)
+  const paths = () => [...view.container.querySelectorAll(".map-line")]
+  const notify = () => act(async () => observers.at(-1).callback())
+  try {
+    assert.equal(paths().length, 5, "montagem com dados deve medir sem alteração posterior")
+    assert.ok(observers.at(-1).elements.has(view.container.querySelector(".objective-canvas")))
+    assert.match(paths()[0].getAttribute("d"), / C /)
+    await click(view.container.querySelector(".map-expand"))
+    assert.equal(paths().length, 7)
+    assert.equal(observers[0].disconnected, true, "observer anterior deve ser limpo após mudança de nós")
+    await click(view.container.querySelector(".map-expand"))
+    assert.equal(paths().length, 5)
+    width = 500
+    await act(async () => window.dispatchEvent(new window.Event("resize")))
+    assert.doesNotMatch(paths()[0].getAttribute("d"), / C /)
+    const beforeContent = paths()[0].getAttribute("d")
+    rootY = 220
+    await notify()
+    assert.notEqual(paths()[0].getAttribute("d"), beforeContent)
+    width = 0
+    await notify()
+    assert.equal(paths().length, 0, "canvas oculto não mantém geometria antiga")
+    width = 900
+    await notify()
+    assert.equal(paths().length, 5, "observer recupera conexões ao reexibir")
+    await view.render({ ...props, title: "Segundo objetivo", purpose: "Propósito novo", nodes: [nodes[1]] })
+    assert.equal(paths().length, 2)
+    assert.equal(view.container.querySelector("h2").textContent, "Segundo objetivo")
+  } finally {
+    await view.close()
+    assert.equal(observers.every((observer) => observer.disconnected), true)
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect
+    globalThis.ResizeObserver = originalObserver
+  }
+})
 
 test("30 nós continuam limitados por grupo, com expansão acessível e nomes completos", async () => {
   let selected

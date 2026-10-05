@@ -29,6 +29,7 @@ export default function TasksPanel({
   onEditTask,
   onReopenTask,
   onTogglePin,
+  onChangeObjective = undefined,
   pinLoadingId,
   reopenLoadingId,
   selectedDate,
@@ -59,6 +60,7 @@ export default function TasksPanel({
               onEdit={() => onEditTask(task)}
               onReopen={() => onReopenTask(task)}
               onTogglePin={() => onTogglePin(task)}
+              onChangeObjective={onChangeObjective ? () => onChangeObjective(task) : undefined}
               pinning={pinLoadingId === task.id}
               reopening={reopenLoadingId === task.id}
               selectedDate={selectedDate}

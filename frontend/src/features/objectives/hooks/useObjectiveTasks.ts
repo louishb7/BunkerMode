@@ -118,7 +118,8 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
   async function unlinkTask(task: Task) {
     if (!token || unlinkingId !== null) return false
     try {
-      await enqueueOperation(ownerId, "task", "unlink", {}, task.id, task.updated_at)
+      await enqueueOperation(ownerId, "task", "unlink", {}, task.id, task.updated_at,
+        undefined, task.recurrence?.series_id)
       return true
     } catch (error) {
       setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")
@@ -134,7 +135,9 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
         payload ? "link" : "complete",
         payload ?? {},
         task.id,
-        task.updated_at
+        task.updated_at,
+        undefined,
+        payload ? task.recurrence?.series_id : undefined
       )
       return true
     } catch (error) {

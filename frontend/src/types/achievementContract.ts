@@ -12,6 +12,8 @@ export type ObjectiveMapNode = {
   ocorrencias_total?: number
   atividade_em?: string | null
   syncStatus?: string
+  practice_intent?: "registro_livre" | "repetir" | "reduzir" | "evitar"
+  practice_fact?: string
 }
 
 export type AchievementSnapshot = {

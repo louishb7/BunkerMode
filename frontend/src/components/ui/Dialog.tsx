@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from "react"
+import React, { useEffect, useId, useLayoutEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 
 const focusableSelector = [
@@ -15,6 +15,9 @@ function getFocusableElements(container: HTMLElement | null) {
     (element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true"
   )
 }
+
+let openDialogs = 0
+let originalBodyOverflow = ""
 
 type DialogProps = {
   ariaLabel?: string
@@ -40,17 +43,22 @@ export default function Dialog({
   title,
 }: DialogProps) {
   const dialogRef = useRef<HTMLElement | null>(null)
-  const previousActiveElementRef = useRef<HTMLElement | null>(null)
+  const optionsRef = useRef({ closeOnEscape, initialFocusRef, onClose })
   const titleId = useId()
 
+  useLayoutEffect(() => {
+    optionsRef.current = { closeOnEscape, initialFocusRef, onClose }
+  }, [closeOnEscape, initialFocusRef, onClose])
+
   useEffect(() => {
-    previousActiveElementRef.current =
+    const previousActiveElement =
       document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousOverflow = document.body.style.overflow
+    if (openDialogs++ === 0) originalBodyOverflow = document.body.style.overflow
     document.body.style.overflow = "hidden"
 
     const focusInitialElement = () => {
-      const initialElement = initialFocusRef?.current
+      if (dialogRef.current?.contains(document.activeElement)) return
+      const initialElement = optionsRef.current.initialFocusRef?.current
       const [firstFocusableElement] = getFocusableElements(dialogRef.current)
       ;(initialElement || firstFocusableElement || dialogRef.current)?.focus()
     }
@@ -58,9 +66,12 @@ export default function Dialog({
     const timeoutId = window.setTimeout(focusInitialElement, 0)
 
     function handleKeyDown(event) {
-      if (event.key === "Escape" && closeOnEscape) {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      if (dialogs.item(dialogs.length - 1) !== dialogRef.current) return
+
+      if (event.key === "Escape" && optionsRef.current.closeOnEscape) {
         event.preventDefault()
-        onClose?.()
+        optionsRef.current.onClose?.()
         return
       }
 
@@ -77,7 +88,10 @@ export default function Dialog({
 
       const firstElement = focusableElements[0]
       const lastElement = focusableElements[focusableElements.length - 1]
-      if (event.shiftKey && document.activeElement === firstElement) {
+      if (!dialogRef.current?.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? lastElement : firstElement).focus()
+      } else if (event.shiftKey && document.activeElement === firstElement) {
         event.preventDefault()
         lastElement.focus()
       } else if (!event.shiftKey && document.activeElement === lastElement) {
@@ -90,15 +104,12 @@ export default function Dialog({
     return () => {
       window.clearTimeout(timeoutId)
       document.removeEventListener("keydown", handleKeyDown)
-      document.body.style.overflow = previousOverflow
-      if (
-        previousActiveElementRef.current instanceof HTMLElement &&
-        previousActiveElementRef.current.isConnected
-      ) {
-        previousActiveElementRef.current.focus()
+      if (--openDialogs === 0) document.body.style.overflow = originalBodyOverflow
+      if (previousActiveElement instanceof HTMLElement && previousActiveElement.isConnected) {
+        previousActiveElement.focus()
       }
     }
-  }, [closeOnEscape, initialFocusRef, onClose])
+  }, [])
 
   return createPortal(
     <div

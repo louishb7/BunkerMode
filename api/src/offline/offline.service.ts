@@ -54,10 +54,11 @@ const payloadFields: Record<Operation["domain"], string[]> = {
     "recurrence_end_date",
     "duration_type",
     "is_pinned",
+    "occurred_at",
   ],
   goal: ["titulo", "descricao", "data_alvo", "status"],
-  tracker: ["titulo", "descricao", "objetivo_id"],
-  occurrence: [],
+  tracker: ["titulo", "descricao", "objetivo_id", "intent", "plan", "status", "effective_from", "recorded_at"],
+  occurrence: ["occurred_at", "recorded_at", "kind", "amount", "note", "plan_effective_from", "unit", "plan_signature"],
   entry: ["titulo", "tipo", "valor_centavos", "data"],
 };
 
@@ -224,7 +225,7 @@ export class OfflineService {
       if (op.action === "update")
         return toTaskResponse(await this.tasks.update(id, p, user), user);
       if (op.action === "complete")
-        return toTaskResponse(await this.tasks.complete(id, user), user);
+        return toTaskResponse(await this.tasks.complete(id, user, p.occurred_at), user);
       if (op.action === "reopen")
         return toTaskResponse(await this.tasks.reopen(id, user), user);
       if (op.action === "pin") {
@@ -271,7 +272,7 @@ export class OfflineService {
     }
     if (op.domain === "occurrence") {
       if (op.action === "create")
-        return this.trackers.recordOccurrence(user, op.parentId!);
+        return this.trackers.recordOccurrence(user, op.parentId!, p);
       await this.trackers.deleteOccurrence(user, op.parentId!, id);
       return { deleted: true };
     }

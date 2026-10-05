@@ -6,6 +6,8 @@ import { GoalsService } from "../src/goals/goals.service";
 import { TASK_STATUS } from "../src/tasks/task.types";
 import { TasksService } from "../src/tasks/tasks.service";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { OrientationService } from "../src/orientation/orientation.service";
+import { FinancesService } from "../src/finances/finances.service";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -74,6 +76,33 @@ describeWithDatabase("Recurrence series persistence", () => {
       },
     });
   }
+
+  it("prepares today's recurrence for Home after a long absence with a bounded window and read-only orientation", async () => {
+    currentDate = "2026-10-05";
+    const calendar = new OperationalCalendarService();
+    jest.spyOn(calendar, "currentDateFor").mockImplementation(() => currentDate);
+    const orientation = new OrientationService(prisma, calendar, new FinancesService(prisma, calendar));
+    const series = await createSeries({
+      start_date: new Date("2025-01-01T00:00:00Z"),
+      recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6],
+    });
+    expect((await orientation.read(currentUser)).tarefas).toEqual([]);
+    expect(await prisma.missoes.count({ where: { recurrence_series_id: series.recurrence_series_id } })).toBe(0);
+    await tasksService.materializeRecurrences(currentUser);
+    const prepared = await orientation.read(currentUser);
+    expect(prepared.tarefas).toHaveLength(1);
+    expect(prepared.tarefas[0].recurrence?.series_id).toBe(series.recurrence_series_id);
+    const occurrences = await prisma.missoes.findMany({
+      where: { recurrence_series_id: series.recurrence_series_id }, orderBy: { prazo: "asc" },
+    });
+    expect(occurrences).toHaveLength(14);
+    expect(occurrences[0].prazo?.toISOString()).toBe("2026-10-05T00:00:00.000Z");
+    expect(occurrences.at(-1)?.prazo?.toISOString()).toBe("2026-10-18T00:00:00.000Z");
+    const auditCount = await prisma.auditoria_eventos.count({ where: { usuario_id: userId } });
+    await orientation.read(currentUser);
+    await tasksService.materializeRecurrences(currentUser);
+    expect(await prisma.auditoria_eventos.count({ where: { usuario_id: userId } })).toBe(auditCount);
+  });
 
   function createTask(recurrenceSeriesId: number | null, title: string) {
     return prisma.missoes.create({

@@ -95,9 +95,10 @@ export class TasksController {
   async completeTask(
     @Req() request: AuthenticatedRequest,
     @Param("id") id: string,
+    @Body() payload: { occurred_at?: unknown },
   ) {
     const user = request.currentUser!;
-    const task = await this.tasksService.complete(taskId(id), user);
+    const task = await this.tasksService.complete(taskId(id), user, payload?.occurred_at);
     return toTaskResponse(task, user);
   }
 

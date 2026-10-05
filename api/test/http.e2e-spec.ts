@@ -4,6 +4,7 @@ import request = require("supertest");
 
 import { AppModule } from "../src/app.module";
 import { hashPassword } from "../src/auth/password";
+import { TokenService } from "../src/auth/token.service";
 import { TASK_STATUS } from "../src/tasks/task.types";
 import { PrismaService } from "../src/prisma/prisma.service";
 
@@ -581,6 +582,9 @@ describe("HTTP application", () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
+    // Keep one server alive for concurrent refresh requests. Supertest's
+    // per-request automatic listen/close can terminate its sibling socket.
+    await app.listen(0, "127.0.0.1");
   });
 
   afterAll(async () => {
@@ -625,12 +629,16 @@ describe("HTTP application", () => {
     expect(credential).toMatch(/^[a-f0-9]{64}$/);
     expect(prisma.sessions.at(-1)?.tokenHash).not.toBe(credential);
 
-    const future = Date.now() + 5 * 24 * 60 * 60 * 1000;
-    const clock = jest.spyOn(Date, "now").mockReturnValue(future);
+    // Generate an expired JWT without changing the clock during HTTP I/O.
+    const tokens = app.get(TokenService);
+    const { sub, email, version } = tokens.decode(login.body.access_token);
+    const clock = jest.spyOn(Date, "now").mockReturnValue(Date.now() - 2 * 60 * 60 * 1000);
+    const expired = tokens.generate({ sub, email, version });
+    clock.mockRestore();
     try {
       await request(server)
         .get("/api/v2/usuarios/me")
-        .set("Authorization", `Bearer ${login.body.access_token}`)
+        .set("Authorization", `Bearer ${expired}`)
         .expect(401);
       const refreshed = await request(server)
         .post("/api/v2/auth/refresh")
@@ -878,6 +886,7 @@ describe("HTTP application", () => {
             "criado_em",
             "detalhes",
             "id",
+            "occurred_at",
             "tarefa_id",
             "usuario_id",
           ]);

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
 const theme = readFileSync(new URL("../src/theme/theme.css", import.meta.url), "utf8")
+const objectiveTheme = readFileSync(new URL("../src/features/objectives/objectives.css", import.meta.url), "utf8")
 const colors = Object.fromEntries(
   [...theme.matchAll(/--color-([\w-]+): light-dark\((#[\da-f]{6}), (#[\da-f]{6})\)/g)].map(
     ([, name, light, dark]) => [name, { light, dark }]
@@ -23,6 +24,15 @@ function contrast(foreground, background, mode) {
 }
 
 for (const mode of ["light", "dark"]) {
+  test(`${mode}: conexões do mapa preservam contraste mínimo de 3:1`, () => {
+    const local = Object.fromEntries([...objectiveTheme.matchAll(/--objective-([\w-]+): light-dark\((#[\da-f]{6}), (#[\da-f]{6})\)/g)]
+      .map(([, name, light, dark]) => [name, { light, dark }]))
+    const line = luminance(local.connector[mode])
+    const paper = luminance(local.paper[mode])
+    const ratio = (Math.max(line, paper) + 0.05) / (Math.min(line, paper) + 0.05)
+    assert.ok(ratio >= 3, `conector/fundo: ${ratio.toFixed(2)}:1`)
+  })
+
   test(`${mode}: textos e estados semânticos preservam contraste mínimo de 4.5:1`, () => {
     const pairs = [
       ["on-action", "action"],

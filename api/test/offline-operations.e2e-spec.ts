@@ -72,6 +72,120 @@ suite("offline operations on PostgreSQL", () => {
       .set("Authorization", `Bearer ${credential}`)
       .send(body);
 
+  it("assigns one confirmed version to every occurrence changed by recurring link and unlink", async () => {
+    const goal = await send(token, {
+      operationId: randomUUID(), domain: "goal", action: "create", payload: { titulo: "Versões da série" },
+    }).expect(201);
+    const created = await send(token, {
+      operationId: randomUUID(), domain: "task", action: "create",
+      payload: { titulo: "Contribuição recorrente", recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6], duration_type: "sem_termino" },
+    }).expect(201);
+    const seriesId = created.body.recurrence.series_id;
+    const before = "2026-01-01T00:00:00.000Z";
+    await prisma.missoes.updateMany({
+      where: { recurrence_series_id: seriesId }, data: { updated_at: new Date(before) },
+    });
+    const occurrences = await prisma.missoes.findMany({ where: { recurrence_series_id: seriesId } });
+    expect(occurrences.length).toBeGreaterThan(1);
+    const otherOccurrence = occurrences.find((item) => item.missao_id !== created.body.id)!;
+    const linked = await send(token, {
+      operationId: randomUUID(), domain: "task", action: "link", target: created.body.id,
+      baseUpdatedAt: before, payload: { objetivo_id: goal.body.id },
+    }).expect(201);
+    const linkedRows = await prisma.missoes.findMany({ where: { recurrence_series_id: seriesId } });
+    expect(linkedRows.every((item) => item.updated_at.toISOString() === linked.body.updated_at)).toBe(true);
+    expect(linked.body.updated_at).not.toBe(before);
+    await send(token, {
+      operationId: randomUUID(), domain: "task", action: "complete", target: otherOccurrence.missao_id,
+      baseUpdatedAt: before,
+    }).expect(409);
+    await send(token, {
+      operationId: randomUUID(), domain: "task", action: "complete", target: otherOccurrence.missao_id,
+      baseUpdatedAt: linked.body.updated_at,
+    }).expect(201);
+    const unlinked = await send(token, {
+      operationId: randomUUID(), domain: "task", action: "unlink", target: created.body.id,
+      baseUpdatedAt: linked.body.updated_at,
+    }).expect(201);
+    const unlinkedRows = await prisma.missoes.findMany({ where: { recurrence_series_id: seriesId } });
+    expect(unlinkedRows.every((item) => item.updated_at.toISOString() === unlinked.body.updated_at)).toBe(true);
+    expect(unlinkedRows.every((item) => item.objetivo_id === null)).toBe(true);
+    await send(token, {
+      operationId: randomUUID(), domain: "task", action: "update", target: created.body.id,
+      baseUpdatedAt: unlinked.body.updated_at, payload: { titulo: "Histórico preservado" },
+    }).expect(201);
+  });
+
+  it("switches an optional objective atomically for a recurring series and retains its execution/history", async () => {
+    const goals = await Promise.all(["Direção antiga", "Direção nova"].map((titulo) => send(token, {
+      operationId: randomUUID(), domain: "goal", action: "create", payload: { titulo },
+    }).expect(201)));
+    const created = await send(token, {
+      operationId: randomUUID(), domain: "task", action: "create",
+      payload: { titulo: "Mesma tarefa", objetivo_id: goals[0].body.id,
+        recurrence_weekdays: [0, 1, 2, 3, 4, 5, 6], duration_type: "sem_termino" },
+    }).expect(201);
+    const completed = await send(token, { operationId: randomUUID(), domain: "task", action: "complete",
+      target: created.body.id, baseUpdatedAt: created.body.updated_at }).expect(201);
+    const seriesId = created.body.recurrence.series_id;
+    const before = await prisma.missoes.count({ where: { recurrence_series_id: seriesId } });
+    const command = { operationId: randomUUID(), domain: "task", action: "link", target: created.body.id,
+      baseUpdatedAt: completed.body.updated_at, payload: { objetivo_id: goals[1].body.id } };
+    const switched = await send(token, command).expect(201);
+    expect((await send(token, command).expect(201)).body).toEqual(switched.body);
+    expect(switched.body).toMatchObject({ id: created.body.id, objetivo_id: goals[1].body.id,
+      status: "CONCLUIDA", completed_at: completed.body.completed_at });
+    expect(await prisma.missoes.count({ where: { recurrence_series_id: seriesId, objetivo_id: goals[1].body.id } })).toBe(before);
+    expect(await prisma.series_recorrencia.findUnique({ where: { recurrence_series_id: seriesId } }))
+      .toMatchObject({ objetivo_id: goals[1].body.id });
+    expect(await prisma.objetivos.findUnique({ where: { id: goals[1].body.id } })).toMatchObject({ status: "ativo" });
+    const unlinked = await send(token, { operationId: randomUUID(), domain: "task", action: "unlink",
+      target: created.body.id, baseUpdatedAt: switched.body.updated_at }).expect(201);
+    expect(unlinked.body.objetivo_id).toBeNull();
+    expect(await prisma.missoes.count({ where: { recurrence_series_id: seriesId, objetivo_id: null } })).toBe(before);
+    expect(await prisma.auditoria_eventos.count({ where: { missao_id: created.body.id, acao: "tarefa_concluida" } })).toBe(1);
+  });
+
+  it("preserves occurrence and completion event time across next-day synchronization and idempotent replay", async () => {
+    const occurredAt = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const task = await send(token, {
+      operationId: randomUUID(), domain: "task", action: "create",
+      payload: { titulo: "Concluída ontem offline" },
+    }).expect(201);
+    const complete = {
+      operationId: randomUUID(), domain: "task", action: "complete",
+      target: task.body.id, baseUpdatedAt: task.body.updated_at,
+      payload: { occurred_at: occurredAt },
+    };
+    const done = await send(token, complete).expect(201);
+    expect(done.body.completed_at).toBe(occurredAt);
+    expect((await send(token, complete).expect(201)).body).toEqual(done.body);
+    const audit = await prisma.auditoria_eventos.findFirstOrThrow({
+      where: { missao_id: task.body.id, acao: "tarefa_concluida" },
+    });
+    expect(audit.occurred_at?.toISOString()).toBe(occurredAt);
+    expect(audit.criado_em.getTime()).toBeGreaterThan(Date.parse(occurredAt));
+    const history = await request(app.getHttpServer())
+      .get(`/api/v2/tarefas/${task.body.id}/historico`)
+      .set("Authorization", `Bearer ${token}`).expect(200);
+    expect(history.body.find((event: { acao: string }) => event.acao === "tarefa_concluida"))
+      .toMatchObject({ occurred_at: occurredAt, criado_em: audit.criado_em.toISOString() });
+
+    const tracker = await send(token, {
+      operationId: randomUUID(), domain: "tracker", action: "create",
+      payload: { titulo: "Observação independente" },
+    }).expect(201);
+    const occurrence = {
+      operationId: randomUUID(), domain: "occurrence", action: "create",
+      parentId: tracker.body.id, payload: { occurred_at: occurredAt },
+    };
+    const first = await send(token, occurrence).expect(201);
+    expect(first.body.occurred_at).toBe(occurredAt);
+    expect(Date.parse(first.body.created_at)).toBeGreaterThan(Date.parse(occurredAt));
+    expect((await send(token, occurrence).expect(201)).body).toEqual(first.body);
+    expect(await prisma.ocorrencias_acompanhamento.count({ where: { acompanhamento_id: tracker.body.id } })).toBe(1);
+  });
+
   it("commits a normal task and its audit event once despite replay and concurrent requests", async () => {
     const operationId = randomUUID();
     const body = {

@@ -186,10 +186,10 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
           assert.ok(container.querySelector("main"), container.textContent)
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
-          const card = container.querySelector('[aria-labelledby="now-title"]')
+          const card = container.querySelector('.home-calm')
           assert.ok(card, container.textContent)
           assert.equal(card.querySelectorAll('a[href="/tarefas/foco"]').length, 1)
-          assert.match(card.textContent, /Entrar em Foco/)
+          assert.match(card.textContent, /Escolher um foco/)
         }
         const trigger =
           route === "/"

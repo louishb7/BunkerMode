@@ -27,8 +27,7 @@ export default function ObjectiveSummary({
       ? [
           allSignals.find((signal) => signal.kind === "task") ||
             allSignals.find(
-              (signal) =>
-                signal.kind === "tracker" && !signal.detail.startsWith("Nenhuma ocorrência")
+              (signal) => signal.kind === "tracker" && !signal.detail.startsWith("Nenhum")
             ) ||
             allSignals.find((signal) => signal.kind === "date"),
         ].filter(Boolean)

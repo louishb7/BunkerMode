@@ -80,7 +80,7 @@ function authHarness(api, stored = {}) {
         if (path.endsWith("offline/snapshots")) return { allowUserData: () => {}, clearUserData: async (id) => { clearedOwners.push(id) } }
         if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {}, subscribeApiRetry: (listener) => { retryListener = listener; return () => { retryListener = undefined } }, subscribeApiSuccess: () => () => {} }
         if (path.endsWith("focusSession")) return { focusStorageKey: (id) => `focus:${id}`, durationStorageKey: (id) => `duration:${id}` }
-        if (path.endsWith("offline/outbox")) return { activateOutbox: () => {}, syncOutbox: async () => {} }
+        if (path.endsWith("offline/outbox")) return { activateOutbox: () => {}, getReplayOwner: () => null, syncOutbox: async () => {} }
         if (path.endsWith("/session")) {
           return { TOKEN_KEY: "bunkermode_token", USER_KEY: "bunkermode_usuario", REFRESH_KEY: "bunkermode_refresh_token" }
         }
@@ -210,7 +210,7 @@ test("reconexão valida usuário atualizado depois de sessão local", async () =
   assert.equal(calls, 2)
 })
 
-test("401 após reconexão encerra sessão local e limpa snapshots do usuário", async () => {
+test("401 após reconexão encerra sessão local e preserva snapshots/outbox do usuário", async () => {
   let calls = 0
   const harness = authHarness({ getCurrentUser: async () => ++calls === 1
     ? { ok: false, status: 0, data: { message: "Sem conexão" } }
@@ -221,7 +221,31 @@ test("401 após reconexão encerra sessão local e limpa snapshots do usuário",
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(harness.render().authenticated, false)
   assert.equal(harness.localStorage.getItem("bunkermode_token"), null)
+  assert.deepEqual(harness.clearedOwners, [])
+})
+
+test("logout voluntário mantém descarte explícito; login de outra conta não apaga dados da anterior", async () => {
+  const newUser = { ...updatedUser, id: 2, usuario: "outra-conta" }
+  const harness = authHarness({ login: async () => ({ ok: true, data: { access_token: "outro-token", usuario: newUser } }) }, storedSession())
+  await harness.render().clearSession(true)
   assert.deepEqual(harness.clearedOwners, [1])
+  await harness.render().login({ email: "outra@bunker.local", senha: "senha" })
+  assert.equal(harness.render().user.id, 2)
+  assert.deepEqual(harness.clearedOwners, [1])
+})
+
+test("invalidação preserva dados; mesma conta pode voltar e outra conta só ativa seu próprio dono", async () => {
+  let currentUser = updatedUser
+  const harness = authHarness({ login: async () => ({ ok: true, data: { access_token: "novo-token", usuario: currentUser } }) }, storedSession())
+  await harness.render().clearSession()
+  assert.deepEqual(harness.clearedOwners, [])
+  await harness.render().login({ email: "mesma@bunker.local", senha: "senha" })
+  assert.equal(harness.render().user.id, 1)
+  await harness.render().clearSession()
+  currentUser = { ...updatedUser, id: 2 }
+  await harness.render().login({ email: "outra@bunker.local", senha: "senha" })
+  assert.equal(harness.render().user.id, 2)
+  assert.deepEqual(harness.clearedOwners, [])
 })
 
 test("logout durante restore impede resposta antiga de ressuscitar a sessão", async () => {

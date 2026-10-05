@@ -17,6 +17,7 @@ import {
   enqueueOperation,
   projectGoals,
   projectTasks,
+  projectTrackers,
   subscribeOutbox,
 } from "../../../offline/outbox"
 import type { OutboxOperation } from "../../../offline/snapshots"
@@ -93,7 +94,18 @@ export default function HomePage({ token, user, onUnauthorized }) {
         direcoes: projectGoals(
           officialData.direcoes,
           operations.filter((item) => item.action !== "create")
-        ).filter((goal) => goal.status === "ativo"),
+        )
+          .filter((goal) => goal.status === "ativo")
+          .map((goal) => ({
+            ...goal,
+            tasks: projectTasks(
+              goal.tasks,
+              operations.filter((item) => item.action !== "create")
+            ).filter((task) => task.objetivo_id === undefined || task.objetivo_id === goal.id),
+            trackers: projectTrackers(goal.trackers, operations).filter(
+              (tracker) => tracker.objetivo_id === undefined || tracker.objetivo_id === goal.id
+            ),
+          })),
       }
     : null
   const [error, setError] = useState("")
@@ -104,7 +116,18 @@ export default function HomePage({ token, user, onUnauthorized }) {
   )
   const refresh = useCallback(async () => {
     const current = ++version.current
-    const result = await api.getOrientation(token)
+    let preparationError = ""
+    if (tasksEnabled) {
+      const prepared = await api.materializeTaskRecurrences(token)
+      if (current !== version.current || onUnauthorized?.(prepared)) return
+      if (!prepared.ok)
+        preparationError = getErrorMessage(
+          prepared,
+          "Não foi possível preparar as tarefas de hoje."
+        )
+    }
+    // A preparação é uma escrita explícita. Sua falha exclui Tarefas desta leitura.
+    const result = await api.getOrientation(token, tasksEnabled && !preparationError)
     if (current !== version.current || onUnauthorized?.(result)) return
     if (!result.ok) {
       setError(getErrorMessage(result, "Não foi possível carregar seu Bunker."))
@@ -114,15 +137,22 @@ export default function HomePage({ token, user, onUnauthorized }) {
       setError("Resposta da orientação inválida.")
       return
     }
+    const response = preparationError
+      ? {
+          ...result.data,
+          tarefas: [],
+          falhas: { ...result.data.falhas, tarefas: preparationError },
+        }
+      : result.data
     const next = {
       key,
       data: {
-        ...result.data,
+        ...response,
         tarefas: !tasksEnabled
           ? []
-          : result.data.falhas?.tarefas && getOrientationCache()?.key === key
+          : response.falhas?.tarefas && getOrientationCache()?.key === key
             ? getOrientationCache().data.tarefas
-            : result.data.tarefas,
+            : response.tarefas,
         financeiro: !financesEnabled
           ? null
           : result.data.falhas?.recursos && getOrientationCache()?.key === key
@@ -232,7 +262,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
         !error && <LoadingLines label="Carregando seu Bunker" />
       ) : (
         <>
-          {tasksEnabled && (
+          {tasksEnabled && (focus || data.tarefas.length > 0 || data.falhas?.tarefas) && (
             <section className="home-now" aria-labelledby="now-title">
               <header className="section-heading">
                 <h2 id="now-title">Agora</h2>
@@ -243,7 +273,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
               </header>
               {data.falhas?.tarefas && (
                 <p role="status" className="text-sm text-danger">
-                  Não foi possível consultar as tarefas.{" "}
+                  {String(data.falhas.tarefas)}{" "}
                   <Button variant="ghost" onClick={refresh}>
                     Tentar novamente
                   </Button>
@@ -278,19 +308,13 @@ export default function HomePage({ token, user, onUnauthorized }) {
                     </li>
                   ))}
                 </ol>
-              ) : (
-                !data.falhas?.tarefas && (
-                  <p className="empty-copy">
-                    O dia está aberto. Escolha uma atividade para o próximo bloco de foco.
-                  </p>
-                )
-              )}
+              ) : null}
               <Link to="/tarefas" className="text-link">
                 Ver o dia <ArrowUpRight size={15} />
               </Link>
             </section>
           )}
-          {objectivesEnabled && (
+          {objectivesEnabled && (data.direcoes.length > 0 || data.falhas?.direcoes) && (
             <section className="home-directions" aria-labelledby="directions-title">
               <header className="section-heading">
                 <h2 id="directions-title">Direções</h2>
@@ -341,14 +365,7 @@ export default function HomePage({ token, user, onUnauthorized }) {
                     </li>
                   ))}
                 </ol>
-              ) : (
-                !data.falhas?.direcoes && (
-                  <p className="empty-copy">
-                    Nenhuma direção ativa. Seus objetivos pausados e encerrados continuam em
-                    Objetivos.
-                  </p>
-                )
-              )}
+              ) : null}
             </section>
           )}
           {financesEnabled && data.falhas?.recursos && (
@@ -369,11 +386,19 @@ export default function HomePage({ token, user, onUnauthorized }) {
               </Link>
             </section>
           )}
-          {!tasksEnabled && !objectivesEnabled && !data.financeiro && (
-            <p className="empty-copy">
-              Nenhum estado pede atenção agora. Suas ferramentas estão na navegação.
-            </p>
-          )}
+          {!focus &&
+            !data.tarefas.length &&
+            !data.financeiro &&
+            !Object.keys(data.falhas ?? {}).length && (
+              <div className="home-calm">
+                <p className="m-0 text-sm text-text-secondary">Nada pede atenção agora.</p>
+                {tasksEnabled && (
+                  <Link className="text-link" to="/tarefas/foco">
+                    Escolher um foco <ArrowUpRight size={15} />
+                  </Link>
+                )}
+              </div>
+            )}
         </>
       )}
     </section>

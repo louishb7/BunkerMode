@@ -15,6 +15,7 @@ export default function TaskCard({
   onEdit = undefined,
   onReopen = undefined,
   onTogglePin = undefined,
+  onChangeObjective = undefined,
   pinning = false,
   reopening = false,
   selectedDate = undefined,
@@ -52,6 +53,14 @@ export default function TaskCard({
   }, [compactCompleted, detailsOpen, focus, task?.instrucao])
   const administrative = [
     ...(permissions.can_edit && onEdit ? [{ label: "Editar", onSelect: onEdit }] : []),
+    ...(onChangeObjective
+      ? [
+          {
+            label: task.objetivo_id == null ? "Vincular objetivo" : "Trocar ou remover objetivo",
+            onSelect: onChangeObjective,
+          },
+        ]
+      : []),
     ...(permissions.can_pin && onTogglePin
       ? [
           {

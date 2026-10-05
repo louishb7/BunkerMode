@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { ArrowDownLeft, ArrowUpRight, ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import Button from "../../../components/ui/Button"
 import PageHeader from "../../../components/ui/PageHeader"
@@ -37,17 +37,24 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
   const [form, setForm] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [historyPage, setHistoryPage] = useState(1)
+  const formDirty = useRef(false)
   const data = finance.data
   const pageCount = Math.max(1, Math.ceil((data?.lancamentos.length ?? 0) / 8))
   const page = Math.min(historyPage, pageCount)
   const movements = data?.lancamentos.slice((page - 1) * 8, page * 8) ?? []
   function selectMonth(value) {
     setMonth(value)
-    setHistoryPage(1)
+  }
+  function closeForm() {
+    if (finance.busy) return
+    if (formDirty.current && !window.confirm("Descartar as alterações deste movimento?")) return
+    formDirty.current = false
+    setForm(null)
   }
   async function save(payload, id) {
     if (await finance.saveEntry(payload, id)) {
       setForm(null)
+      formDirty.current = false
       setHistoryPage(1)
     }
   }
@@ -66,54 +73,67 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           </Button>
         </div>
       )}
-      <div className="finance-toolbar">
-        <div className="finance-month" aria-label="Período financeiro">
-          <button
-            type="button"
-            aria-label="Mês anterior"
-            onClick={() => selectMonth(monthOffset(month, -1))}
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <strong>{monthLabel(month)}</strong>
-          <button
-            type="button"
-            aria-label="Próximo mês"
-            disabled={month >= currentMonth}
-            onClick={() => selectMonth(monthOffset(month, 1))}
-          >
-            <ChevronRight size={20} />
-          </button>
-          {month !== currentMonth && (
-            <button
-              type="button"
-              className="finance-current"
-              onClick={() => selectMonth(currentMonth)}
-            >
-              Mês atual
-            </button>
+      <section className="finance-state" aria-labelledby="finance-global-title">
+        <div>
+          <h2 id="finance-global-title">Situação registrada</h2>
+          <p className="finance-history-note">Saldo global · Todos os períodos</p>
+          {data && (
+            <p className={`finance-result ${data.saldo_centavos < 0 ? "text-danger" : ""}`}>
+              {money(data.saldo_centavos)}
+            </p>
           )}
         </div>
-        <Button onClick={() => setForm({ item: null })}>
+        <Button
+          onClick={() => {
+            formDirty.current = false
+            setForm({ item: null })
+          }}
+        >
           <Plus size={17} aria-hidden="true" /> Movimento
         </Button>
-      </div>
+      </section>
       {!data ? (
         finance.loading ? (
           <LoadingLines label="Carregando finanças" />
         ) : null
       ) : (
         <>
-          <section className="finance-state" aria-label="Resultado financeiro do mês">
-            <p className="eyebrow">Saldo registrado</p>
-            <p className={`finance-result ${data.saldo_centavos < 0 ? "text-danger" : ""}`}>
-              {money(data.saldo_centavos)}
-            </p>
-            <p className="text-sm text-text-secondary">Saldo de todos os movimentos registrados.</p>
-            <p className="text-sm text-text-secondary">
-              Resultado do mês: {money(data.resultado_centavos)}
-            </p>
+          <section className="finance-month-section" aria-labelledby="finance-month-title">
+            <div className="finance-toolbar">
+              <h2 id="finance-month-title">Resumo do mês</h2>
+              <div className="finance-month" aria-label="Período financeiro">
+                <button
+                  type="button"
+                  aria-label="Mês anterior"
+                  onClick={() => selectMonth(monthOffset(month, -1))}
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <strong>{monthLabel(month)}</strong>
+                <button
+                  type="button"
+                  aria-label="Próximo mês"
+                  disabled={month >= currentMonth}
+                  onClick={() => selectMonth(monthOffset(month, 1))}
+                >
+                  <ChevronRight size={20} />
+                </button>
+                {month !== currentMonth && (
+                  <button
+                    type="button"
+                    className="finance-current"
+                    onClick={() => selectMonth(currentMonth)}
+                  >
+                    Mês atual
+                  </button>
+                )}
+              </div>
+            </div>
             <dl className="finance-flow">
+              <div>
+                <dt>Resultado do mês</dt>
+                <dd>{money(data.resultado_centavos)}</dd>
+              </div>
               <div>
                 <dt>Entradas</dt>
                 <dd>{money(data.receitas_centavos)}</dd>
@@ -123,8 +143,20 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
                 <dd>{money(data.despesas_centavos)}</dd>
               </div>
             </dl>
+            <FinanceChart
+              key={month}
+              points={data.serie_diaria}
+              today={today}
+              movementCount={
+                data.lancamentos.filter(
+                  (entry) =>
+                    entry.data.startsWith(month) &&
+                    ["receita", "despesa"].includes(entry.tipo) &&
+                    !["failed", "conflict"].includes(entry.syncStatus)
+                ).length
+              }
+            />
           </section>
-          <FinanceChart key={month} points={data.serie_diaria} today={today} />
           <section className="finance-movements" aria-labelledby="finance-movements-title">
             <h2 id="finance-movements-title">Histórico de movimentos</h2>
             <p className="finance-history-note">
@@ -159,7 +191,13 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
                         label={`Ações do movimento: ${entry.titulo}`}
                         disabled={finance.busy}
                         items={[
-                          { label: "Editar movimento", onSelect: () => setForm({ item: entry }) },
+                          {
+                            label: "Editar movimento",
+                            onSelect: () => {
+                              formDirty.current = false
+                              setForm({ item: entry })
+                            },
+                          },
                           {
                             label: "Excluir movimento",
                             onSelect: () => setDeleting(entry),
@@ -199,18 +237,27 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
       {form && (
         <Dialog
           title={form.item ? "Editar movimento" : "Novo movimento"}
-          onClose={() => setForm(null)}
+          onClose={closeForm}
           closeOnBackdrop={false}
         >
-          <FinanceForm
-            key={form.item?.id ?? "new"}
-            item={form.item}
-            today={today}
-            busy={finance.busy}
-            error={finance.error}
-            onSave={save}
-            onCancel={() => setForm(null)}
-          />
+          <div
+            onInputCapture={() => {
+              formDirty.current = true
+            }}
+            onChangeCapture={() => {
+              formDirty.current = true
+            }}
+          >
+            <FinanceForm
+              key={form.item?.id ?? "new"}
+              item={form.item}
+              today={today}
+              busy={finance.busy}
+              error={finance.error}
+              onSave={save}
+              onCancel={closeForm}
+            />
+          </div>
         </Dialog>
       )}
       {deleting && (

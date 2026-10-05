@@ -15,6 +15,11 @@ export function SyncStatusProvider({ children }: { children: React.ReactNode }) 
   const online = useOnlineStatus()
   const availability = useApiAvailability()
   const replayOwner = useSyncExternalStore(subscribeReplay, getReplayOwner)
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   const [outbox, setOutbox] = useState<{ ownerId?: number; items: OutboxOperation[] }>({
     items: [],
   })
@@ -28,6 +33,7 @@ export function SyncStatusProvider({ children }: { children: React.ReactNode }) 
     online,
     availability,
     replaying: !!ownerId && replayOwner === ownerId,
+    now,
   })
   return (
     <SyncStatusContext.Provider value={{ ...presentation, items }}>

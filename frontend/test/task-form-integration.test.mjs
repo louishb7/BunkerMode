@@ -106,3 +106,25 @@ test("recorrência independente envia dias e término por data", () => {
   assert.equal(payload.recurrence_end_date, "30-09-2026")
   assert.equal(JSON.stringify(payload.recurrence_weekdays), "[0,1,2,3,4,5,6]")
 })
+
+test("Objetivo é opcional na criação e um vínculo escolhido usa a tarefa real", () => {
+  let payload
+  const render = formHarness({})
+  const props = { currentUser: { id: 7 }, objectivesAvailable: true,
+    objectiveOptions: [{ id: 9, titulo: "Ler mais", status: "ativo" }],
+    onCreate: (data) => { payload = data } }
+  render(props).effects()
+  assert.equal(findField(render(props).tree, "objetivo_id").props.value, "")
+  render(props).tree.props.onSubmit({ preventDefault() {} })
+  assert.equal(payload.objetivo_id, null)
+  findField(render(props).tree, "objetivo_id").props.onChange({ target: { name: "objetivo_id", value: "9" } })
+  render(props).tree.props.onSubmit({ preventDefault() {} })
+  assert.equal(payload.objetivo_id, 9)
+  assert.equal(payload.responsavel_id, 7)
+  findField(render(props).tree, "repeat_type").props.onChange({ target: { value: "todos_dias" } })
+  render(props).tree.props.onSubmit({ preventDefault() {} })
+  assert.equal(payload.objetivo_id, 9)
+  assert.equal(payload.duration_type, "sem_termino")
+  assert.equal(JSON.stringify(payload.recurrence_weekdays), "[0,1,2,3,4,5,6]")
+  assert.match(JSON.stringify(render(props).tree), /série inteira/)
+})

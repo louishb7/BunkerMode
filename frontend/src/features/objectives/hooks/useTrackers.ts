@@ -140,8 +140,8 @@ export function useTrackers({ token, ownerId, onUnauthorized, enabled = true }) 
     queue("tracker", "update", payload, tracker.id, tracker.updated_at)
   const deleteTracker = (tracker: Tracker) =>
     queue("tracker", "delete", {}, tracker.id, tracker.updated_at)
-  const recordOccurrence = (tracker: Tracker) =>
-    queue("occurrence", "create", {}, undefined, undefined, tracker.id)
+  const recordOccurrence = (tracker: Tracker, payload: Record<string, unknown> = {}) =>
+    queue("occurrence", "create", payload, undefined, undefined, tracker.id)
   const deleteOccurrence = (tracker: Tracker, occurrence: TrackerOccurrence) =>
     queue("occurrence", "delete", {}, occurrence.id, undefined, tracker.id)
   return {

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { registerSW } from "virtual:pwa-register"
 import { useSyncStatus } from "../../context/SyncStatusContext"
+import { dismissInstall, installDismissed, isIosSafari, isMobileInstallDevice } from "../../pwa/installPolicy"
 
 type InstallPrompt = Event & {
   prompt: () => Promise<void>
@@ -20,16 +21,11 @@ function standalone() {
   )
 }
 
-function iosSafari() {
-  const ua = navigator.userAgent
-  return /iPhone|iPad|iPod/.test(ua) && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua)
-}
-
 export default function PwaBanners() {
   const sync = useSyncStatus()
   const [installable, setInstallable] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
-  const [dismissed, setDismissed] = useState(inviteDismissed)
+  const [dismissed, setDismissed] = useState(() => inviteDismissed || installDismissed(window.localStorage))
   const [needRefresh, setNeedRefresh] = useState(false)
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [updateSW, setUpdateSW] = useState<(() => Promise<void>) | null>(null)
@@ -38,6 +34,7 @@ export default function PwaBanners() {
     const update = registerSW({ onNeedRefresh: () => setNeedRefresh(true) })
     setUpdateSW(() => update)
     const onBeforeInstall = (event: Event) => {
+      if (!isMobileInstallDevice(navigator) || standalone()) return
       event.preventDefault()
       installPrompt = event as InstallPrompt
       setInstallable(true)
@@ -54,7 +51,7 @@ export default function PwaBanners() {
     }
   }, [])
 
-  const showInstall = !standalone() && !dismissed && !promptUsed && (installable || iosSafari())
+  const showInstall = isMobileInstallDevice(navigator) && !standalone() && !dismissed && !promptUsed && (installable || isIosSafari(navigator))
   return (
     <div className="relative z-20 bg-peripheral text-text-primary">
       {sync.message && (
@@ -98,7 +95,7 @@ export default function PwaBanners() {
           <button
             className="shrink-0 rounded-control bg-action px-3 py-2 text-xs font-semibold text-on-action"
             onClick={async () => {
-              if (iosSafari()) {
+              if (isIosSafari(navigator)) {
                 setShowInstructions(true)
               } else if (installPrompt) {
                 const prompt = installPrompt
@@ -114,9 +111,10 @@ export default function PwaBanners() {
           </button>
           <button
             aria-label="Fechar convite de instalação"
-            className="grid size-9 shrink-0 place-items-center rounded-control text-text-secondary"
+            className="grid size-11 shrink-0 place-items-center rounded-control text-text-secondary"
             onClick={() => {
               inviteDismissed = true
+              dismissInstall(window.localStorage)
               setDismissed(true)
             }}
           >

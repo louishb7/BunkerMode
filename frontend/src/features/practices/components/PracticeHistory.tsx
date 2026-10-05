@@ -3,6 +3,7 @@ import { Star } from "lucide-react"
 import Button from "../../../components/ui/Button"
 import type { Tracker, TrackerOccurrence } from "../../../types/trackerContract"
 import { derivePractice, practicePlanLabel } from "../practiceDomain"
+import { formatPracticeOccurrence } from "../dateTime"
 
 export default function PracticeHistory({
   tracker,
@@ -122,9 +123,10 @@ export default function PracticeHistory({
                       : ""}
                   </strong>
                   <span>
-                    {new Date(record.occurred_at).toLocaleString("pt-BR", {
-                      timeZone: tracker.planos?.[0]?.timezone ?? timezone,
-                    })}
+                    {formatPracticeOccurrence(
+                      record.occurred_at,
+                      tracker.planos?.[0]?.timezone ?? timezone,
+                    )}
                   </span>
                   {record.note && (
                     <p className="my-1 whitespace-pre-line break-words text-text-secondary">

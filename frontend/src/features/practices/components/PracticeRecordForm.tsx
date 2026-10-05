@@ -9,6 +9,7 @@ import {
   practiceLocalTime,
   practicePlanSignature,
 } from "../practiceDomain"
+import { formatPracticeLocalDateTime } from "../dateTime"
 
 const fieldClass =
   "min-h-11 w-full rounded-control border border-control-border bg-surface px-3 py-2 text-sm text-text-primary focus-visible:outline-2 focus-visible:outline-focus-ring"
@@ -118,20 +119,29 @@ export default function PracticeRecordForm({
       )}
       <label className="grid gap-2 text-sm">
         {kind === "confirmacao" ? "Dia do período observado" : "Quando aconteceu?"}
-        <input
-          name="occurred_at"
-          type="datetime-local"
-          className={fieldClass}
-          required
-          value={when}
-          onChange={(event) => setWhen(event.target.value)}
-        />
+        <div
+          className={`${fieldClass} relative flex items-center focus-within:outline-2 focus-within:outline-focus-ring`}
+        >
+          <span aria-hidden="true" className="relative z-0 text-sm text-text-primary">
+            {formatPracticeLocalDateTime(when)}
+          </span>
+          <input
+            name="occurred_at"
+            type="datetime-local"
+            lang="pt-BR"
+            aria-label={`Quando aconteceu? ${formatPracticeLocalDateTime(when)}`}
+            className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 focus:outline-none"
+            required
+            value={when}
+            onChange={(event) => setWhen(event.target.value)}
+          />
+        </div>
       </label>
       <p className="m-0 text-xs text-text-secondary">
         Calendário: {zone}.{" "}
         {kind === "confirmacao"
           ? "Confirme apenas se observou todo o dia ou semana. Dias sem informação continuam desconhecidos."
-          : "A data do evento permanece no histórico, mesmo ao sincronizar depois."}
+          : "Formato exibido: dia/mês/ano, 24 horas. A data do evento permanece no histórico, mesmo ao sincronizar depois."}
       </p>
       {free && (
         <label className="flex min-h-11 items-center gap-2 text-sm">

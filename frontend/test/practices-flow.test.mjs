@@ -214,6 +214,24 @@ test("registro parcial usa unidade e meta da data histórica, mesmo após mudar 
     await view.close()
   }
 })
+test("data do registro permanece explícita em dia/mês/ano e 24 horas", async () => {
+  const view = await mount(RecordForm, {
+    tracker: tracker({ planos: [plan({ effective_from: "2026-01-01" })] }),
+    onSubmit() {},
+    onCancel() {},
+  })
+  try {
+    await input(view.container.querySelector("input[name=occurred_at]"), "2026-10-05T17:07")
+    assert.equal(
+      view.container.querySelector("input[name=occurred_at]").getAttribute("lang"),
+      "pt-BR",
+    )
+    assert.match(view.container.textContent, /05\/10\/2026, 17:07/)
+    assert.doesNotMatch(view.container.textContent, /10\/05\/2026, 05:07 PM/)
+  } finally {
+    await view.close()
+  }
+})
 test("registro livre detalhado aceita quantidade e unidade sem meta", async () => {
   let payload
   const view = await mount(RecordForm, {
@@ -303,6 +321,19 @@ test("histórico mantém parciais, todas as páginas, planos e marcos factuais s
     await click(button("Próxima", view.container))
     assert.equal(view.container.querySelectorAll(".objective-occurrences li").length, 2)
     assert.match(view.container.textContent, /2 de 2/)
+  } finally {
+    await view.close()
+  }
+})
+test("histórico converte o instante para America/Recife em formato de 24 horas", async () => {
+  const view = await mount(History, {
+    tracker: tracker({
+      ocorrencias: [{ id: 1, occurred_at: "2026-10-05T20:07:00.000Z", kind: "atividade" }],
+    }),
+    timezone: "America/Recife",
+  })
+  try {
+    assert.match(view.container.textContent, /05\/10\/2026, 17:07/)
   } finally {
     await view.close()
   }

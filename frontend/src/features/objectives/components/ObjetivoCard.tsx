@@ -95,6 +95,7 @@ export default function ObjetivoCard({
         <ActionsMenu
           label={`Ações do objetivo: ${objetivo.titulo}`}
           disabled={loading}
+          triggerClassName="!size-12"
           items={menuItems}
         />
       </div>

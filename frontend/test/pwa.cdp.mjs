@@ -330,7 +330,10 @@ async function main() {
       await until(() => evaluate(`location.pathname === ${JSON.stringify(path)}`), `navegação SPA ${path}`)
     }
     const visible = async (value) => {
-      try { await until(() => evaluate(`document.body.innerText.includes(${JSON.stringify(value)})`), value) }
+      try {
+        const found = await evaluate(`new Promise(resolve=>{const contains=()=>document.body.innerText.includes(${JSON.stringify(value)});if(contains())return resolve(true);const observer=new MutationObserver(()=>{if(contains()){observer.disconnect();clearTimeout(timer);resolve(true)}});observer.observe(document.body,{childList:true,subtree:true,characterData:true});const timer=setTimeout(()=>{observer.disconnect();resolve(false)},15000)})`)
+        if (!found) throw new Error("texto não apareceu")
+      }
       catch (error) { throw new Error(`${error.message}; tela: ${await evaluate("document.body.innerText.slice(0, 500)")}`) }
     }
     const auditLayout = async (surface) => {
@@ -426,12 +429,20 @@ async function main() {
     if (process.env.BUNKER_GATE === "2") return
     await navigate("/financas")
     await visible("1,00")
+    const financeState = await evaluate(`(()=>{const card=document.querySelector('.finance-state'),content=card?.firstElementChild,button=card?.querySelector('button');const rect=x=>{const r=x.getBoundingClientRect();return{left:r.left,right:r.right}};return{hasTitle:Boolean(card?.querySelector('h2')),label:card?.getAttribute('aria-label'),align:getComputedStyle(card).textAlign,card:rect(card),content:rect(content),button:rect(button)}})()`)
+    assert.equal(financeState.hasTitle, false, "card financeiro não deve exibir o título anterior")
+    assert.equal(financeState.label, "Saldo global")
+    assert.equal(financeState.align, "center")
+    assert.ok(Math.abs((financeState.content.left + financeState.content.right) / 2 - (financeState.card.left + financeState.card.right) / 2) < 2)
+    assert.ok(Math.abs((financeState.button.left + financeState.button.right) / 2 - (financeState.card.left + financeState.card.right) / 2) < 2)
     await evaluate("document.querySelector('button[aria-label=\"Mês anterior\"]')?.click()")
     await until(() => evaluate("document.body.innerText.includes('Mês atual')"), "mês financeiro anterior")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1 && x.key.startsWith('finances:')).length>=2)})})()"), "snapshots de dois meses")
     await navigate("/")
     await visible("Objetivo 1")
     assert.equal(await evaluate("location.pathname"), "/objetivos")
+    const objectiveMenuTarget = await evaluate(`(()=>{const button=document.querySelector('.objective-workspace-toolbar button');if(!button)return null;const r=button.getBoundingClientRect(),target=document.elementFromPoint(r.right-8,r.bottom-8);return{width:r.width,height:r.height,hit:target===button||button.contains(target)}})()`)
+    assert.ok(objectiveMenuTarget?.width >= 48 && objectiveMenuTarget?.height >= 48 && objectiveMenuTarget.hit, `menu de Objetivos precisa ter alvo de 48×48 px sem sobreposição: ${JSON.stringify(objectiveMenuTarget)}`)
     assert.equal(await evaluate("[...document.querySelectorAll('nav a')].some(a=>a.textContent.trim()==='Início')"), false)
     await auditLayout("objectives-entry")
     console.log("Objetivos como entrada: raiz redireciona, Home ausente; 320–1440px, light/dark OK")
@@ -447,12 +458,15 @@ async function main() {
     assert.equal(await evaluate("location.pathname"), "/objetivos")
     console.log("Bootstrap real: /me em 6,5s permanece em loading, conclui online sem timeout/aviso global OK")
     meFailures = 1
+    // Mantém a resposta de recuperação em voo para que o estado local seja observável no E2E.
+    meDelayMs = 650
     await navigate("/")
     await visible("Não foi possível confirmar a sessão. Tentando novamente.")
     assert.equal(await evaluate("document.body.innerText.includes('Serviço temporariamente indisponível')"), false)
     await visible("Novo objetivo")
     await captureState("session-revalidation")
     await until(() => evaluate("!document.body.innerText.includes('Não foi possível confirmar a sessão.')"), "revalidação automática sem foco/clique", 20000)
+    meDelayMs = 0
     await visible("Objetivo 1")
     console.log("Sessão: /me 503 isolado com readiness 200 mantém credenciais e recupera autonomamente sem clique OK")
     await clickAppLink("/tarefas")

@@ -14,10 +14,12 @@ export default function ActionsMenu({
   label,
   items,
   disabled = false,
+  triggerClassName = "",
 }: {
   label: string
   items: MenuItem[]
   disabled?: boolean
+  triggerClassName?: string
 }) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
@@ -81,6 +83,7 @@ export default function ActionsMenu({
         disabled={disabled}
         size="icon"
         variant="ghost"
+        className={triggerClassName}
         onClick={() => (open ? close(true) : show())}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {

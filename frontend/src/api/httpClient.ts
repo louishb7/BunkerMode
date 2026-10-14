@@ -166,6 +166,10 @@ export function checkApiHealth(): Promise<boolean> {
   return healthPromise
 }
 
+function checkApiHealthInBackground() {
+  void checkApiHealth().catch(() => {})
+}
+
 export function hasRefreshSession() {
   return Boolean(window.localStorage.getItem(REFRESH_KEY))
 }
@@ -420,7 +424,7 @@ async function performRequest<T>(
     recordRequest({ path, method, status, durationMs: Date.now() - started, availabilityBefore })
     recorded = true
     if (response.status >= 500 || response.status === 408 || getApiAvailability() !== "available") {
-      await checkApiHealth()
+      checkApiHealthInBackground()
       if (!authenticationAction && expectedOwner !== currentSessionOwner()) return sessionChanged()
     }
     if (response.ok && recover && !authenticationAction && !hasRefreshSession()) {
@@ -477,7 +481,7 @@ async function performRequest<T>(
       availabilityBefore,
     })
     recorded = true
-    await checkApiHealth()
+    checkApiHealthInBackground()
     if (!authenticationAction && expectedOwner !== currentSessionOwner()) return sessionChanged()
     if (failure === "timeout") {
       return {

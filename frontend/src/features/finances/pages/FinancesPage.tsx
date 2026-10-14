@@ -73,9 +73,8 @@ export default function FinancesPage({ token, user, onUnauthorized }) {
           </Button>
         </div>
       )}
-      <section className="finance-state" aria-labelledby="finance-global-title">
+      <section className="finance-state" aria-label="Saldo global">
         <div>
-          <h2 id="finance-global-title">Situação registrada</h2>
           <p className="finance-history-note">Saldo global · Todos os períodos</p>
           {data && (
             <p className={`finance-result ${data.saldo_centavos < 0 ? "text-danger" : ""}`}>

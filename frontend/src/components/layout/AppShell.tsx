@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { Wallet, Home, ListTodo, Compass, Settings, LogOut, Menu, X } from "lucide-react"
+import { Wallet, ListTodo, Compass, Settings, LogOut, Menu, X } from "lucide-react"
 import Brand from "../ui/Brand"
 import OutboxNotice from "../system/OutboxNotice"
 import { NavLink } from "react-router-dom"
@@ -15,11 +15,8 @@ const focusableSelector = [
 ].join(",")
 
 function NavigationLinks({ onNavigate = undefined, user }) {
-  const items = [
-    { key: "home", label: "Início", route: APP_ROUTES.ROOT },
-    ...getEnabledModules(user),
-  ]
-  const icons = { home: Home, tasks: ListTodo, objectives: Compass, finances: Wallet }
+  const items = getEnabledModules(user)
+  const icons = { tasks: ListTodo, objectives: Compass, finances: Wallet }
   return (
     <nav aria-label="Navegação principal" className="grid gap-2">
       {items.map((item) => {
@@ -28,7 +25,6 @@ function NavigationLinks({ onNavigate = undefined, user }) {
           <NavLink
             key={item.key}
             to={item.route}
-            end={item.route === APP_ROUTES.ROOT}
             onClick={onNavigate}
             className={({ isActive }) =>
               `flex min-h-12 items-center gap-3 rounded-xl px-4 text-sm no-underline transition-colors motion-reduce:transition-none ${isActive ? "bg-surface font-semibold text-text-primary shadow-surface ring-1 ring-border" : "font-medium text-text-secondary hover:bg-surface-subtle hover:text-text-primary"}`

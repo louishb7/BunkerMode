@@ -28,6 +28,7 @@ export function useTaskBoard({
   token,
   timezone,
   ownerId,
+  sessionMode = "online",
 }) {
   const [tasks, setTasks] = useState(() =>
     boardMode === "focus" ? (getOverview(ownerId).daily ?? []) : (getOverview(ownerId).all ?? [])
@@ -73,14 +74,14 @@ export function useTaskBoard({
 
   const loadTasksBoard = useCallback(
     async (successMessage = "") => {
-      if (!token || getApiAvailability() === "unavailable") {
+      if (!token || sessionMode !== "online" || getApiAvailability() === "unavailable") {
         return
       }
 
       const requestId = loadRequestRef.current + 1
       loadRequestRef.current = requestId
       setTaskLoading(true)
-      const materializationResult = await api.materializeTaskRecurrences(token)
+      const materializationResult = await api.materializeTaskRecurrences(token, timezone)
       if (requestId !== loadRequestRef.current) {
         return false
       }
@@ -128,12 +129,12 @@ export function useTaskBoard({
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token, ownerId]
+    [onUnauthorized, token, ownerId, timezone, sessionMode]
   )
 
   const loadFocusBoard = useCallback(
     async (successMessage = "") => {
-      if (!token || getApiAvailability() === "unavailable") {
+      if (!token || sessionMode !== "online" || getApiAvailability() === "unavailable") {
         return
       }
 
@@ -141,7 +142,7 @@ export function useTaskBoard({
       loadRequestRef.current = requestId
       setTaskLoading(true)
 
-      const materializationResult = await api.materializeTaskRecurrences(token)
+      const materializationResult = await api.materializeTaskRecurrences(token, timezone)
       if (requestId !== loadRequestRef.current) {
         return false
       }
@@ -191,7 +192,7 @@ export function useTaskBoard({
       setStatus(successMessage ? { type: "success", message: successMessage } : emptyStatus)
       return true
     },
-    [onUnauthorized, token, timezone, ownerId]
+    [onUnauthorized, token, timezone, ownerId, sessionMode]
   )
 
   useEffect(() => {

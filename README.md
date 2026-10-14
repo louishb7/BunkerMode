@@ -13,6 +13,8 @@ O Bunker reúne planejamento e execução sem transformar cada capacidade em um 
 - Módulo de Tarefas com calendário semanal e Modo Foco.
 - Tarefas pontuais ou recorrentes.
 - Identificação de tarefas passadas não concluídas como “Não realizadas”.
+- Objetivos como entrada principal quando habilitado, com mapa, conquistas e hábitos/mudanças.
+- Raiz prioriza Objetivos, Tarefas e Finanças; sem módulos abre Configurações.
 - Módulo de Objetivos independente, com associação opcional a tarefas.
 - Habilitação e desabilitação de módulos sem exclusão de dados.
 - Autenticação de usuários.
@@ -171,3 +173,13 @@ npm run check
 npm run format:check
 node --test test/*.test.mjs
 ```
+
+## Conexão, sessão e entrada
+
+A restauração aguarda `/usuarios/me` antes de resolver a entrada. Usa timeout de 30 segundos; falhas transitórias preservam sessão local e pendências por dono e revalidam automaticamente com backoff/eventos de retorno. Renovação de token não substitui essa leitura. Readiness `/api/v2/health/database` confirma API e conexão ao banco; `/health` e `/api/v2/health` são liveness. Um 5xx isolado não declara indisponibilidade global nem é resolvido por sucesso alheio. Falha ao consultar o banco durante autenticação retorna 503; credencial inválida continua 401.
+
+Configurações → Diagnóstico de conexão → Baixar diagnóstico exporta até 200 eventos da abertura atual: método, endpoint anonimizado, status/tipo de falha, duração, disponibilidade e transições de sessão. Não contém payload, query, dados de módulos, identidade de usuário ou credenciais; não persiste entre recargas. Para incidente de produção, baixe antes de recarregar e correlacione horário UTC com logs sanitizados de hospedagem/banco.
+
+Recorrências são preparadas pela sessão remota quando Tarefas está habilitado, compartilhando o comando com Tarefas, Foco e vínculos em Objetivos. Sucesso é reutilizado por sessão/dia no fuso do usuário e invalidado após alteração oficial de Tarefas. Sessão local/offline não materializa. O contrato `/api/v2/orientacao` continua disponível por compatibilidade HTTP, sem página Home ou consulta na interface.
+
+Validação adicional: `cd frontend && npm run test:pwa` usa build de produção, Brave headless (`/usr/bin/brave-browser`) e API local controlada; `BUNKER_AUDIT_DIR` permite capturas em um diretório externo novo. PostgreSQL real requer `TEST_DATABASE_URL` apontando exclusivamente para banco local de teste migrado. Instalação Android/iOS e atualização após deploy exigem dispositivo/HTTPS: roteiro em `frontend/test/PWA_VALIDACAO.txt`.

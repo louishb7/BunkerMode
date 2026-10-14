@@ -26,6 +26,7 @@ function harness() {
     fetch: async (url, options) => {
       calls.push({ path: new URL(url).pathname, authorization: options.headers.Authorization,
         body: options.body && JSON.parse(options.body) })
+      if (new URL(url).pathname.endsWith("/health/database")) return Response.json({status:"ok",database:"ok"})
       return handler(calls.at(-1))
     },
     require(path) {
@@ -33,7 +34,7 @@ function harness() {
       if (path === "../constants/session") return { TOKEN_KEY: "token", USER_KEY: "user", REFRESH_KEY: "refresh" }
       if (path === "../offline/apiAvailability") return {
         getApiAvailability: () => availability, setApiAvailability: (next) => { availability = next },
-        notifyApiSuccess() {},
+        notifyApiSuccess() {}, subscribeApiRetry: () => () => {},
       }
       throw new Error(path)
     },

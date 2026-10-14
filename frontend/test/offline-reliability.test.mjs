@@ -39,7 +39,8 @@ function harness() {
     timerId = 0,
     handler = async () => ({ ok: true, data: { id: 1 } }),
     writeHook = async () => {},
-    snapshotHook = async () => true
+    snapshotHook = async () => true,
+    healthyReadiness = false
   const window = new EventTarget(),
     document = new EventTarget(),
     storage = new Map()
@@ -98,7 +99,7 @@ function harness() {
     calls.push({ path, options: structuredClone(options) })
     const result = await handler(path, options)
     availability.setApiAvailability(
-      !result.ok && (result.status === 0 || result.status >= 500) ? "unavailable" : "available"
+      !healthyReadiness && !result.ok && (result.status === 0 || result.status >= 500) ? "unavailable" : "available"
     )
     return result
   }
@@ -167,6 +168,8 @@ function harness() {
         hasRefreshSession: () => false,
         ensurePersistentSession: async () => {},
         revokePersistentSession: async () => {},
+        recordSessionMode() {},
+        checkApiHealth: async () => true,
       },
       "../../../constants/session": {
         TOKEN_KEY: "token",
@@ -185,7 +188,6 @@ function harness() {
       },
       "../../../state/overviewCache": { clearOverview() {} },
       "../../../state/financeCache": { clearFinanceSnapshots() {} },
-      "../../../state/orientationCache": { clearOrientationCache() {} },
       "../../../offline/snapshots": { allowUserData() {}, clearUserData: async () => {} },
       "../../../offline/apiAvailability": availability,
       "../../tasks/focusSession": {
@@ -198,10 +200,12 @@ function harness() {
     slot = 0
     effects.length = 0
     useAuthSession()
-    return effects[0]()
+    // Ativa somente o ciclo autenticado da outbox (diagnóstico e health são anteriores).
+    return effects[2]()
   }
   return {
     ...outbox,
+    set healthyReadiness(value) { healthyReadiness = value },
     practiceDomain,
     availability,
     calls,
@@ -548,7 +552,7 @@ test("exclusão de objetivo só retira intenção após vínculos de tarefas e a
   assert.deepEqual(attempts[0].options.body, attempts[1].options.body)
   h.activateOutbox(null)
 })
-test("confirmação financeira do mês atual exige também snapshot usado pela Home", async () => {
+test("confirmação financeira do mês atual exige também snapshot financeiro corrente", async () => {
   const h = harness(),
     command = op("entry", "create", {
       payload: { titulo: "Entrada", tipo: "receita", valor_centavos: 100, data: "2026-10-04" },
@@ -633,7 +637,7 @@ for (const race of ["request", "write"])
     assert.equal(h.calls.find((call) => call.path === "/offline/operations").options.body.target, 8)
     h.activateOutbox(null)
   })
-test("foco e conectividade retomam recovery; offline não agenda polling", () => {
+test("foco e conectividade retomam recovery; offline não agenda polling", async () => {
   const h = harness()
   let retries = 0
   const stop = h.availability.subscribeApiRetry(() => retries++)
@@ -645,6 +649,7 @@ test("foco e conectividade retomam recovery; offline não agenda polling", () =>
   assert.equal(h.timers.size, 0)
   h.online = true
   h.window.dispatchEvent(new Event("online"))
+  await h.drain()
   assert.equal(retries, 2)
   stop()
 })
@@ -857,4 +862,27 @@ test("tarefa criada em formulário antigo preserva vínculo com objetivo recém-
   )
   assert.equal(h.operations.size, 0)
   h.activateOutbox(null)
+})
+
+test("429/408/500 isolados preservam outbox e recuperam mesmo com API disponível", async () => {
+  for (const status of [429, 408, 500]) {
+    const h = harness(), command = op("task", "complete", {target:2,baseUpdatedAt:dayA})
+    h.healthyReadiness = true
+    h.operations.set(command.operationId, command)
+    let recovered = false
+    h.handler = async path => path === "/usuarios/me" ? {ok:true,data:{id:1}}
+      : path === "/offline/operations" ? recovered ? {ok:true,data:{id:2}} : {ok:false,status,data:{}}
+      : {ok:true,data:[task(2)]}
+    const stop = h.availability.subscribeApiRetry(() => h.syncOutbox(1))
+    h.activateOutbox(1)
+    await h.drain()
+    assert.equal(h.availability.getApiAvailability(), "available")
+    assert.equal(h.operations.get(command.operationId).status, "pending")
+    assert.equal(h.timers.size,1)
+    recovered = true
+    await h.fireTimer()
+    assert.equal(h.operations.size,0)
+    assert.deepEqual(h.calls.filter(x=>x.path==="/offline/operations").map(x=>x.options.body.operationId),[command.operationId,command.operationId])
+    stop();h.activateOutbox(null)
+  }
 })

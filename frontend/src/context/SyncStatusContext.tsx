@@ -11,7 +11,8 @@ const SyncStatusContext = createContext<
 >(null)
 
 export function SyncStatusProvider({ children }: { children: React.ReactNode }) {
-  const ownerId = useAuth().user?.id
+  const auth = useAuth()
+  const ownerId = auth.user?.id
   const online = useOnlineStatus()
   const availability = useApiAvailability()
   const replayOwner = useSyncExternalStore(subscribeReplay, getReplayOwner)
@@ -32,6 +33,7 @@ export function SyncStatusProvider({ children }: { children: React.ReactNode }) 
     items,
     online,
     availability,
+    sessionMode: auth.sessionMode,
     replaying: !!ownerId && replayOwner === ownerId,
     now,
   })

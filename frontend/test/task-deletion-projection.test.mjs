@@ -16,7 +16,7 @@ test("exclusão remove todas as pendentes da série e preserva concluídas, avul
   assert.equal(official.length, 5)
   assert.deepEqual(projectTasks(official, [{ ...deletion, recurrenceSeriesId: undefined }]).map(t => t.id), [1, 4, 5])
 })
-test("metadado persiste no reload e cobre Home/Foco mesmo sem a ocorrência selecionada no snapshot", () => {
+test("metadado persiste no reload e cobre Foco mesmo sem a ocorrência selecionada no snapshot", () => {
   const daily = [task(1, 31, "CONCLUIDA"), task(3), task(4, 32)]
   const persisted = JSON.parse(JSON.stringify(deletion))
   assert.deepEqual(projectTasks(daily, [persisted]).map(t => t.id), [1, 4])

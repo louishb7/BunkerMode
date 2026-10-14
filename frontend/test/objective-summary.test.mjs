@@ -23,7 +23,6 @@ const load = (path) => vite.ssrLoadModule(`/src/${path}`)
 const [
   { summarizeObjective, trackerOccurrenceLabel },
   { default: Card },
-  { default: Home, selectHomeObjectives },
   { default: ObjectivesPage },
   { useTrackers },
   { api },
@@ -31,7 +30,6 @@ const [
 ] = await Promise.all([
   load("features/objectives/objectiveSummary.ts"),
   load("features/objectives/components/ObjetivoCard.tsx"),
-  load("features/home/pages/HomePage.tsx"),
   load("features/objectives/pages/ObjectivesPage.tsx"),
   load("features/objectives/hooks/useTrackers.ts"),
   load("services/bunkermodeApi.ts"),
@@ -147,10 +145,6 @@ test("sinais são fatos limitados a três; datas, ausência e última ocorrênci
     summarizeObjective({ objetivo: { ...objetivo, data_alvo: "2026-09-30" } })[0].detail,
     "30/09/2026"
   )
-  assert.deepEqual(
-    selectHomeObjectives([objetivo, { ...objetivo, id: 5, status: "pausado" }]).map((o) => o.id),
-    [4]
-  )
 })
 
 test("núcleo permanece dominante e relações distinguem erro, carregamento e vazio", async () => {
@@ -171,35 +165,6 @@ test("núcleo permanece dominante e relações distinguem erro, carregamento e v
     } finally {
       await view.close()
     }
-  }
-})
-
-test("Home e Objetivos exibem o mesmo fato do acompanhamento", async () => {
-  const original = { ...api }
-  api.listObjetivos = async () => ({ ok: true, data: [objetivo] })
-  api.listTrackers = async () => ({ ok: true, data: [tracker] })
-  api.getOrientation = async () => ({
-    ok: true,
-    data: {
-      tarefas: [],
-      direcoes: [{ ...objetivo, trackers: [tracker], tasks: [] }],
-      financeiro: null,
-    },
-  })
-  const home = await mount(Home, { token: "shared", user, onUnauthorized: () => false })
-  const page = await mount(ObjectivesPage, { token: "shared", user, onUnauthorized: () => false })
-  try {
-    assert.match(home.container.textContent, /Não fumar|dias desde a ocorrência/)
-    assert.match(
-      page.container.querySelector(".map-node-list").textContent,
-      /Não fumar|dias desde a ocorrência/
-    )
-    assert.doesNotMatch(home.container.textContent, /Reorganizar hábitos/)
-  } finally {
-    await home.close()
-    await page.close()
-    Object.assign(api, original)
-    cache.clearOverview()
   }
 })
 
@@ -277,17 +242,6 @@ test("refresh preserva snapshot em loading e erro; 401 de leitura segue tratamen
     api.listTrackers = original
     cache.clearOverview()
   }
-})
-
-test("Home seleciona apenas direções ativas; pausadas continuam no módulo", () => {
-  assert.deepEqual(
-    selectHomeObjectives([
-      { ...objetivo, id: 5, status: "pausado" },
-      objetivo,
-      { ...objetivo, id: 6, status: "concluido" },
-    ]).map((item) => item.id),
-    [4]
-  )
 })
 
 test("síntese enxerga a ocorrência de hoje mesmo quando a lista agrupa a série", async () => {
@@ -510,4 +464,23 @@ test("busca limita resultados, informa a série e não oferece itens já vincula
   } finally {
     await series.close()
   }
+})
+
+test("falha isolada de objetivos permanece explícita e retry repete somente a leitura", async () => {
+  const original={...api}
+  let failed=true,reads=0,writes=0
+  cache.clearOverview()
+  api.listObjetivos=async()=>{reads++;return failed?{ok:false,status:500,data:{message:"Falha local de objetivos"}}:{ok:true,data:[objetivo]}}
+  api.listTrackers=async()=>({ok:true,data:[]})
+  api.listAchievements=async()=>({ok:true,data:[]})
+  api.createObjetivo=async()=>{writes++;throw Error("Não reenviar mutação")}
+  const view=await mount(ObjectivesPage,{token:"read-error",user,onUnauthorized:()=>false})
+  try{
+    assert.match(view.container.textContent,/Falha local de objetivos/)
+    failed=false
+    await act(async()=>[...view.container.querySelectorAll("button")].find(b=>b.textContent==="Tentar carregar objetivos novamente").click())
+    assert.doesNotMatch(view.container.textContent,/Falha local de objetivos/)
+    assert.match(view.container.textContent,/Cuidar da saúde/)
+    assert.equal(reads,2);assert.equal(writes,0)
+  }finally{await view.close();Object.assign(api,original);cache.clearOverview()}
 })

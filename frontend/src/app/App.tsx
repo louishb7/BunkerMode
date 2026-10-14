@@ -11,11 +11,11 @@ import { useAuth } from "../context/AuthContext"
 import { TaskBoardProvider, useTaskBoardContext } from "../context/TaskBoardContext"
 import AuthScreen from "../features/auth/components/AuthScreen"
 import ResetPasswordScreen from "../features/auth/components/ResetPasswordScreen"
-import HomePage from "../features/home/pages/HomePage"
-import { getEnabledModules } from "../modules/moduleCatalog"
+import { getEnabledModules, getInitialRoute } from "../modules/moduleCatalog"
 import { APP_ROUTES } from "../routes/routeConstants"
 import { listOutbox } from "../offline/snapshots"
 import { syncOutbox } from "../offline/outbox"
+import { useSessionTaskPreparation } from "../features/tasks/hooks/useSessionTaskPreparation"
 import { getApiAvailability } from "../offline/apiAvailability"
 
 const FinancesPage = lazy(() => import("../features/finances/pages/FinancesPage"))
@@ -59,7 +59,7 @@ function AppContent() {
             </ProtectedRoute>
           }
         >
-          <Route path={APP_ROUTES.ROOT} element={<HomeRoute />} />
+          <Route path={APP_ROUTES.ROOT} element={<InitialRoute />} />
           <Route
             path={APP_ROUTES.FINANCES}
             element={
@@ -116,15 +116,9 @@ function AuthRoute() {
   )
 }
 
-function HomeRoute() {
+function InitialRoute() {
   const auth = useAuth()
-  const logout = useLogout()
-
-  return (
-    <AppShell onLogout={logout} user={auth.user}>
-      <HomePage onUnauthorized={auth.handleUnauthorized} token={auth.token} user={auth.user} />
-    </AppShell>
-  )
+  return <Navigate to={getInitialRoute(auth.user)} replace />
 }
 
 function SettingsRoute() {
@@ -147,6 +141,7 @@ function SettingsRoute() {
 
 function ProtectedRoute({ children }) {
   const auth = useAuth()
+  useSessionTaskPreparation(auth)
 
   if (!auth.authenticated) {
     return <Navigate to={APP_ROUTES.AUTH} replace />
@@ -201,6 +196,7 @@ function ObjectivesRoute() {
     <AppShell onLogout={logout} user={auth.user}>
       <Suspense fallback={<div className="route-loading" aria-label="Carregando objetivos" />}>
         <ObjectivesPage
+          sessionMode={auth.sessionMode}
           onUnauthorized={auth.handleUnauthorized}
           token={auth.token}
           user={auth.user}

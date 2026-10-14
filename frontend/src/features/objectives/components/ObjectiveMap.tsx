@@ -21,7 +21,12 @@ export function AchievementCrown({ achieved = false, className = "" }) {
 
 function NodeMark({ node, timezone, now }) {
   if (node.tipo === "acompanhamento") {
-    if (node.practice_intent && node.practice_intent !== "registro_livre") return <span className="map-occurrence-mark" aria-hidden="true"><Activity size={18} /></span>
+    if (node.practice_intent && node.practice_intent !== "registro_livre")
+      return (
+        <span className="map-occurrence-mark" aria-hidden="true">
+          <Activity size={18} />
+        </span>
+      )
     const days = node.ultima_ocorrencia ? elapsedDays(node.ultima_ocorrencia, now, timezone) : null
     return (
       <span className="map-occurrence-mark" aria-hidden="true">

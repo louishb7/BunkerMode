@@ -18,6 +18,7 @@ export function TaskBoardProvider({ children }) {
     ownerId: auth.user?.id,
     timezone: auth.user?.timezone,
     boardMode,
+    sessionMode: auth.sessionMode,
   })
 
   return <TaskBoardContext.Provider value={board}>{children}</TaskBoardContext.Provider>

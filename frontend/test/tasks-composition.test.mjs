@@ -131,7 +131,7 @@ test("ações no rodapé da execução do dia abrem Foco e criação mantém hoj
   }
 })
 
-test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repete usuário", async () => {
+test("rotas reais: Tarefas e raiz com Tasks abrem Foco; sidebar preserva identidade", async () => {
   const { MemoryRouter } = await import("react-router-dom")
   const { default: App } = await vite.ssrLoadModule("/src/app/App.tsx")
   const { AuthProvider } = await vite.ssrLoadModule("/src/context/AuthContext.tsx")
@@ -145,10 +145,6 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
     timezone: "America/Recife",
   }
   Object.assign(api, {
-    getOrientation: async () => ({
-      ok: true,
-      data: { tarefas: [], direcoes: [], financeiro: null },
-    }),
     getCurrentUser: async () => ({ ok: true, data: user }),
     materializeTaskRecurrences: async () => ({ ok: true }),
     listTasks: async () => ({ ok: true, data: [] }),
@@ -186,15 +182,8 @@ test("rotas reais: entradas de Tarefas e Home abrem preparação; Home não repe
           assert.ok(container.querySelector("main"), container.textContent)
           assert.doesNotMatch(container.querySelector("main").textContent, /Usuário da sidebar/)
           assert.match(container.querySelector("aside").textContent, /Usuário da sidebar/)
-          const card = container.querySelector('.home-calm')
-          assert.ok(card, container.textContent)
-          assert.equal(card.querySelectorAll('a[href="/tarefas/foco"]').length, 1)
-          assert.match(card.textContent, /Escolher um foco/)
         }
-        const trigger =
-          route === "/"
-            ? container.querySelector('main a[href="/tarefas/foco"]')
-            : [...container.querySelectorAll("button")].find((el) => el.textContent === "Foco")
+        const trigger = [...container.querySelectorAll("button")].find((el) => el.textContent === "Foco")
         assert.ok(trigger)
         await act(async () =>
           trigger.dispatchEvent(

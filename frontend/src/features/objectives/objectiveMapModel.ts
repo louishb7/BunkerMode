@@ -101,7 +101,10 @@ export function liveMapNodes(
       ultima_ocorrencia: last?.occurred_at ?? null,
       syncStatus: tracker.syncStatus,
       practice_intent: tracker.intent,
-      practice_fact: tracker.intent && tracker.intent !== "registro_livre" ? practiceFact(tracker, new Date(), timezone) : undefined,
+      practice_fact:
+        tracker.intent && tracker.intent !== "registro_livre"
+          ? practiceFact(tracker, new Date(), timezone)
+          : undefined,
     })
   }
   return nodes

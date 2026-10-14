@@ -25,7 +25,6 @@ const [
   { parseMoney, money, formatMoneyInput },
   { summarizeObjective },
   { default: Page },
-  { default: Home },
   { setApiAvailability },
   { default: FinanceForm },
   { projectFinances },
@@ -36,7 +35,6 @@ const [
   load("features/finances/money.ts"),
   load("features/objectives/objectiveSummary.ts"),
   load("features/finances/pages/FinancesPage.tsx"),
-  load("features/home/pages/HomePage.tsx"),
   load("offline/apiAvailability.ts"),
   load("features/finances/components/FinanceForm.tsx"),
   load("offline/outbox.ts"),
@@ -251,38 +249,6 @@ test("página financeira funciona sem Objetivos e tem formulários operáveis", 
     Object.assign(api, original)
   }
 })
-test("Home prepara recorrências explicitamente antes da orientação e preserva direções", async () => {
-  const original = { ...api }
-  let reads = 0
-  api.materializeTaskRecurrences = async () => ({ ok: true })
-  api.getOrientation = async () => {
-    reads++
-    return {
-      ok: true,
-      data: {
-        tarefas: [],
-        direcoes: [
-          { id: 1, titulo: "Direção independente", status: "ativo", tasks: [], trackers: [] },
-        ],
-        financeiro: null,
-      },
-    }
-  }
-  const view = await mount(Home, {
-    token: "prepare-failed",
-    user: { id: 1, enabled_modules: ["tasks", "objectives"] },
-    onUnauthorized: () => false,
-  })
-  try {
-    assert.equal(reads, 1)
-    assert.match(view.container.textContent, /Direção independente/)
-    assert.doesNotMatch(view.container.textContent, /Atualizando/)
-  } finally {
-    await view.close()
-    Object.assign(api, original)
-  }
-})
-
 test("falha na exclusão financeira aparece na confirmação e permite tentar novamente", async () => {
   const original = { ...api }
   let deleted = false

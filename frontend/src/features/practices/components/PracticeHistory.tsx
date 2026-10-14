@@ -125,7 +125,7 @@ export default function PracticeHistory({
                   <span>
                     {formatPracticeOccurrence(
                       record.occurred_at,
-                      tracker.planos?.[0]?.timezone ?? timezone,
+                      tracker.planos?.[0]?.timezone ?? timezone
                     )}
                   </span>
                   {record.note && (

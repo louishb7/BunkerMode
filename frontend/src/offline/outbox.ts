@@ -1,5 +1,5 @@
 import { request } from "../api/httpClient"
-import { getApiAvailability, setApiAvailability } from "./apiAvailability"
+import { getApiAvailability, requestApiRecovery } from "./apiAvailability"
 import {
   listOutbox,
   removeOutboxOperation,
@@ -318,7 +318,13 @@ async function run(ownerId: number, epoch: number): Promise<void> {
   if (activeOwner !== ownerId || epoch !== generation) return
   if (!validated.ok) {
     if (validated.status === 401) window.dispatchEvent(new Event("bunkermode-auth-invalid"))
-    else if (validated.status === 0 || validated.status >= 500) setApiAvailability("unavailable")
+    else if (
+      validated.status === 0 ||
+      validated.status === 408 ||
+      validated.status === 429 ||
+      validated.status >= 500
+    )
+      requestApiRecovery()
     return
   }
   if (validated.data?.id !== ownerId) {
@@ -381,9 +387,14 @@ async function run(ownerId: number, epoch: number): Promise<void> {
     })
     if (activeOwner !== ownerId || epoch !== generation) return
     if (!result.ok) {
-      if (result.status === 0 || result.status >= 500) {
+      if (
+        result.status === 0 ||
+        result.status === 408 ||
+        result.status === 429 ||
+        result.status >= 500
+      ) {
         await saveOutboxOperation({ ...attempted, status: "pending" })
-        setApiAvailability("unavailable")
+        requestApiRecovery()
         return
       }
       if (result.status === 401) {
@@ -409,6 +420,7 @@ async function run(ownerId: number, epoch: number): Promise<void> {
     if (!(await refreshOfficial(ownerId, op, epoch))) {
       if (activeOwner !== ownerId || epoch !== generation) return
       await saveOutboxOperation({ ...attempted, status: "pending" })
+      requestApiRecovery()
       return
     }
     if (op.action === "create") {

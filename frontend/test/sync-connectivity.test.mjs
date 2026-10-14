@@ -72,6 +72,7 @@ const op = (status = "pending", index = 1) => ({ ownerId: 1, operationId: String
 beforeEach(() => {
   setOnline(true)
   items = []; ownerId = 1; replayOwner = null
+  mockFetch = async () => Response.json({status:"ok",database:"ok"})
   apiAvailability.setApiAvailability("available")
   window.localStorage.setItem("refresh", "test")
 })
@@ -148,6 +149,7 @@ test("E: network error, timeout e 5xx geram uma superfície; 4xx permitem resolu
     for (const failure of ["network", "timeout", 500, 503]) {
       await view.update(() => apiAvailability.setApiAvailability("available"))
       mockFetch = async (_url, { signal }) => {
+        if (_url.endsWith("/health/database")) return Response.json({status:"error"},{status:503})
         if (failure === "network") throw new TypeError("Failed to fetch")
         if (failure === "timeout") return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("timeout"), { name: "AbortError" }))))
         return Response.json({ message: "Falha temporária" }, { status: failure })
@@ -161,7 +163,7 @@ test("E: network error, timeout e 5xx geram uma superfície; 4xx permitem resolu
       assert.equal(items.every(item => item.status === "pending"), true)
       assert.doesNotMatch(view.container.textContent, /Aguardando sincronização|API indisponível|Alteração salva|alterações? locais/)
     }
-    mockFetch = async () => Response.json({ message: "Conflito" }, { status: 409 })
+    mockFetch = async (url) => url.endsWith("/health/database") ? Response.json({status:"ok",database:"ok"}) : Response.json({ message: "Conflito" }, { status: 409 })
     await act(async () => client.request("/usuarios/me"))
     assert.equal(apiAvailability.getApiAvailability(), "available")
     assertNeutral(view)
@@ -211,4 +213,11 @@ test("fila antiga pede ação sem confundir replay normal, offline ou falha", ()
   assert.equal(presentation.deriveSyncPresentation({...input, online: false}).state, "offline")
   assert.equal(presentation.deriveSyncPresentation({...input, availability: "unavailable"}).state, "stalled")
   assert.equal(presentation.deriveSyncPresentation({...input, items: [op("failed")]}).state, "failed")
+})
+
+test("sessão local com readiness saudável comunica revalidação sem declarar outage", () => {
+  const result=presentation.deriveSyncPresentation({items:[],online:true,availability:"available",sessionMode:"local",replaying:false})
+  assert.equal(result.state,"session")
+  assert.equal(result.message,"Não foi possível confirmar a sessão. Tentando novamente.")
+  assert.equal(presentation.deriveSyncPresentation({items:[],online:false,availability:"available",sessionMode:"local",replaying:false}).state,"offline")
 })

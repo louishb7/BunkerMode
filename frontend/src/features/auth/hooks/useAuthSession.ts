@@ -5,6 +5,8 @@ import {
   getErrorMessage,
   hasRefreshSession,
   revokePersistentSession,
+  recordSessionMode,
+  checkApiHealth,
 } from "../../../api/httpClient"
 
 import { REFRESH_KEY, TOKEN_KEY, USER_KEY } from "../../../constants/session"
@@ -12,13 +14,12 @@ import { emptyStatus } from "../../../constants/uiState"
 import { api } from "../../../services/bunkermodeApi"
 import { clearOverview } from "../../../state/overviewCache"
 import { clearFinanceSnapshots } from "../../../state/financeCache"
-import { clearOrientationCache } from "../../../state/orientationCache"
 import { allowUserData, clearUserData } from "../../../offline/snapshots"
 import {
   getApiAvailability,
   subscribeApiAvailability,
   subscribeApiRetry,
-  subscribeApiSuccess,
+  requestApiRecovery,
 } from "../../../offline/apiAvailability"
 import { focusStorageKey, durationStorageKey } from "../../tasks/focusSession"
 import { activateOutbox, getReplayOwner, syncOutbox } from "../../../offline/outbox"
@@ -99,6 +100,15 @@ export function useAuthSession() {
   const revalidating = useRef(false)
   const skipRestoreToken = useRef(null)
 
+  useEffect(() => recordSessionMode(sessionMode), [sessionMode])
+  useEffect(
+    () =>
+      subscribeApiRetry(() => {
+        if (getApiAvailability() !== "available") return checkApiHealth()
+      }),
+    []
+  )
+
   const authenticated = Boolean(token && user && sessionValidated)
 
   const persistUser = useCallback((nextUser) => {
@@ -129,7 +139,6 @@ export function useAuthSession() {
       }
       clearOverview()
       clearFinanceSnapshots()
-      clearOrientationCache()
       removeStoredSession()
       setToken(null)
       setUser(null)
@@ -159,7 +168,7 @@ export function useAuthSession() {
     async (storedToken, requestId) => {
       revalidating.current = true
       const result = await api.getCurrentUser(storedToken)
-      revalidating.current = false
+      if (requestId === sessionRequestId.current) revalidating.current = false
       if (requestId !== sessionRequestId.current) {
         return false
       }
@@ -173,6 +182,7 @@ export function useAuthSession() {
       if (!result.ok) {
         setSessionValidated(true)
         setSessionMode("local")
+        requestApiRecovery()
         setAuthStatus(emptyStatus)
         return false
       }
@@ -182,7 +192,6 @@ export function useAuthSession() {
         activateOutbox(null)
         clearOverview()
         clearFinanceSnapshots()
-        clearOrientationCache()
       }
 
       persistUser(result.data)
@@ -246,6 +255,13 @@ export function useAuthSession() {
     return () => window.removeEventListener("bunkermode-token-refreshed", updateToken)
   }, [])
 
+  useEffect(
+    () => () => {
+      sessionRequestId.current += 1
+    },
+    []
+  )
+
   useEffect(() => {
     if (!token) {
       setBooting(false)
@@ -255,9 +271,6 @@ export function useAuthSession() {
 
     if (skipRestoreToken.current === token) {
       skipRestoreToken.current = null
-      setBooting(false)
-      setSessionValidated(true)
-      setSessionMode("online")
       return
     }
 
@@ -268,7 +281,10 @@ export function useAuthSession() {
     void restoreSession(token, requestId)
 
     return () => {
-      if (sessionRequestId.current === requestId) {
+      if (
+        sessionRequestId.current === requestId &&
+        skipRestoreToken.current !== persistentStore.getItem(TOKEN_KEY)
+      ) {
         sessionRequestId.current += 1
       }
     }
@@ -288,13 +304,11 @@ export function useAuthSession() {
     const stopRetry = subscribeApiRetry(() => {
       if (revalidating.current) return
       const requestId = ++sessionRequestId.current
-      void restoreSession(token, requestId)
+      return restoreSession(token, requestId)
     })
-    const stopSuccess = subscribeApiSuccess(retry)
     return () => {
       stopAvailability()
       stopRetry()
-      stopSuccess()
     }
   }, [token, user, sessionValidated, sessionMode, restoreSession])
 

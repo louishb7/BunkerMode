@@ -73,6 +73,8 @@ async function main() {
   let lostResponse = false
   let syncDelayMs = 0
   let backendFailure = null
+  let meDelayMs = 0, meFailures = 0, goalFailures = 0
+  const networkTrace = []
   const tasksByOwner = new Map([[1, [task(1, 1)]], [2, [task(2, 2)]]])
   const goalsByOwner = new Map([[1, [{ id: 1, titulo: "Objetivo 1", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Objetivo 2", status: "ativo", order_index: 0, updated_at: new Date().toISOString() }]]])
   const trackersByOwner = new Map([[1, [{ id: 1, titulo: "Acompanhamento 1", objetivo_id: 1, ocorrencias: [], updated_at: new Date().toISOString() }]], [2, [{ id: 2, titulo: "Acompanhamento 2", objetivo_id: 2, ocorrencias: [], updated_at: new Date().toISOString() }]]])
@@ -86,8 +88,15 @@ async function main() {
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
     if (request.method === "OPTIONS") { response.writeHead(204).end(); return }
     const pathname = new URL(request.url, "http://local").pathname
+    const requestStarted = Date.now()
+    const trace = (failure = undefined) => networkTrace.push({ at: new Date().toISOString(),
+      endpoint: pathname.replace(/\/\d+(?=\/|$)/g,"/:id"), method: request.method,
+      status: response.statusCode, failure, durationMs: Date.now() - requestStarted })
+    response.on("finish", () => trace())
+    response.on("close", () => { if (!response.writableFinished) trace("transport") })
     if (backendFailure === "network") { response.destroy(); return }
     if (backendFailure === 503) { response.writeHead(503).end(JSON.stringify({ message: "Serviço temporariamente indisponível" })); return }
+    if (pathname.endsWith("/health/database")) { response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({status:"ok",database:"ok"})); return }
     if (pathname.endsWith("/auth/login") && request.method === "POST") {
       loginAttempts++
       response.setHeader("Content-Type", "application/json")
@@ -227,12 +236,18 @@ async function main() {
     }
     if (pathname.endsWith("/auth/session")) response.end(JSON.stringify({ refresh_token: `refresh-${token}` }))
     else if (pathname.endsWith("/auth/logout")) response.end(JSON.stringify({ message: "ok" }))
-    else if (pathname.endsWith("/usuarios/me")) response.end(JSON.stringify(user(id)))
-    else if (pathname.endsWith("/orientacao")) response.end(JSON.stringify({ tarefas: tasksByOwner.get(id).filter((item) => item.status !== "CONCLUIDA").slice(0, 3), direcoes: [], financeiro: null, falhas: {} }))
+    else if (pathname.endsWith("/usuarios/me")) {
+      if (meFailures > 0) { meFailures--; response.writeHead(503).end(JSON.stringify({message:"Falha temporária de sessão"})) }
+      else if (meDelayMs) setTimeout(() => response.end(JSON.stringify(user(id))),meDelayMs)
+      else response.end(JSON.stringify(user(id)))
+    }
     else if (pathname.endsWith("/tarefas/recorrencias/materializar")) response.writeHead(204).end()
     else if (pathname.endsWith("/tarefas/foco")) response.end(JSON.stringify({ tasks: tasksByOwner.get(id), daily_tasks: tasksByOwner.get(id) }))
     else if (pathname.endsWith("/tarefas")) response.end(JSON.stringify(tasksByOwner.get(id)))
-    else if (pathname.endsWith("/objetivos")) response.end(JSON.stringify(goalsByOwner.get(id)))
+    else if (pathname.endsWith("/objetivos")) {
+      if (goalFailures > 0) { goalFailures--; response.writeHead(500).end(JSON.stringify({message:"Falha de objetivos controlada"})) }
+      else response.end(JSON.stringify(goalsByOwner.get(id)))
+    }
     else if (pathname.endsWith("/acompanhamentos")) response.end(JSON.stringify(trackersByOwner.get(id)))
     else if (pathname.endsWith("/financas")) {
       const month = new URL(request.url, "http://local").searchParams.get("mes") || new Date().toISOString().slice(0, 7)
@@ -308,6 +323,12 @@ async function main() {
       })
     }
     const navigate = async (path) => { await cdp.send("Page.navigate", { url: origin + path }); await until(() => evaluate("document.readyState === 'complete'"), `navegação ${path}`) }
+    const clickAppLink = async (path) => {
+      const mobileMenu = await evaluate("document.querySelector('button[aria-label=\"Abrir menu\"]')?.getBoundingClientRect().width > 0")
+      if (mobileMenu) await evaluate("document.querySelector('button[aria-label=\"Abrir menu\"]').click()")
+      await evaluate(`[...document.querySelectorAll('a[href="${path}"]')].find(link=>link.getBoundingClientRect().width>0).click()`)
+      await until(() => evaluate(`location.pathname === ${JSON.stringify(path)}`), `navegação SPA ${path}`)
+    }
     const visible = async (value) => {
       try { await until(() => evaluate(`document.body.innerText.includes(${JSON.stringify(value)})`), value) }
       catch (error) { throw new Error(`${error.message}; tela: ${await evaluate("document.body.innerText.slice(0, 500)")}`) }
@@ -327,6 +348,13 @@ async function main() {
       }
       await cdp.send("Emulation.clearDeviceMetricsOverride")
       await evaluate("document.documentElement.removeAttribute('data-theme')")
+    }
+    const captureState = async (name) => {
+      if (!process.env.BUNKER_AUDIT_DIR) return
+      await cdp.send("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true})
+      const shot = await cdp.send("Page.captureScreenshot", {format:"png",captureBeyondViewport:false})
+      await writeFile(join(process.env.BUNKER_AUDIT_DIR,`${name}.png`),Buffer.from(shot.data,"base64"))
+      await cdp.send("Emulation.clearDeviceMetricsOverride")
     }
     const putOutbox = async (operation) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});const tx=db.transaction('outbox','readwrite');tx.objectStore('outbox').put(${JSON.stringify(operation)});await new Promise(ok=>tx.oncomplete=ok);window.dispatchEvent(new CustomEvent('bunkermode-outbox-change',{detail:2}))})()`)
     const outboxStatus = async (operationId) => evaluate(`(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('outbox').objectStore('outbox').get([2,${JSON.stringify(operationId)}]);r.onsuccess=()=>ok(r.result?.status??null)})})()`)
@@ -391,6 +419,7 @@ async function main() {
       const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false })
       await writeFile(join(process.env.BUNKER_AUDIT_DIR, "objectives-mobile.png"), Buffer.from(shot.data, "base64"))
     }
+    await auditLayout("objectives-map")
     await cdp.send("Emulation.clearDeviceMetricsOverride")
     tasksByOwner.set(1, tasksByOwner.get(1).filter(x => x.id < 1000))
     console.log("Produto Gate 2: árvore inicial, expansão, resize, ocultação, menu de conquista, busca/foco e saída mobile OK")
@@ -401,9 +430,74 @@ async function main() {
     await until(() => evaluate("document.body.innerText.includes('Mês atual')"), "mês financeiro anterior")
     await until(() => evaluate("(async()=>{const db=await new Promise(ok=>{const r=indexedDB.open('bunkermode-offline');r.onsuccess=()=>ok(r.result)});return await new Promise(ok=>{const r=db.transaction('snapshots').objectStore('snapshots').getAll();r.onsuccess=()=>ok(r.result.filter(x=>x.ownerId===1 && x.key.startsWith('finances:')).length>=2)})})()"), "snapshots de dois meses")
     await navigate("/")
-    await visible("Tarefa do usuário 1")
-    await auditLayout("home")
-    console.log("Auditoria integrada: Home compacta, 320–1440px, light/dark e transição da navegação OK")
+    await visible("Objetivo 1")
+    assert.equal(await evaluate("location.pathname"), "/objetivos")
+    assert.equal(await evaluate("[...document.querySelectorAll('nav a')].some(a=>a.textContent.trim()==='Início')"), false)
+    await auditLayout("objectives-entry")
+    console.log("Objetivos como entrada: raiz redireciona, Home ausente; 320–1440px, light/dark OK")
+    // Reproduz latência maior que o timeout antigo sem alterar timeout de produção.
+    meDelayMs = 6500
+    await navigate("/")
+    await delay(6100)
+    assert.equal(await evaluate("location.pathname"), "/", "bootstrap aguarda usuário completo")
+    assert.equal(await evaluate("document.body.innerText.includes('Serviço temporariamente indisponível')"), false)
+    await captureState("bootstrap-slow")
+    await visible("Objetivo 1")
+    meDelayMs = 0
+    assert.equal(await evaluate("location.pathname"), "/objetivos")
+    console.log("Bootstrap real: /me em 6,5s permanece em loading, conclui online sem timeout/aviso global OK")
+    meFailures = 1
+    await navigate("/")
+    await visible("Não foi possível confirmar a sessão. Tentando novamente.")
+    assert.equal(await evaluate("document.body.innerText.includes('Serviço temporariamente indisponível')"), false)
+    await visible("Novo objetivo")
+    await captureState("session-revalidation")
+    await until(() => evaluate("!document.body.innerText.includes('Não foi possível confirmar a sessão.')"), "revalidação automática sem foco/clique", 20000)
+    await visible("Objetivo 1")
+    console.log("Sessão: /me 503 isolado com readiness 200 mantém credenciais e recupera autonomamente sem clique OK")
+    await clickAppLink("/tarefas")
+    await visible("Nova tarefa")
+    goalFailures = 1
+    await clickAppLink("/objetivos")
+    await visible("Falha de objetivos controlada")
+    await delay(200)
+    assert.equal(await evaluate("document.body.innerText.includes('Falha de objetivos controlada')"), true)
+    assert.equal(await evaluate("document.body.innerText.includes('Serviço temporariamente indisponível')"), false)
+    await captureState("endpoint-local-error")
+    await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Tentar carregar objetivos novamente').click()")
+    await until(() => evaluate("!document.body.innerText.includes('Falha de objetivos controlada')"), "retry da operação específica")
+    console.log("Endpoint 500 isolado mantém erro da operação após outras leituras 200, readiness saudável e retry próprio OK")
+
+    if (process.env.BUNKER_AUDIT_DIR) {
+      await cdp.send("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:process.env.BUNKER_AUDIT_DIR})
+      await clickAppLink("/configuracoes")
+      await visible("Diagnóstico de conexão")
+      await evaluate("[...document.querySelectorAll('summary')].find(x=>x.textContent==='Diagnóstico de conexão').click()")
+      await evaluate("[...document.querySelectorAll('button')].find(x=>x.textContent==='Baixar diagnóstico').click()")
+      const download = join(process.env.BUNKER_AUDIT_DIR,"bunkermode-conexao.json")
+      await until(async()=>{try{return JSON.parse(await readFile(download,"utf8")).length>0}catch{return false}}, "exportação diagnóstica")
+      const exported = await readFile(download,"utf8")
+      const events = JSON.parse(exported)
+      assert(events.some(event=>event.status===503 && event.path==="/usuarios/me"))
+      assert(events.some(event=>event.status===500 && event.path==="/objetivos"))
+      assert(events.some(event=>event.sessionMode==="local"))
+      assert(events.some(event=>event.sessionMode==="online"))
+      assert.doesNotMatch(exported, /Bearer|@local\.test|access_token|refresh_token|payload|authorization/)
+      await navigate("/")
+      await visible("Objetivo 1")
+      console.log("Diagnóstico exportado pela UI contém apenas eventos sanitizados desta abertura OK")
+    }
+
+    const savedGoals = goalsByOwner.get(1)
+    goalsByOwner.set(1,[])
+    await navigate("/")
+    await visible("Novo objetivo")
+    await until(() => evaluate("!document.querySelector('.map-root')"), "empty state de objetivos")
+    await auditLayout("objectives-empty")
+    goalsByOwner.set(1,savedGoals)
+    await navigate("/")
+    await visible("Objetivo 1")
+
     const stored = await evaluate("(async () => { const db = await new Promise((ok,no) => { const r=indexedDB.open('bunkermode-offline'); r.onsuccess=()=>ok(r.result); r.onerror=()=>no(r.error) }); return await new Promise((ok,no) => { const r=db.transaction('snapshots').objectStore('snapshots').getAll(); r.onsuccess=()=>ok(r.result.map(x=>({ownerId:x.ownerId,key:x.key,updatedAt:x.updatedAt}))); r.onerror=()=>no(r.error) }) })()")
     assert(stored.some((item) => item.ownerId === 1 && item.key === "tasks:all" && item.updatedAt))
     assert(stored.every((item) => Number.isSafeInteger(item.ownerId) && !item.key.includes("one")))
@@ -545,6 +639,7 @@ async function main() {
     await until(() => syncCalls >= callsBeforeLostResponse + 1, "primeiro envio da operação")
     await visible("Resposta perdida")
     await visible("Serviço temporariamente indisponível")
+    await captureState("service-unavailable")
     assert.equal(await evaluate("document.querySelectorAll('[data-sync-status]').length"), 1)
     backendFailure = null
     await evaluate("window.dispatchEvent(new Event('online'))")
@@ -994,11 +1089,12 @@ async function main() {
     await evaluate("document.querySelector('input[name=senha]')?.focus()")
     await cdp.send("Input.insertText", { text: "senha123" })
     await evaluate("document.querySelector('button[type=submit]')?.click()")
-    await until(() => evaluate("location.pathname === '/'"), "login após reconexão")
+    await until(() => evaluate("location.pathname === '/objetivos'"), "login após reconexão")
     assert.equal(loginAttempts, 1)
     assert.equal(await evaluate("localStorage.getItem('bunkermode_token')"), "two")
-    console.log("PWA: login após reconexão confirma API sem health check OK")
+    console.log("PWA: login após reconexão confirma sessão e readiness OK")
   } finally {
+    if (process.env.BUNKER_AUDIT_DIR) await writeFile(join(process.env.BUNKER_AUDIT_DIR,"browser-network-events.json"),JSON.stringify(networkTrace,null,2))
     cdp?.close()
     chrome?.kill("SIGTERM")
     preview?.kill("SIGTERM")

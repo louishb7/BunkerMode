@@ -5,12 +5,14 @@ export function deriveSyncPresentation({
   items,
   online,
   availability,
+  sessionMode = "online",
   replaying,
   now = Date.now(),
 }: {
   items: OutboxOperation[]
   online: boolean
   availability: ApiAvailability
+  sessionMode?: "online" | "local" | "none"
   replaying: boolean
   now?: number
 }) {
@@ -35,7 +37,9 @@ export function deriveSyncPresentation({
           ? "stalled"
           : availability === "unavailable"
             ? "unavailable"
-            : "normal"
+            : sessionMode === "local"
+              ? "session"
+              : "normal"
   const message =
     state === "conflict"
       ? "Há uma alteração em conflito. Revise em Configurações."
@@ -47,6 +51,8 @@ export function deriveSyncPresentation({
             ? "Sem conexão"
             : state === "stalled"
               ? "Há alterações sem confirmação há algum tempo. Revise em Configurações."
-              : ""
+              : state === "session"
+                ? "Não foi possível confirmar a sessão. Tentando novamente."
+                : ""
   return { state, message, pendingCount, conflictCount, failedCount }
 }

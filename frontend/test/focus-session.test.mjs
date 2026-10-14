@@ -23,7 +23,7 @@ const model = await vite.ssrLoadModule("/src/features/tasks/focusSession.ts")
 const { useTaskBoard } = await vite.ssrLoadModule("/src/features/tasks/hooks/useTaskBoard.ts")
 const { api } = await vite.ssrLoadModule("/src/services/bunkermodeApi.ts")
 const { getOverview, clearOverview } = await vite.ssrLoadModule("/src/state/overviewCache.ts")
-after(() => vite.close())
+after(async () => { await vite.close(); dom.window.close() })
 const storage = window.localStorage
 const task = {
   id: 7,

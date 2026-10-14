@@ -26,7 +26,7 @@ import ConquerObjectiveDialog from "../components/ConquerObjectiveDialog"
 import { useAchievements } from "../hooks/useAchievements"
 import "../objectives.css"
 
-export default function ObjectivesPage({ onUnauthorized, token, user }) {
+export default function ObjectivesPage({ onUnauthorized, token, user, sessionMode = "online" }) {
   const objectives = useObjectives({ onUnauthorized, token, ownerId: user.id })
   const achievements = useAchievements({ onUnauthorized, token, ownerId: user.id })
   const [context, setContext] = useState(
@@ -80,6 +80,8 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
     ownerId: user.id,
     onUnauthorized,
     enabled: tasksEnabled,
+    timezone: user.timezone,
+    sessionMode,
   })
   const trackers = useTrackers({ token, ownerId: user.id, onUnauthorized })
   const [addingTo, setAddingTo] = useState(null)
@@ -230,6 +232,16 @@ export default function ObjectivesPage({ onUnauthorized, token, user }) {
       <OfflineNotice updatedAt={objectives.lastUpdated ?? trackers.lastUpdated} />
 
       <StatusNotice status={objectives.status} />
+      {objectives.status.type === "error" && (
+        <Button
+          variant="ghost"
+          className="w-fit"
+          disabled={objectives.loading}
+          onClick={() => void objectives.refresh()}
+        >
+          Tentar carregar objetivos novamente
+        </Button>
+      )}
       <StatusNotice status={trackers.status} />
 
       <nav className="objective-contexts" aria-label="Contextos dos objetivos">

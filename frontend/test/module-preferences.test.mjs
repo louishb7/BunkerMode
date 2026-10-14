@@ -29,7 +29,7 @@ const { getEnabledModules } = exports
 const keysFor = (user) => Array.from(getEnabledModules(user), (module) => module.key)
 
 test("preferências filtram o catálogo sem criar módulos adicionais", () => {
-  assert.deepEqual(keysFor({ enabled_modules: ["tasks", "objectives"] }), ["tasks", "objectives"])
+  assert.deepEqual(keysFor({ enabled_modules: ["tasks", "objectives"] }), ["objectives", "tasks"])
   assert.deepEqual(keysFor({ enabled_modules: ["tasks"] }), ["tasks"])
   assert.deepEqual(keysFor({ enabled_modules: ["objectives"] }), ["objectives"])
   assert.deepEqual(keysFor({ enabled_modules: [] }), [])
@@ -37,5 +37,5 @@ test("preferências filtram o catálogo sem criar módulos adicionais", () => {
 })
 
 test("sessão antiga sem enabled_modules preserva os dois módulos originais como fallback", () => {
-  assert.deepEqual(keysFor({}), ["tasks", "objectives"])
+  assert.deepEqual(keysFor({}), ["objectives", "tasks"])
 })

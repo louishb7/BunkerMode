@@ -267,7 +267,7 @@ test("resposta stale não aciona o tratamento global de sessão", async () => {
   assert.equal(unauthorizedCalls, 0)
 })
 
-test("integração lê vínculos sem escrever e preserva 401 global", async () => {
+test("integração prepara recorrências antes de ler vínculos e preserva 401 global", async () => {
   for (const status of [200, 503, 401]) {
     const calls = []
     let unauthorized = 0
@@ -294,7 +294,7 @@ test("integração lê vínculos sem escrever e preserva 401 global", async () =
       }
     )
     assert.equal(await render().refresh(), status === 200)
-    assert.deepEqual(calls, ["GET"])
+    assert.deepEqual(calls, ["POST", "GET"])
     assert.equal(unauthorized, status === 401 ? 1 : 0)
     assert.equal(render().error, status === 503 ? "Leitura indisponível" : "")
   }
@@ -363,5 +363,19 @@ test("Objetivos aceita somente a leitura mais nova e ignora 401 e erro comuns an
     assert.equal(render().status.message, "")
     assert.equal(render().loading, false)
     assert.equal(unauthorized, 0)
+  }
+})
+
+test("falha na preparação impede GET de vínculos e mantém Objetivos independente", async () => {
+  for (const status of [503, 401]) {
+    let reads = 0, unauthorized = 0
+    const render = loadHook("../src/features/objectives/hooks/useObjectiveTasks.ts", "useObjectiveTasks", {
+      materializeTaskRecurrences: async () => ({ok:false,status,data:{message:"Preparação indisponível"}}),
+      listTasks: async () => { reads++; return {ok:true,data:[]} },
+    }, result => { if (result.status === 401) unauthorized++; return result.status === 401 })
+    assert.equal(await render().refresh(),false)
+    assert.equal(reads,0)
+    assert.equal(unauthorized,status === 401 ? 1 : 0)
+    assert.equal(render().error,status === 503 ? "Preparação indisponível" : "")
   }
 })

@@ -134,9 +134,7 @@ export class AuthService {
     }
   }
 
-  async login(
-    payload: LoginPayload,
-  ): Promise<{
+  async login(payload: LoginPayload): Promise<{
     access_token: string;
     token_type: "bearer";
     usuario: UserRecord;
@@ -184,7 +182,12 @@ export class AuthService {
   }
 
   async getUserFromToken(token: string): Promise<UserRecord> {
-    const payload = this.tokenService.decode(token);
+    let payload: ReturnType<TokenService["decode"]>;
+    try {
+      payload = this.tokenService.decode(token);
+    } catch {
+      throw new HttpException("Token inválido.", HttpStatus.UNAUTHORIZED);
+    }
     const usuario = await this.prisma.usuarios.findUnique({
       where: { usuario_id: payload.sub },
     });

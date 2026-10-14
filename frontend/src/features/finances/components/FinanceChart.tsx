@@ -5,7 +5,15 @@ import { money } from "../money"
 type Point = FinanceOverview["serie_diaria"][number]
 const dateLabel = (date: string) => date.slice(5).split("-").reverse().join("/")
 
-export default function FinanceChart({ points, today, movementCount }: { points: Point[]; today: string; movementCount?: number }) {
+export default function FinanceChart({
+  points,
+  today,
+  movementCount,
+}: {
+  points: Point[]
+  today: string
+  movementCount?: number
+}) {
   // Não desenhar dias futuros como se fossem resultados já realizados.
   const days = points.filter((point) => point.data <= today)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -46,7 +54,8 @@ export default function FinanceChart({ points, today, movementCount }: { points:
     setSelectedDate(days[index].data)
   }
 
-  if (!hasMovements) return <p className="finance-chart-empty">Ainda não há entradas ou saídas para mostrar.</p>
+  if (!hasMovements)
+    return <p className="finance-chart-empty">Ainda não há entradas ou saídas para mostrar.</p>
   const chart = (
     <section className="finance-chart" aria-label="Evolução no mês">
       <div className="finance-chart-heading">
@@ -163,8 +172,12 @@ export default function FinanceChart({ points, today, movementCount }: { points:
   )
   return movementCount !== undefined && movementCount < 3 ? (
     <details className="finance-chart-reveal">
-      <summary>Ver evolução diária · {movementCount} {movementCount === 1 ? "movimento" : "movimentos"}</summary>
+      <summary>
+        Ver evolução diária · {movementCount} {movementCount === 1 ? "movimento" : "movimentos"}
+      </summary>
       {chart}
     </details>
-  ) : chart
+  ) : (
+    chart
+  )
 }

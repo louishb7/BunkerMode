@@ -76,9 +76,8 @@ function authHarness(api, stored = {}) {
         if (path.endsWith("bunkermodeApi")) return { api }
         if (path.endsWith("overviewCache")) return { clearOverview: () => {} }
         if (path.endsWith("financeCache")) return { clearFinanceSnapshots: () => {} }
-        if (path.endsWith("orientationCache")) return { clearOrientationCache: () => {} }
         if (path.endsWith("offline/snapshots")) return { allowUserData: () => {}, clearUserData: async (id) => { clearedOwners.push(id) } }
-        if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {}, subscribeApiRetry: (listener) => { retryListener = listener; return () => { retryListener = undefined } }, subscribeApiSuccess: () => () => {} }
+        if (path.endsWith("offline/apiAvailability")) return { getApiAvailability: () => "available", subscribeApiAvailability: () => () => {}, subscribeApiRetry: (listener) => { retryListener = listener; return () => { retryListener = undefined } }, subscribeApiSuccess: () => () => {}, requestApiRecovery() {} }
         if (path.endsWith("focusSession")) return { focusStorageKey: (id) => `focus:${id}`, durationStorageKey: (id) => `duration:${id}` }
         if (path.endsWith("offline/outbox")) return { activateOutbox: () => {}, getReplayOwner: () => null, syncOutbox: async () => {} }
         if (path.endsWith("/session")) {
@@ -86,7 +85,7 @@ function authHarness(api, stored = {}) {
         }
         if (path.endsWith("uiState")) return { emptyStatus: { type: "", message: "" } }
         if (path.endsWith("httpClient")) {
-          return { getErrorMessage: (result, fallback) => result.data?.message || fallback, hasRefreshSession: () => false, ensurePersistentSession: async () => {}, revokePersistentSession: async () => {} }
+          return { getErrorMessage: (result, fallback) => result.data?.message || fallback, hasRefreshSession: () => false, ensurePersistentSession: async () => {}, revokePersistentSession: async () => {}, recordSessionMode() {}, checkApiHealth: async () => true }
         }
         throw new Error(path)
       },

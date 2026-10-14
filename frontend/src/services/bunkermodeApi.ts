@@ -77,12 +77,18 @@ async function requestFocusBoard(
   }
 }
 
+let preparedKey: string | null = null
+let preparationEpoch = 0
+if (typeof window !== "undefined")
+  window.addEventListener("bunkermode-official-change", (event: Event) => {
+    if ((event as CustomEvent<{ key: string }>).detail?.key === "tasks:all") {
+      preparedKey = null
+      preparationEpoch++
+    }
+  })
 const pendingMaterializations = new Map<string, ReturnType<typeof request>>()
 
 export const api = {
-  getOrientation(token, includeTasks = true) {
-    return request(`/orientacao${includeTasks ? "" : "?incluir_tarefas=false"}`, { token })
-  },
   getFinances(token, month?) {
     return request<import("../types/financeContract").FinanceOverview>(
       `/financas${month ? `?mes=${encodeURIComponent(month)}` : ""}`,
@@ -112,7 +118,7 @@ export const api = {
     return request<AuthSession>("/auth/login", { method: "POST", body: payload })
   },
   getCurrentUser(token) {
-    return request<User>("/usuarios/me", { token, timeoutMs: 6000 })
+    return request<User>("/usuarios/me", { token })
   },
   updateEnabledModules(token, payload) {
     return request<User>("/usuarios/me/modulos", { token, method: "PATCH", body: payload })
@@ -126,13 +132,22 @@ export const api = {
   getFocusBoard(token) {
     return requestFocusBoard("/tarefas/foco", { token })
   },
-  materializeTaskRecurrences(token) {
-    const pending = pendingMaterializations.get(token)
+  materializeTaskRecurrences(token, timezone = undefined) {
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, dateStyle: "short" }).format(
+      new Date()
+    )
+    const key = `${token}:${timezone ?? "local"}:${day}`
+    if (preparedKey === key) return Promise.resolve({ ok: true as const, status: 204, data: null })
+    const pending = pendingMaterializations.get(key)
     if (pending) return pending
+    const epoch = preparationEpoch
     const result = request("/tarefas/recorrencias/materializar", { token, method: "POST" })
-    pendingMaterializations.set(token, result)
+    pendingMaterializations.set(key, result)
+    void result.then((response) => {
+      if (response.ok && epoch === preparationEpoch) preparedKey = key
+    })
     void result.finally(() => {
-      if (pendingMaterializations.get(token) === result) pendingMaterializations.delete(token)
+      if (pendingMaterializations.get(key) === result) pendingMaterializations.delete(key)
     })
     return result
   },

@@ -129,6 +129,7 @@ test("seletor sai por botão, backdrop e Escape; formulário alterado exige desc
   api.listObjetivos = async () => ({ ok: true, data: [{ id: 42, titulo: "Ler mais", descricao: null, status: "ativo", order_index: 0, created_at: "2026-10-01T12:00:00Z", updated_at: "2026-10-01T12:00:00Z", data_alvo: null }] })
   api.listTrackers = async () => ({ ok: true, data: [] })
   api.listAchievements = async () => ({ ok: true, data: [] })
+  api.materializeTaskRecurrences = async () => ({ok:true,status:204})
   api.listTasks = async () => ({ ok: true, data: [
     { id: 10, titulo: "Ler livro", objetivo_id: null, status: "PENDENTE", prazo: null },
     { id: 11, titulo: "Comprar tênis", objetivo_id: null, status: "PENDENTE", prazo: null },

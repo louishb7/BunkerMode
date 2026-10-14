@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from "react"
 import { Monitor, Sun, Moon, Palette, Boxes } from "lucide-react"
 import { getThemePreference, setThemePreference } from "../../../theme/preference"
 import PageHeader from "../../../components/ui/PageHeader"
-import { getErrorMessage } from "../../../api/httpClient"
+import { getApiDiagnostics, getErrorMessage } from "../../../api/httpClient"
 import StatusNotice from "../../../components/ui/StatusNotice"
 import { emptyStatus } from "../../../constants/uiState"
 import { getEnabledModules, MODULE_CATALOG } from "../../../modules/moduleCatalog"
@@ -57,6 +57,25 @@ export default function SettingsPage({ onUnauthorized, onUpdateUser, token, user
   return (
     <section className="mx-auto grid max-w-[720px] gap-6">
       <PageHeader title="Configurações" />
+      <details className="text-sm text-text-secondary">
+        <summary className="min-h-11 cursor-pointer">Diagnóstico de conexão</summary>
+        <p>Registros desta abertura, sem dados dos módulos ou credenciais.</p>
+        <button
+          className="min-h-11 underline"
+          onClick={() => {
+            const url = URL.createObjectURL(
+              new Blob([JSON.stringify(getApiDiagnostics(), null, 2)], { type: "application/json" })
+            )
+            const link = document.createElement("a")
+            link.href = url
+            link.download = "bunkermode-conexao.json"
+            link.click()
+            URL.revokeObjectURL(url)
+          }}
+        >
+          Baixar diagnóstico
+        </button>
+      </details>
       <section className="work-surface p-5 sm:p-6" aria-labelledby="appearance-title">
         <h2
           id="appearance-title"

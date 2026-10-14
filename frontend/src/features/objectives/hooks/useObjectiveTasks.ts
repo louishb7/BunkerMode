@@ -11,7 +11,14 @@ import type { OutboxOperation } from "../../../offline/snapshots"
 import { enqueueOperation, projectTasks, subscribeOutbox } from "../../../offline/outbox"
 
 // Falhas desta integração não relacionadas à autenticação são locais.
-export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = true }) {
+export function useObjectiveTasks({
+  token,
+  ownerId,
+  onUnauthorized,
+  enabled = true,
+  timezone = undefined,
+  sessionMode = "online",
+}) {
   const [tasks, setTasks] = useState<Task[]>(() => getOverview(ownerId).all ?? [])
   const [operations, setOperations] = useState<OutboxOperation[]>([])
   const projectedTasks = useMemo(() => projectTasks(tasks, operations), [tasks, operations])
@@ -38,10 +45,18 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
   const requestId = useRef(0)
 
   const refresh = useCallback(async () => {
-    if (!token || !enabled) return false
+    if (!token || !enabled || sessionMode !== "online") return false
     const currentRequest = ++requestId.current
     setLoading(!getOverview(ownerId).all)
     setError("")
+    const prepared = await api.materializeTaskRecurrences(token, timezone)
+    if (currentRequest !== requestId.current) return false
+    if (onUnauthorized?.(prepared) || !prepared.ok) {
+      setLoading(false)
+      if (!prepared.ok && prepared.status !== 401)
+        setError(getErrorMessage(prepared, "Não foi possível preparar as tarefas recorrentes."))
+      return false
+    }
     const result = await api.listTasks(token)
     if (currentRequest !== requestId.current) return false
     if (onUnauthorized?.(result)) {
@@ -57,7 +72,7 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
     updateOverview(ownerId, { all: result.data })
     await saveSnapshot(ownerId, "tasks:all", result.data)
     return true
-  }, [token, ownerId, onUnauthorized, enabled])
+  }, [token, ownerId, onUnauthorized, enabled, timezone, sessionMode])
 
   useEffect(() => {
     setFormLoading(false)
@@ -118,8 +133,16 @@ export function useObjectiveTasks({ token, ownerId, onUnauthorized, enabled = tr
   async function unlinkTask(task: Task) {
     if (!token || unlinkingId !== null) return false
     try {
-      await enqueueOperation(ownerId, "task", "unlink", {}, task.id, task.updated_at,
-        undefined, task.recurrence?.series_id)
+      await enqueueOperation(
+        ownerId,
+        "task",
+        "unlink",
+        {},
+        task.id,
+        task.updated_at,
+        undefined,
+        task.recurrence?.series_id
+      )
       return true
     } catch (error) {
       setError(error instanceof Error ? error.message : "Não foi possível salvar localmente.")

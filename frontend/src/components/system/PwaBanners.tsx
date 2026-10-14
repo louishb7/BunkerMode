@@ -2,7 +2,12 @@ import React, { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import { registerSW } from "virtual:pwa-register"
 import { useSyncStatus } from "../../context/SyncStatusContext"
-import { dismissInstall, installDismissed, isIosSafari, isMobileInstallDevice } from "../../pwa/installPolicy"
+import {
+  dismissInstall,
+  installDismissed,
+  isIosSafari,
+  isMobileInstallDevice,
+} from "../../pwa/installPolicy"
 
 type InstallPrompt = Event & {
   prompt: () => Promise<void>
@@ -25,7 +30,9 @@ export default function PwaBanners() {
   const sync = useSyncStatus()
   const [installable, setInstallable] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
-  const [dismissed, setDismissed] = useState(() => inviteDismissed || installDismissed(window.localStorage))
+  const [dismissed, setDismissed] = useState(
+    () => inviteDismissed || installDismissed(window.localStorage)
+  )
   const [needRefresh, setNeedRefresh] = useState(false)
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [updateSW, setUpdateSW] = useState<(() => Promise<void>) | null>(null)
@@ -51,7 +58,12 @@ export default function PwaBanners() {
     }
   }, [])
 
-  const showInstall = isMobileInstallDevice(navigator) && !standalone() && !dismissed && !promptUsed && (installable || isIosSafari(navigator))
+  const showInstall =
+    isMobileInstallDevice(navigator) &&
+    !standalone() &&
+    !dismissed &&
+    !promptUsed &&
+    (installable || isIosSafari(navigator))
   return (
     <div className="relative z-20 bg-peripheral text-text-primary">
       {sync.message && (
